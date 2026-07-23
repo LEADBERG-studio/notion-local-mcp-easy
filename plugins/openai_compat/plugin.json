@@ -1,0 +1,95 @@
+{
+  "id": "openai_compat",
+  "display_name": "OpenAI-compatible provider",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py",
+  "supported_modes": ["read_only", "full_access"],
+  "capabilities": ["ai", "provider", "subagent"],
+  "config_schema_version": 1,
+  "required_env": [],
+  "dependencies": [],
+  "required": false,
+  "install_scope_support": "both",
+  "tools": [
+    {
+      "name": "openai_compat_list_models",
+      "title": "Provider list models",
+      "description": "List configured models for an OpenAI-compatible provider plugin.",
+      "capability": "provider.list_models",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "provider": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "openai_compat.list_models",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "openai_compat_describe_provider",
+      "title": "Describe provider",
+      "description": "Describe routing and secret-ref diagnostics for a configured provider.",
+      "capability": "provider.describe",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "provider": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "openai_compat.describe_provider",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "openai_compat_generate_text",
+      "title": "Generate text",
+      "description": "Generate text through an OpenAI-compatible chat-completions endpoint.",
+      "capability": "provider.generate_text",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string"},
+          "provider": {"type": "string"},
+          "model": {"type": "string"},
+          "system_prompt": {"type": "string"},
+          "temperature": {"type": "number"},
+          "max_output_tokens": {"type": "integer"}
+        },
+        "required": ["prompt"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "openai_compat.generate_text",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "openai_compat_run_subagent",
+      "title": "Run subagent",
+      "description": "Run a delegated subagent-compatible prompt through the configured provider.",
+      "capability": "subagent.run_prompt",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task": {"type": "string"},
+          "provider": {"type": "string"},
+          "model": {"type": "string"},
+          "system_prompt": {"type": "string"},
+          "temperature": {"type": "number"},
+          "max_output_tokens": {"type": "integer"}
+        },
+        "required": ["task"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "openai_compat.run_subagent",
+      "safety_tags": ["ai", "subagent", "full_access"],
+      "diagnostic_visibility": "full"
+    }
+  ]
+}

@@ -19,6 +19,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
+from profiles import (
+    access_mode_from_allow_commands,
+    apply_profile_to_legacy_config,
+    load_profiles,
+    mark_active_profile,
+    save_profiles,
+    sync_profiles_with_slots,
+)
+
 APP_NAME = "NotionMcpEasy"
 VERSION = "1.4.2"
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -186,6 +195,52 @@ def bootstrap_workspace_in_connections(config: dict) -> tuple[int | None, bool]:
     return remember_workspace_path(workspace, preferred_slot=1)
 
 
+def prompt_access_mode(default_access_mode: str) -> str:
+    trusted_default = default_access_mode == "trusted"
+    allow_commands = yes_no(
+        "Enable trusted developer mode for this workspace?",
+        trusted_default,
+    )
+    return access_mode_from_allow_commands(allow_commands)
+
+
+def workflow_profiles_file() -> Path:
+    return CONFIG_FILE.with_name("workflow-profiles.json")
+
+
+def sync_workflow_profiles(
+    config: dict, *, created_from: str = "sync"
+) -> tuple[dict, dict | None]:
+    connections = load_connections_cfg()
+    storage = load_profiles(workflow_profiles_file())
+    updated, active_profile, changed = sync_profiles_with_slots(
+        storage,
+        dict(connections["paths"]),
+        legacy_allow_commands=bool(config.get("allow_commands", False)),
+        active_workspace=str(config.get("workspace", "")),
+        created_from=created_from,
+    )
+    if changed:
+        save_profiles(updated, workflow_profiles_file())
+    return updated, active_profile
+
+
+def profile_for_slot(storage: dict, slot: int) -> dict | None:
+    profiles = storage.get("profiles") if isinstance(storage.get("profiles"), dict) else {}
+    for profile in profiles.values():
+        if int(profile.get("pathSlot", 0) or 0) == int(slot):
+            return profile
+    return None
+
+
+def activate_profile_config(storage: dict, profile: dict, config: dict) -> tuple[dict, dict]:
+    updated_storage = mark_active_profile(storage, str(profile["profileId"]))
+    save_profiles(updated_storage, workflow_profiles_file())
+    updated_config = apply_profile_to_legacy_config(config, profile)
+    save_json(CONFIG_FILE, updated_config)
+    return updated_storage, updated_config
+
+
 def choose_workspace_from_connections(config: dict) -> dict:
     slot, added = bootstrap_workspace_in_connections(config)
     if added and slot is not None:
@@ -194,7 +249,10 @@ def choose_workspace_from_connections(config: dict) -> dict:
         )
     connections = load_connections_cfg()
     paths = dict(connections["paths"])
+    storage, active_profile = sync_workflow_profiles(config, created_from="menu_sync")
     if not bool(connections["menu_on"]):
+        if active_profile is not None:
+            _, config = activate_profile_config(storage, active_profile, config)
         return config
 
     current_workspace = normalize_workspace_path(config["workspace"])
@@ -205,9 +263,23 @@ def choose_workspace_from_connections(config: dict) -> dict:
     if occupied:
         print("\nСохранённые рабочие области:")
         for slot_number, saved_path in occupied:
-            marker = " (текущая)" if find_connection_slot({slot_number: saved_path}, current_workspace) == slot_number else ""
+            slot_profile = profile_for_slot(storage, slot_number)
+            marker = (
+                " (текущая)"
+                if slot_profile is not None
+                and str(slot_profile.get("workspacePath", ""))
+                == str(current_workspace)
+                else ""
+            )
             suffix = "" if Path(saved_path).expanduser().exists() else " [папка не найдена]"
-            print(f" {slot_number}. {saved_path}{marker}{suffix}")
+            if slot_profile is None:
+                profile_hint = ""
+            else:
+                profile_hint = (
+                    f" [mode={slot_profile.get('accessMode', 'file_only')} | "
+                    f"env={slot_profile.get('environmentMode', 'DEFAULT')}]"
+                )
+            print(f" {slot_number}. {saved_path}{profile_hint}{marker}{suffix}")
     else:
         print("\nСохранённых рабочих областей пока нет.")
     print(" 0. Задать новую рабочую область")
@@ -220,6 +292,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
         choice = input("\nВыберите пункт [Enter = оставить текущую область]: ").strip().lower()
         if not choice:
             if current_workspace.is_dir():
+                if active_profile is not None:
+                    _, config = activate_profile_config(storage, active_profile, config)
                 print(
                     f"Оставляем текущую рабочую область без изменений: {current_workspace}.\n"
                     f"При необходимости отредактируйте {CONNECTIONS_FILE} вручную."
@@ -229,6 +303,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
             continue
         if choice == "q":
             save_connections_cfg(False, paths)
+            if active_profile is not None:
+                _, config = activate_profile_config(storage, active_profile, config)
             print(
                 f"Меню отключено в {CONNECTIONS_FILE}.\n"
                 f"По умолчанию остаётся рабочая область из {CONFIG_FILE}: {current_workspace}"
@@ -246,6 +322,7 @@ def choose_workspace_from_connections(config: dict) -> dict:
                 print(
                     f"Эта рабочая область уже сохранена в {CONNECTIONS_FILE} (слот {existing_slot})."
                 )
+                selected = existing_slot
             else:
                 slot_number = first_free_connection_slot(paths)
                 replaced = False
@@ -265,12 +342,27 @@ def choose_workspace_from_connections(config: dict) -> dict:
                 print(
                     f"Новый путь {action} в {CONNECTIONS_FILE} (слот {slot_number})."
                 )
-            config["workspace"] = str(workspace)
-            save_json(CONFIG_FILE, config)
-            print(
-                f"Текущая рабочая область обновлена в {CONFIG_FILE}. Сервер продолжит запуск с: {workspace}"
-            )
-            return config
+                config["workspace"] = str(workspace)
+                temp_storage, _ = sync_workflow_profiles(config, created_from="menu_add")
+                profile = profile_for_slot(temp_storage, slot_number)
+                if profile is None:
+                    print("Не удалось создать профиль для новой области.")
+                    continue
+                default_access_mode = str(
+                    (active_profile or {}).get(
+                        "accessMode",
+                        access_mode_from_allow_commands(bool(config.get("allow_commands", False))),
+                    )
+                )
+                chosen_access_mode = prompt_access_mode(default_access_mode)
+                profile["accessMode"] = chosen_access_mode
+                profile["updatedAt"] = profile.get("updatedAt") or ""
+                temp_storage, config = activate_profile_config(temp_storage, profile, config)
+                save_profiles(temp_storage, workflow_profiles_file())
+                print(
+                    f"Текущая рабочая область обновлена в {CONFIG_FILE}. Сервер продолжит запуск с: {workspace}"
+                )
+                return config
         if selected not in paths:
             print(f"Слот {selected} пуст. Откройте {CONNECTIONS_FILE} или выберите другой пункт.")
             continue
@@ -282,7 +374,12 @@ def choose_workspace_from_connections(config: dict) -> dict:
             )
             continue
         config["workspace"] = str(workspace)
-        save_json(CONFIG_FILE, config)
+        storage, _ = sync_workflow_profiles(config, created_from="menu_switch")
+        profile = profile_for_slot(storage, selected)
+        if profile is None:
+            print(f"Не удалось найти профиль для слота {selected}.")
+            continue
+        storage, config = activate_profile_config(storage, profile, config)
         print(
             f"Выбрана рабочая область из {CONNECTIONS_FILE} (слот {selected}).\n"
             f"Текущий config обновлён: {CONFIG_FILE}"
@@ -291,6 +388,94 @@ def choose_workspace_from_connections(config: dict) -> dict:
 
 
 def setup(force: bool = False) -> dict:
+    ensure_connections_cfg_exists()
+    existing = load_json(CONFIG_FILE)
+    if existing and not force:
+        return choose_workspace_from_connections(existing)
+
+    print(f"\n=== Notion Local MCP Easy {VERSION}: first-time setup ===\n")
+    default_workspace = (
+        normalize_workspace_path(existing["workspace"])
+        if existing.get("workspace")
+        else SCRIPT_DIR.parent.parent.resolve()
+    )
+    workspace = prompt_workspace_folder("Workspace folder", default_workspace)
+
+    print("\nFile-only mode keeps MCP file operations inside the selected workspace.")
+    print("Trusted developer mode adds Python/Git/Node commands with your Windows user rights.")
+    print("Those programs can access files and the network outside the workspace.")
+    allow_commands = yes_no(
+        "Enable trusted developer mode?", bool(existing.get("allow_commands", False))
+    )
+
+    print("\nA reserved Serveo hostname keeps the same Custom MCP URL after restarts.")
+    stable_tunnel = yes_no(
+        "Use a reserved Serveo hostname?", bool(existing.get("serveo_hostname"))
+    )
+    serveo_hostname = str(existing.get("serveo_hostname", "")).strip().lower() if stable_tunnel else ""
+    ssh_key = str(existing.get("ssh_key", "")).strip() if stable_tunnel else ""
+    if stable_tunnel:
+        while not serveo_hostname:
+            current_hostname = serveo_hostname or ""
+            prompt = (
+                f"Reserved hostname (without domain) [{current_hostname}]"
+                if current_hostname
+                else "Reserved hostname (without domain)"
+            )
+            raw_hostname = input(f"{prompt}: ").strip().lower()
+            serveo_hostname = (raw_hostname or serveo_hostname).removesuffix(
+                ".serveousercontent.com"
+            )
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", serveo_hostname):
+                print("Use 3-63 lowercase letters, digits or hyphens.")
+                serveo_hostname = ""
+        default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "serveo_notion_mcp").resolve()
+        key_path = default_key
+        while True:
+            raw_key = input(f"Serveo private SSH key [{default_key}]: ").strip().strip('"')
+            key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
+            if key_path.is_file():
+                break
+            print(f"Private key not found: {key_path}")
+        ssh_key = str(key_path)
+
+    token = str(existing.get("token", "")).strip() or secrets.token_urlsafe(32)
+    config = {
+        "version": VERSION,
+        "token": token,
+        "workspace": str(workspace),
+        "port": int(existing.get("port", 8765) or 8765),
+        "allow_commands": allow_commands,
+        "serveo_hostname": serveo_hostname,
+        "ssh_key": ssh_key,
+        "allowed_commands": [
+            "git",
+            "make",
+            "node",
+            "npm",
+            "npx",
+            "pip",
+            "py",
+            "pytest",
+            "python",
+            "ruff",
+            "uv",
+        ],
+    }
+    save_json(CONFIG_FILE, config)
+    saved_slot, added_to_connections = remember_workspace_path(workspace, preferred_slot=1)
+    storage, active_profile = sync_workflow_profiles(config, created_from="setup")
+    if active_profile is not None:
+        _, config = activate_profile_config(storage, active_profile, config)
+    print(f"\nConfiguration saved in: {CONFIG_FILE}")
+    if added_to_connections:
+        print(f"Рабочая область сохранена в {CONNECTIONS_FILE} (слот {saved_slot}).")
+    else:
+        print(f"Рабочая область уже есть в {CONNECTIONS_FILE} (слот {saved_slot}).")
+    print("Access token is stored in the config and reused on later launches.\n")
+    return config
+
+
     ensure_connections_cfg_exists()
     existing = load_json(CONFIG_FILE)
     if existing and not force:
@@ -543,6 +728,16 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
         raise RuntimeError(
             f"Port {port} is already in use. Stop the other service or change the port in {CONFIG_FILE}."
         )
+    profile_storage_path = ""
+    profile_id = ""
+    profile_access_mode = access_mode_from_allow_commands(bool(config.get("allow_commands", False)))
+    storage, active_profile = sync_workflow_profiles(config, created_from="launcher_start")
+    if active_profile is not None:
+        profile_storage_path = str(workflow_profiles_file())
+        profile_id = str(active_profile["profileId"])
+        profile_access_mode = str(active_profile.get("accessMode", profile_access_mode))
+        config = apply_profile_to_legacy_config(config, active_profile)
+        save_json(CONFIG_FILE, config)
     env = os.environ.copy()
     env.update(
         {
@@ -552,6 +747,9 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
             "MCP_ALLOW_COMMANDS": "1" if config.get("allow_commands", False) else "0",
             "MCP_ALLOWED_COMMANDS": ",".join(config.get("allowed_commands", [])),
             "MCP_SERVEO_HOSTNAME": str(config.get("serveo_hostname", "")).strip().lower(),
+            "MCP_PROFILE_STORAGE": profile_storage_path,
+            "MCP_PROFILE_ID": profile_id,
+            "MCP_PROFILE_ACCESS_MODE": profile_access_mode,
             "PYTHONUNBUFFERED": "1",
         }
     )

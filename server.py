@@ -26,6 +26,7 @@ from core import (
 )
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from plugin_runtime import PluginError, PluginManager
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -72,6 +73,13 @@ mcp = FastMCP(
     # Serveo, so it is disabled and replaced by the Host check inside
     # SecurityMiddleware (localhost + *.serveousercontent.com).
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
+
+PLUGIN_MANAGER = PluginManager(
+    server_dir=SERVER_DIR,
+    base_dir=BASE_DIR,
+    allow_commands=ALLOW_COMMANDS,
+    mcp=mcp,
 )
 
 def _clip(text) -> str:
@@ -917,6 +925,11 @@ def _setup_git_context_sync(
         summary = _repo_context_summary(cwd)
         return f"Saved disabled git policy to {config_path.relative_to(BASE_DIR)}\n\n{summary}"
 
+    if mode == "bind_existing_repo" and not detected_before["repo_present"]:
+        raise ValueError(
+            "No git repository exists here yet. Ask the user whether to init_new_repo, attach_to_remote, or disable_git."
+        )
+
     repository_url = repository_url.strip()
     if not repository_url:
         raise ValueError("repository_url is required for this setup mode")
@@ -983,8 +996,6 @@ def _setup_git_context_sync(
         else:
             work_root = Path(str(detected_before["top_level"]))
     elif mode == "bind_existing_repo":
-        if not detected_before["repo_present"]:
-            raise ValueError("No git repository exists here yet. Ask the user whether to init_new_repo, attach_to_remote, or disable_git.")
         work_root = Path(str(detected_before["top_level"]))
 
     actions.append(_ensure_remote_url(work_root, "origin", repository_url, force_origin_update, confirm_reconfigure))
@@ -1658,12 +1669,65 @@ async def workspace_info() -> str:
     commands = ", ".join(sorted(ALLOWED_COMMANDS)) if ALLOW_COMMANDS else "disabled"
     mode = "trusted developer mode" if ALLOW_COMMANDS else "file-only mode"
     repo_overview = await asyncio.to_thread(_workspace_repo_overview, BASE_DIR)
+    profile = PLUGIN_MANAGER.active_profile
+    plugin_lines = [
+        f"active profile id: {profile.get('profileId', '(none)')}",
+        f"active path slot: {profile.get('pathSlot', 0)}",
+        f"active access mode: {profile.get('accessMode', 'file_only')}",
+        f"active environment mode: {profile.get('environmentMode', 'DEFAULT')}",
+        f"profile storage: {PLUGIN_MANAGER.profile_context.get('profileStoragePath') or '(legacy synthetic mode)'}",
+        f"plugins discovered: {len(PLUGIN_MANAGER.manifests)}",
+        f"plugins loaded: {sum(1 for state in PLUGIN_MANAGER.states.values() if state.get('status') == 'loaded')}",
+    ]
     return (
         f"workspace: {BASE_DIR}\nmode: {mode}\ncommands: {commands}\n"
         f"max text file: {MAX_TEXT_FILE:,} bytes\n"
         f"repo context file: {REPO_CONTEXT_FILE}\n"
-        f"{repo_overview}"
+        + "\n".join(plugin_lines)
+        + "\n"
+        + repo_overview
     )
+
+
+@tool()
+async def list_plugins() -> str:
+    """List discoverable plugins and their current attachment/effective state."""
+    return await asyncio.to_thread(PLUGIN_MANAGER.list_plugins_text)
+
+
+@tool()
+async def plugin_status() -> str:
+    """Show active profile, plugin scope, effective mode, and loader diagnostics."""
+    return await asyncio.to_thread(PLUGIN_MANAGER.diagnostics_text)
+
+
+@tool()
+async def attach_plugin(
+    plugin_id: str,
+    scope: str = "current",
+    requested_mode: str = "read_only",
+    config_json: str = "{}",
+) -> str:
+    """Attach a discoverable plugin in current or global scope. Restart MCP after attaching to rebuild the tool registry."""
+    try:
+        config = json.loads(config_json or "{}")
+    except json.JSONDecodeError as exc:
+        raise PluginError(f"config_json is not valid JSON: {exc}") from exc
+    if not isinstance(config, dict):
+        raise PluginError("config_json must decode to a JSON object")
+    return await asyncio.to_thread(
+        PLUGIN_MANAGER.attach_plugin,
+        plugin_id,
+        scope,
+        requested_mode,
+        config,
+    )
+
+
+@tool()
+async def detach_plugin(plugin_id: str, scope: str = "current") -> str:
+    """Detach a plugin from current or global scope. Restart MCP after detaching to rebuild the tool registry."""
+    return await asyncio.to_thread(PLUGIN_MANAGER.detach_plugin, plugin_id, scope)
 
 
 @tool()

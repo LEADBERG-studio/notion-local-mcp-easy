@@ -1,0 +1,105 @@
+{
+  "id": "sqlite",
+  "display_name": "SQLite",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py",
+  "supported_modes": ["read_only", "full_access"],
+  "capabilities": ["database", "sql", "query"],
+  "config_schema_version": 1,
+  "required_env": [],
+  "dependencies": [],
+  "required": false,
+  "install_scope_support": "both",
+  "tools": [
+    {
+      "name": "sqlite_list_connections",
+      "title": "SQLite list connections",
+      "description": "List configured SQLite connection aliases for the active profile context.",
+      "capability": "database.list_connections",
+      "mode_required": "read_only",
+      "input_schema": {"type": "object", "properties": {}},
+      "output_schema": {"type": "object"},
+      "handler_ref": "sqlite.list_connections",
+      "safety_tags": ["db", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "sqlite_list_tables",
+      "title": "SQLite list tables",
+      "description": "List tables for a configured SQLite connection alias.",
+      "capability": "database.list_tables",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {"type": "string"}
+        },
+        "required": ["connection"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "sqlite.list_tables",
+      "safety_tags": ["db", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "sqlite_describe_table",
+      "title": "SQLite describe table",
+      "description": "Describe columns of a table in a configured SQLite connection alias.",
+      "capability": "database.describe_table",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {"type": "string"},
+          "table": {"type": "string"}
+        },
+        "required": ["connection", "table"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "sqlite.describe_table",
+      "safety_tags": ["db", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "sqlite_query",
+      "title": "SQLite query",
+      "description": "Run a read-only SQL query against a configured SQLite connection alias.",
+      "capability": "database.query",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {"type": "string"},
+          "sql": {"type": "string"},
+          "params_json": {"type": "string"},
+          "limit": {"type": "integer"}
+        },
+        "required": ["connection", "sql"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "sqlite.query",
+      "safety_tags": ["db", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "sqlite_execute",
+      "title": "SQLite execute",
+      "description": "Run a mutating SQL statement against a configured SQLite connection alias.",
+      "capability": "database.execute",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {"type": "string"},
+          "sql": {"type": "string"},
+          "params_json": {"type": "string"}
+        },
+        "required": ["connection", "sql"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "sqlite.execute",
+      "safety_tags": ["db", "full_access"],
+      "diagnostic_visibility": "full"
+    }
+  ]
+}

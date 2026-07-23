@@ -77,6 +77,104 @@ class LauncherTests(unittest.TestCase):
             stored = json.loads(config_file.read_text(encoding="utf-8"))
             self.assertEqual(stored["workspace"], str(workspace_two.resolve()))
 
+    def test_setup_creates_workflow_profiles_storage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace-one"
+            workspace.mkdir()
+            config_file = root / "config.json"
+            connections_file = root / "connections.cfg"
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+                mock.patch("launcher.input", side_effect=[str(workspace)]),
+                mock.patch("launcher.yes_no", side_effect=[False, False]),
+            ):
+                launcher.setup(force=False)
+            profiles_file = root / "workflow-profiles.json"
+            self.assertTrue(profiles_file.is_file())
+            data = json.loads(profiles_file.read_text(encoding="utf-8"))
+            self.assertTrue(data["activeProfileId"])
+            self.assertEqual(len(data["profiles"]), 1)
+            profile = next(iter(data["profiles"].values()))
+            self.assertEqual(profile["workspacePath"], str(workspace.resolve()))
+            self.assertEqual(profile["accessMode"], "file_only")
+            self.assertEqual(profile["environmentMode"], "DEFAULT")
+
+    def test_switch_activates_profile_access_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace_one = root / "workspace-one"
+            workspace_two = root / "workspace-two"
+            workspace_one.mkdir()
+            workspace_two.mkdir()
+            config_file = root / "config.json"
+            connections_file = root / "connections.cfg"
+            profiles_file = root / "workflow-profiles.json"
+            config = {
+                "token": "fixed-token",
+                "workspace": str(workspace_one.resolve()),
+                "port": 8765,
+                "allow_commands": False,
+            }
+            config_file.write_text(json.dumps(config), encoding="utf-8")
+            profiles = {
+                "schemaVersion": 1,
+                "activeProfileId": "profile-1",
+                "profiles": {
+                    "profile-1": {
+                        "profileId": "profile-1",
+                        "pathSlot": 1,
+                        "workspacePath": str(workspace_one.resolve()),
+                        "accessMode": "file_only",
+                        "environmentMode": "DEFAULT",
+                        "displayName": "workspace-one",
+                        "createdAt": "2026-07-20T22:00:00",
+                        "updatedAt": "2026-07-20T22:00:00",
+                        "metadata": {
+                            "createdFrom": "test",
+                            "lastSelectedAt": "",
+                            "lastKnownGood": True,
+                            "notes": "",
+                        },
+                        "plugins": {},
+                    },
+                    "profile-2": {
+                        "profileId": "profile-2",
+                        "pathSlot": 2,
+                        "workspacePath": str(workspace_two.resolve()),
+                        "accessMode": "trusted",
+                        "environmentMode": "DEFAULT",
+                        "displayName": "workspace-two",
+                        "createdAt": "2026-07-20T22:00:00",
+                        "updatedAt": "2026-07-20T22:00:00",
+                        "metadata": {
+                            "createdFrom": "test",
+                            "lastSelectedAt": "",
+                            "lastKnownGood": True,
+                            "notes": "",
+                        },
+                        "plugins": {},
+                    },
+                },
+                "globalPlugins": {},
+            }
+            profiles_file.write_text(json.dumps(profiles), encoding="utf-8")
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+            ):
+                launcher.save_connections_cfg(
+                    True,
+                    {1: str(workspace_one.resolve()), 2: str(workspace_two.resolve())},
+                )
+                with mock.patch("launcher.input", side_effect=["2"]):
+                    updated = launcher.setup(force=False)
+            self.assertEqual(updated["workspace"], str(workspace_two.resolve()))
+            self.assertTrue(updated["allow_commands"])
+            stored_profiles = json.loads(profiles_file.read_text(encoding="utf-8"))
+            self.assertEqual(stored_profiles["activeProfileId"], "profile-2")
+
     def test_start_menu_can_save_new_workspace_to_free_slot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -95,6 +193,7 @@ class LauncherTests(unittest.TestCase):
             with (
                 mock.patch.object(launcher, "CONFIG_FILE", config_file),
                 mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+                mock.patch("launcher.yes_no", return_value=False),
             ):
                 launcher.save_connections_cfg(True, {1: str(workspace_one.resolve())})
                 with mock.patch("launcher.input", side_effect=["0", str(workspace_two)]):
@@ -127,6 +226,7 @@ class LauncherTests(unittest.TestCase):
             with (
                 mock.patch.object(launcher, "CONFIG_FILE", config_file),
                 mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+                mock.patch("launcher.yes_no", return_value=False),
             ):
                 launcher.save_connections_cfg(True, occupied)
                 with mock.patch("launcher.input", side_effect=["0", str(new_workspace), "10"]):
