@@ -1,5 +1,5 @@
 import asyncio
-import asyncio
+import importlib
 import os
 import re
 import sys
@@ -15,7 +15,9 @@ os.environ["MCP_ALLOW_COMMANDS"] = "0"
 # Tests may run inside an active MCP session; do not inherit its stable hostname.
 os.environ["MCP_SERVEO_HOSTNAME"] = ""
 
-import server
+import server as _server
+
+server = importlib.reload(_server)
 
 
 class ProcessLimitTests(unittest.TestCase):
@@ -116,8 +118,6 @@ class ProcessLimitTests(unittest.TestCase):
 
 class AtomicWriteTests(unittest.TestCase):
     def test_atomic_write_replaces_content_and_leaves_no_temp(self):
-        import tempfile
-
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "file.txt"
             target.write_text("old", encoding="utf-8")

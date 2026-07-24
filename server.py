@@ -12,6 +12,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+import uuid
+from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -55,6 +58,13 @@ CHUNK_CHAR_LIMIT = 9_500
 TEMP_DIRNAME = "temp"
 TEMP_PATH_PREFIX = "@temp/"
 TEMP_FILE_TTL_SECONDS = 24 * 60 * 60
+MAX_COMMAND_TIMEOUT = 300
+MAX_COMMAND_JOBS = max(1, int(os.environ.get("MCP_MAX_COMMAND_JOBS", "4")))
+JOB_RETENTION_SECONDS = max(60, int(os.environ.get("MCP_COMMAND_JOB_RETENTION_SECONDS", "600")))
+MAX_BACKGROUND_COMMAND_OUTPUT = max(
+    MAX_COMMAND_OUTPUT,
+    int(os.environ.get("MCP_MAX_BACKGROUND_COMMAND_OUTPUT", str(MAX_TEXT_FILE))),
+)
 REPO_CONTEXT_FILE = "agent-repo-config.local.json"
 REPO_CONTEXT_SCHEMA_VERSION = 3
 
@@ -81,6 +91,30 @@ PLUGIN_MANAGER = PluginManager(
     allow_commands=ALLOW_COMMANDS,
     mcp=mcp,
 )
+
+
+@dataclass
+class CommandJob:
+    job_id: str
+    program: str
+    args: list[str]
+    cwd: str
+    timeout: int
+    command: str
+    stdout_path: Path
+    stderr_path: Path
+    started_at: float
+    process: asyncio.subprocess.Process | None = None
+    status: str = "running"
+    cancel_requested: bool = False
+    timed_out: bool = False
+    truncated: bool = False
+    returncode: int | None = None
+    finished_at: float | None = None
+    task: asyncio.Task | None = None
+
+
+COMMAND_JOBS: dict[str, CommandJob] = {}
 
 def _clip(text) -> str:
     if text is None:
@@ -2189,6 +2223,325 @@ async def _capture_process_to_files(
     return timed_out, truncated
 
 
+def _format_command_result(
+    returncode: int | None,
+    stdout_text: str,
+    stderr_text: str,
+    *,
+    timed_out: bool = False,
+    truncated: bool = False,
+    truncated_limit: int = MAX_COMMAND_OUTPUT,
+) -> str:
+    stdout_text = stdout_text if stdout_text != "" else "(empty result)"
+    stderr_text = stderr_text if stderr_text != "" else "(empty result)"
+    prefix_parts: list[str] = []
+    if timed_out:
+        prefix_parts.append("Timed out before the command completed (process tree stopped).")
+    if truncated:
+        prefix_parts.append(
+            f"Output truncated after reaching the safe combined limit of {truncated_limit:,} bytes."
+        )
+    prefix = "\n".join(prefix_parts)
+    if prefix:
+        prefix += "\n"
+    return (
+        prefix
+        + f"exit code: {returncode}\n"
+        + f"--- stdout ---\n{stdout_text}\n"
+        + f"--- stderr ---\n{stderr_text}"
+    )
+
+
+async def _prepare_command(
+    program: str,
+    args: list[str] | None = None,
+    cwd: str = ".",
+    timeout: int = 60,
+) -> tuple[str, Path, list[str], int]:
+    if not ALLOW_COMMANDS:
+        raise ValueError(
+            "Command execution is disabled. Re-run SETUP.bat to enable trusted developer mode."
+        )
+    args_list = list(args or [])
+    executable = resolve_program(BASE_DIR, program, ALLOWED_COMMANDS)
+    workdir = _path(cwd)
+    if not workdir.is_dir():
+        raise ValueError(f"cwd is not a directory: {cwd}")
+    if normalized_program_name(program) == "git":
+        await asyncio.to_thread(_ensure_git_context_for_command, workdir, args_list)
+    seconds = max(1, min(timeout, MAX_COMMAND_TIMEOUT))
+    return executable, workdir, args_list, seconds
+
+
+def _command_summary(program: str, args: list[str]) -> str:
+    pieces = [program, *args]
+    return " ".join(piece if " " not in piece else repr(piece) for piece in pieces)
+
+
+async def _read_command_output(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return await asyncio.to_thread(_read_text_with_replace, path)
+
+
+def _delete_job_artifacts(job: CommandJob) -> None:
+    for artifact in (job.stdout_path, job.stderr_path):
+        with contextlib.suppress(OSError):
+            artifact.unlink()
+
+
+def _job_elapsed_seconds(job: CommandJob) -> float:
+    end = job.finished_at if job.finished_at is not None else time.time()
+    return max(0.0, end - job.started_at)
+
+
+def _prune_command_jobs() -> None:
+    now = time.time()
+    expired: list[str] = []
+    for job_id, job in COMMAND_JOBS.items():
+        if job.status == "running":
+            continue
+        if job.finished_at is None:
+            continue
+        if now - job.finished_at >= JOB_RETENTION_SECONDS:
+            expired.append(job_id)
+    for job_id in expired:
+        job = COMMAND_JOBS.pop(job_id, None)
+        if job is not None:
+            _delete_job_artifacts(job)
+
+
+def _count_running_command_jobs() -> int:
+    return sum(1 for job in COMMAND_JOBS.values() if job.status == "running")
+
+
+async def _capture_process_to_job_files(
+    proc: asyncio.subprocess.Process,
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout: int,
+) -> tuple[bool, bool]:
+    total = 0
+    truncated = False
+
+    async def consume(stream: asyncio.StreamReader, target_path: Path) -> None:
+        nonlocal total, truncated
+        with target_path.open("wb") as handle:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                    return
+                remaining = MAX_BACKGROUND_COMMAND_OUTPUT - total
+                if remaining <= 0:
+                    truncated = True
+                    continue
+                accepted = chunk[:remaining]
+                if accepted:
+                    handle.write(accepted)
+                    total += len(accepted)
+                if len(accepted) < len(chunk):
+                    truncated = True
+
+    async def finish() -> None:
+        assert proc.stdout is not None and proc.stderr is not None
+        await asyncio.gather(
+            consume(proc.stdout, stdout_path),
+            consume(proc.stderr, stderr_path),
+            proc.wait(),
+        )
+
+    run_task = asyncio.create_task(finish())
+    timed_out = False
+    try:
+        await asyncio.wait_for(run_task, timeout=timeout)
+    except TimeoutError:
+        timed_out = True
+        await _kill_tree(proc)
+        await run_task
+    return timed_out, truncated
+
+
+async def _run_command_job(job_id: str) -> None:
+    job = COMMAND_JOBS[job_id]
+    proc = job.process
+    if proc is None:
+        job.status = "failed"
+        job.finished_at = time.time()
+        return
+    try:
+        timed_out, truncated = await _capture_process_to_job_files(
+            proc,
+            job.stdout_path,
+            job.stderr_path,
+            job.timeout,
+        )
+        job.timed_out = timed_out
+        job.truncated = truncated
+        job.returncode = proc.returncode
+        if job.cancel_requested:
+            job.status = "cancelled"
+        elif timed_out:
+            job.status = "timed_out"
+        elif proc.returncode == 0:
+            job.status = "completed"
+        else:
+            job.status = "failed"
+    except Exception as exc:
+        with contextlib.suppress(OSError):
+            with job.stderr_path.open("ab") as handle:
+                handle.write(f"\n[internal job runner error] {exc}\n".encode("utf-8", "replace"))
+        if proc.returncode is None:
+            with contextlib.suppress(Exception):
+                await _kill_tree(proc)
+        job.returncode = proc.returncode
+        job.status = "failed"
+    finally:
+        job.finished_at = time.time()
+        job.process = None
+        job.task = None
+
+
+def _job_status_summary(job: CommandJob) -> str:
+    lines = [
+        f"job_id: {job.job_id}",
+        f"status: {job.status}",
+        f"command: {job.command}",
+        f"cwd: {job.cwd}",
+        f"elapsed: {_job_elapsed_seconds(job):.1f}s",
+        f"timeout: {job.timeout}s",
+    ]
+    if job.returncode is not None:
+        lines.append(f"exit code: {job.returncode}")
+    if job.truncated:
+        lines.append(
+            f"captured output truncated after {MAX_BACKGROUND_COMMAND_OUTPUT:,} bytes"
+        )
+    return "\n".join(lines)
+
+
+async def _job_result(job: CommandJob) -> str:
+    stdout_text = await _read_command_output(job.stdout_path)
+    stderr_text = await _read_command_output(job.stderr_path)
+    if len(stdout_text) + len(stderr_text) > MAX_OUTPUT_CHARS:
+        lines = [
+            _job_status_summary(job),
+            f"stdout: {_temp_virtual_path(job.stdout_path)}",
+            f"stderr: {_temp_virtual_path(job.stderr_path)}",
+        ]
+        return "\n".join(lines)
+    formatted = _format_command_result(
+        job.returncode,
+        stdout_text,
+        stderr_text,
+        timed_out=job.timed_out,
+        truncated=job.truncated,
+        truncated_limit=MAX_BACKGROUND_COMMAND_OUTPUT,
+    )
+    if job.status != "completed":
+        return f"{_job_status_summary(job)}\n\n{formatted}"
+    return formatted
+
+
+@tool()
+async def start_command(
+    program: str,
+    args: list[str] | None = None,
+    cwd: str = ".",
+    timeout: int = 60,
+) -> str:
+    """Trusted developer mode: start an allow-listed program in the background and return a job id immediately."""
+    _prune_command_jobs()
+    if _count_running_command_jobs() >= MAX_COMMAND_JOBS:
+        raise ValueError(
+            f"Too many running command jobs. Wait for one to finish or cancel it first (limit {MAX_COMMAND_JOBS})."
+        )
+
+    executable, workdir, args_list, seconds = await _prepare_command(program, args, cwd, timeout)
+    flags = 0x00000200 if os.name == "nt" else 0
+    job_id = uuid.uuid4().hex[:12]
+    stdout_capture = _tool_output_path(f"command-job-{job_id}-stdout")
+    stderr_capture = _tool_output_path(f"command-job-{job_id}-stderr")
+    proc = await asyncio.create_subprocess_exec(
+        executable,
+        *args_list,
+        cwd=str(workdir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        creationflags=flags,
+    )
+    job = CommandJob(
+        job_id=job_id,
+        program=program,
+        args=args_list,
+        cwd=str(workdir.relative_to(BASE_DIR)) if workdir != BASE_DIR else ".",
+        timeout=seconds,
+        command=_command_summary(program, args_list),
+        stdout_path=stdout_capture,
+        stderr_path=stderr_capture,
+        started_at=time.time(),
+        process=proc,
+    )
+    COMMAND_JOBS[job_id] = job
+    job.task = asyncio.create_task(_run_command_job(job_id))
+    return (
+        f"Started background command job {job_id}.\n"
+        f"command: {job.command}\n"
+        f"cwd: {job.cwd}\n"
+        f"timeout: {seconds}s\n"
+        f'Poll get_command_status(job_id="{job_id}") for progress and the result.'
+    )
+
+
+@tool()
+async def get_command_status(job_id: str) -> str:
+    """Get the current status or final result of a background command job."""
+    _prune_command_jobs()
+    job = COMMAND_JOBS.get(job_id)
+    if job is None:
+        raise ValueError(
+            f"Unknown command job: {job_id}. Use list_commands() to see tracked jobs."
+        )
+    if job.status == "running":
+        return _job_status_summary(job)
+    return await _job_result(job)
+
+
+@tool()
+async def cancel_command(job_id: str) -> str:
+    """Cancel a running background command job."""
+    _prune_command_jobs()
+    job = COMMAND_JOBS.get(job_id)
+    if job is None:
+        raise ValueError(
+            f"Unknown command job: {job_id}. Use list_commands() to see tracked jobs."
+        )
+    if job.status != "running" or job.process is None:
+        return f"Command job {job_id} is already {job.status}."
+    job.cancel_requested = True
+    await _kill_tree(job.process)
+    if job.task is not None:
+        await job.task
+    return _job_status_summary(job)
+
+
+@tool()
+async def list_commands() -> str:
+    """List tracked background command jobs."""
+    _prune_command_jobs()
+    if not COMMAND_JOBS:
+        return "No tracked command jobs."
+    rows = []
+    for job in sorted(
+        COMMAND_JOBS.values(), key=lambda item: (item.status != "running", -item.started_at)
+    ):
+        rows.append(
+            f"{job.job_id} | {job.status} | {_job_elapsed_seconds(job):.1f}s | {job.command}"
+        )
+    return "\n".join(rows)
+
+
 @tool()
 async def run_command(
     program: str,
@@ -2201,18 +2554,7 @@ async def run_command(
     Short output is returned directly. Long output is saved to a file and returned
     through the same chunked reading model as read_file().
     """
-    if not ALLOW_COMMANDS:
-        raise ValueError(
-            "Command execution is disabled. Re-run SETUP.bat to enable trusted developer mode."
-        )
-    executable = resolve_program(BASE_DIR, program, ALLOWED_COMMANDS)
-    workdir = _path(cwd)
-    if not workdir.is_dir():
-        raise ValueError(f"cwd is not a directory: {cwd}")
-    if normalized_program_name(program) == "git":
-        await asyncio.to_thread(_ensure_git_context_for_command, workdir, list(args or []))
-
-    seconds = max(1, min(timeout, 300))
+    executable, workdir, args_list, seconds = await _prepare_command(program, args, cwd, timeout)
     flags = 0x00000200 if os.name == "nt" else 0
 
     stdout_capture = _tool_output_path("run-command-stdout")
@@ -2221,7 +2563,7 @@ async def run_command(
     try:
         proc = await asyncio.create_subprocess_exec(
             executable,
-            *(args or []),
+            *args_list,
             cwd=str(workdir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -2234,27 +2576,15 @@ async def run_command(
             seconds,
         )
 
-        stdout_text = await asyncio.to_thread(_read_text_with_replace, stdout_capture)
-        stderr_text = await asyncio.to_thread(_read_text_with_replace, stderr_capture)
-        stdout_text = stdout_text if stdout_text != "" else "(empty result)"
-        stderr_text = stderr_text if stderr_text != "" else "(empty result)"
-
-        prefix_parts: list[str] = []
-        if timed_out:
-            prefix_parts.append(f"Timed out after {seconds}s (process tree stopped).")
-        if truncated:
-            prefix_parts.append(
-                f"Output truncated after reaching the safe combined limit of {MAX_COMMAND_OUTPUT:,} bytes."
-            )
-        prefix = "\n".join(prefix_parts)
-        if prefix:
-            prefix += "\n"
-
-        result = (
-            prefix
-            + f"exit code: {proc.returncode}\n"
-            + f"--- stdout ---\n{stdout_text}\n"
-            + f"--- stderr ---\n{stderr_text}"
+        stdout_text = await _read_command_output(stdout_capture)
+        stderr_text = await _read_command_output(stderr_capture)
+        result = _format_command_result(
+            proc.returncode,
+            stdout_text,
+            stderr_text,
+            timed_out=timed_out,
+            truncated=truncated,
+            truncated_limit=MAX_COMMAND_OUTPUT,
         )
         return _direct_or_saved_output("run-command", result)
     finally:
