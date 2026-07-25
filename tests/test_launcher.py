@@ -2,6 +2,7 @@ import json
 import os
 import queue
 import socket
+from io import StringIO
 import sys
 import tempfile
 import unittest
@@ -495,6 +496,77 @@ class LauncherTests(unittest.TestCase):
                 "https://x.serveousercontent.com", "token", attempts=1, delay=0
             )
         )
+
+    def test_oauth_setup_saves_mode_and_owner_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_file = root / "config.json"
+            config_file.write_text(json.dumps({
+                "token": "fixed-token",
+                "workspace": str(root),
+                "auth_mode": "legacy",
+                "serveo_hostname": "stable-name",
+            }), encoding="utf-8")
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch("launcher.input", side_effect=["3"]),
+            ):
+                result = launcher.oauth_setup()
+            self.assertEqual(result, 0)
+            updated = json.loads(config_file.read_text(encoding="utf-8"))
+            self.assertEqual(updated["auth_mode"], "dual")
+            self.assertTrue(updated["oauth_owner_code"])
+
+    def test_show_connection_masks_owner_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_file = root / "config.json"
+            connection_file = root / "connection.txt"
+            config_file.write_text(json.dumps({
+                "token": "super-secret-token",
+                "oauth_owner_code": "owner-secret-code",
+            }), encoding="utf-8")
+            connection_file.write_text(
+                "Bearer token: super-secret-token\nOAuth owner code: owner-secret-code\n",
+                encoding="utf-8",
+            )
+            stdout = StringIO()
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch.object(launcher, "CONNECTION_FILE", connection_file),
+                mock.patch("sys.stdout", stdout),
+            ):
+                result = launcher.show_connection(full=False)
+            self.assertEqual(result, 0)
+            rendered = stdout.getvalue()
+            self.assertNotIn("super-secret-token", rendered)
+            self.assertNotIn("owner-secret-code", rendered)
+            self.assertIn("Secrets are masked", rendered)
+
+    def test_register_oauth_client_stores_byo_client(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_dir = root / "cfg"
+            config_dir.mkdir()
+            config_file = config_dir / "config.json"
+            config_file.write_text(json.dumps({
+                "token": "fixed-token",
+                "workspace": str(root),
+                "auth_mode": "dual",
+            }), encoding="utf-8")
+            with (
+                mock.patch.object(launcher, "CONFIG_DIR", config_dir),
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch("launcher.input", side_effect=["https://client.example/callback", ""]),
+                mock.patch("launcher.yes_no", return_value=True),
+            ):
+                result = launcher.register_oauth_client()
+            self.assertEqual(result, 0)
+            state = json.loads((config_dir / "oauth_state.json").read_text(encoding="utf-8"))
+            self.assertTrue(state["clients"])
+            client = next(iter(state["clients"].values()))
+            self.assertEqual(client["redirect_uris"], ["https://client.example/callback"])
+            self.assertEqual(client["token_endpoint_auth_method"], "none")
 
 
 if __name__ == "__main__":

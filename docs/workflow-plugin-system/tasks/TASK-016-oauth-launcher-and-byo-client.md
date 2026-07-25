@@ -1,6 +1,6 @@
 # TASK-016 — OAuth launcher UX and BYO client registration
 
-Status: TODO
+Status: DONE
 Target release: 1.5.1
 
 ## Objective

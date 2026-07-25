@@ -1,3 +1,15 @@
+## 1.5.1 — 2026-07-26
+
+- Imported the donor embedded OAuth core into the local product: `auth/` package, embedded provider/store, discovery/protected-resource metadata, consent flow, and `legacy` / `oauth` / `dual` server modes.
+
+- Added operator-facing OAuth launcher flows: `--oauth`, `--register-oauth-client`, owner-code generation/storage/display, and wrapper scripts `OAUTH_SETUP.bat`, `REGISTER_OAUTH_CLIENT.bat`, `oauth_setup.sh`, and `register_oauth_client.sh`.
+
+- Extended launcher connection output so OAuth/dual runs expose discovery metadata and keep both Bearer token and OAuth owner code masked by default in `SHOW_CONNECTION`.
+
+- Hardened transport-sensitive command execution by steering long risky invocations away from synchronous `run_command` and toward background command jobs.
+
+- Added and passed regression coverage for embedded OAuth, launcher OAuth flows, command-job guidance, repo-context gate, and the stage-1 / stage-2 release path.
+
 # Changelog
 
 

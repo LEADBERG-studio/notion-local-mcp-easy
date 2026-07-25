@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.4.2
+# Notion Local MCP Easy 1.5.1
 
 
 
@@ -50,7 +50,7 @@ One-click Windows MCP-сервер для личного использован�
 
 
 
-6. Если вы используете legacy-доступ, скопируйте показанные `URL` и `Bearer token` в Custom MCP вашего Notion Agent. Если включён OAuth через Tunnellio, используйте публичный MCP URL и настройте OAuth app с точным Redirect URI вашего клиента.
+6. Для bearer-only сценария используйте показанные `URL` и `Bearer token` в Custom MCP вашего Notion Agent. Для OAuth/dual сценария сначала выполните `OAUTH_SETUP.bat`, затем используйте публичный MCP URL, discovery endpoint и owner code, который показывает launcher.
 
 
 
@@ -84,7 +84,7 @@ One-click Windows MCP-сервер для личного использован�
 
 ## OAuth через Tunnellio
 
-После апдейта серверной и клиентской частей Tunnellio production-путь для внешних MCP-клиентов выглядит так:
+Начиная с 1.5.1 launcher умеет не только запускать OAuth/dual режим, но и отдельно проводить operator setup через `OAUTH_SETUP.bat` и pre-register BYO clients через `REGISTER_OAUTH_CLIENT.bat`. Production-путь для внешних MCP-клиентов выглядит так:
 
 1. В `%LOCALAPPDATA%\NotionMcpEasy\config.json` включите `"tunnel_backend": "tunnellio"` и выберите `"auth_mode": "oauth"` либо `"dual"` для переходного периода.
 2. Для постоянного публичного адреса задайте `tunnellio_domain` и, если этого требует ваш runtime / reservation flow, `tunnellio_key`.
@@ -117,7 +117,11 @@ One-click Windows MCP-сервер для личного использован�
 
 
 
-- `SHOW_CONNECTION.bat` — показать текущие URL, токен, workspace и режим.
+- `SHOW_CONNECTION.bat` — показать текущие URL, токен, workspace, auth mode и OAuth discovery / owner code (по умолчанию секреты замаскированы).
+
+- `OAUTH_SETUP.bat` / `oauth_setup.sh` — переключить `legacy` / `oauth` / `dual`, сохранить или перевыпустить owner code и получить operator summary для OAuth-клиентов.
+
+- `REGISTER_OAUTH_CLIENT.bat` / `register_oauth_client.sh` — заранее зарегистрировать OAuth client для Bring Your Own OAuth App flow и сохранить его в локальном `oauth_state.json`.
 
 
 

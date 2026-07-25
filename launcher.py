@@ -29,7 +29,7 @@ from profiles import (
 )
 
 APP_NAME = "NotionMcpEasy"
-VERSION = "1.4.2"
+VERSION = "1.5.1"
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -42,6 +42,12 @@ URL_PATTERN = re.compile(r"https://[a-zA-Z0-9.-]+\.serveousercontent\.com")
 PATH_SLOT_PATTERN = re.compile(r"PATH\[(\d+)\]$", re.IGNORECASE)
 DEFAULT_CONNECTION_SLOTS = 9
 AUTH_MODES = {"legacy", "oauth", "dual"}
+AUTH_MODE_OPTIONS = ("legacy", "oauth", "dual")
+AUTH_MODE_DESCRIPTIONS = {
+    "legacy": "static Bearer token only (Notion Custom MCP and similar clients)",
+    "oauth": "OAuth 2.1 only (Hyperagent and other OAuth MCP clients)",
+    "dual": "Bearer token and OAuth on the same /mcp endpoint",
+}
 TUNNEL_BACKENDS = {"serveo", "tunnellio"}
 DEFAULT_TUNNELLIO_CONNECTION_MODE = "cloud_proxy"
 DEFAULT_TUNNELLIO_OAUTH_CLIENT_POLICY = "shared"
@@ -572,6 +578,7 @@ def setup(force: bool = False) -> dict:
         "port": int(existing.get("port", 8765) or 8765),
         "allow_commands": allow_commands,
         "auth_mode": normalize_auth_mode(existing.get("auth_mode", "legacy")),
+        "oauth_owner_code": str(existing.get("oauth_owner_code", "")).strip() or secrets.token_urlsafe(9),
         "public_url": str(existing.get("public_url", "")).strip().rstrip("/"),
         "tunnel_backend": selected_tunnel_backend,
         "tunnel_mode_preference": selected_tunnel_mode,
@@ -612,6 +619,11 @@ def setup(force: bool = False) -> dict:
         print(f"Рабочая область сохранена в {CONNECTIONS_FILE} (слот {saved_slot}).")
     else:
         print(f"Рабочая область уже есть в {CONNECTIONS_FILE} (слот {saved_slot}).")
+    auth_mode = normalize_auth_mode(config.get("auth_mode", "legacy"))
+    if auth_mode in ("oauth", "dual"):
+        print(f"Auth mode: {auth_mode} ({AUTH_MODE_DESCRIPTIONS[auth_mode]})")
+        print("OAuth owner code (use it to approve new OAuth clients):")
+        print(f"    {config['oauth_owner_code']}")
     print("Access token is stored in the config and reused on later launches.\n")
     return config
 
@@ -858,6 +870,7 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
             "MCP_ALLOW_COMMANDS": "1" if config.get("allow_commands", False) else "0",
             "MCP_ALLOWED_COMMANDS": ",".join(config.get("allowed_commands", [])),
             "MCP_AUTH_MODE": normalize_auth_mode(config.get("auth_mode", "legacy")),
+            "MCP_OAUTH_OWNER_CODE": str(config.get("oauth_owner_code", "")).strip(),
             "MCP_PUBLIC_URL": config_public_url(config),
             "MCP_SERVEO_HOSTNAME": str(config.get("serveo_hostname", "")).strip().lower(),
             "MCP_PROFILE_STORAGE": profile_storage_path,
@@ -1115,6 +1128,18 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
         tunnel_mode = f"tunnellio ({tunnellio_runtime_name(config)})"
     else:
         tunnel_mode = f"stable ({hostname})" if hostname else "temporary"
+    oauth_lines = ""
+    oauth_prints: list[str] = []
+    if auth_mode in ("oauth", "dual"):
+        owner_code = str(config.get("oauth_owner_code", "")).strip()
+        oauth_lines = (
+            f"OAuth discovery: {url.rstrip('/')}/.well-known/oauth-protected-resource/mcp\n"
+            f"OAuth owner code: {owner_code}\n"
+        )
+        oauth_prints = [
+            f" OAuth discovery: {url.rstrip('/')}/.well-known/oauth-protected-resource/mcp",
+            f" OAuth owner code: {owner_code}",
+        ]
     CONNECTION_FILE.write_text(
         f"Notion Local MCP Easy {VERSION}\n"
         f"URL: {endpoint}\n"
@@ -1122,6 +1147,7 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
         f"Workspace: {config['workspace']}\n"
         f"Mode: {mode}\n"
         f"Auth: {auth_mode}\n"
+        f"{oauth_lines}"
         + (f"Public URL: {public_url}\n" if public_url else "")
         + f"Tunnel: {tunnel_mode}\n",
         encoding="utf-8",
@@ -1134,6 +1160,8 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     print(f" Workspace: {config['workspace']}")
     print(f" Mode: {mode}")
     print(f" Auth: {auth_mode}")
+    for line in oauth_prints:
+        print(line)
     if public_url:
         print(f" Public URL: {public_url}")
     print(f" Connection info: {CONNECTION_FILE}")
@@ -1224,13 +1252,113 @@ def show_connection(full: bool) -> int:
         return 1
     text = CONNECTION_FILE.read_text(encoding="utf-8")
     if not full:
-        token = str(load_json(CONFIG_FILE).get("token", ""))
-        if token:
-            text = text.replace(token, mask_token(token))
+        config = load_json(CONFIG_FILE)
+        for secret in (str(config.get("token", "")), str(config.get("oauth_owner_code", ""))):
+            if secret:
+                text = text.replace(secret, mask_token(secret))
         print(text)
-        print("Token is masked. Use SHOW_CONNECTION.bat --full to reveal it.")
+        print("Secrets are masked. Use SHOW_CONNECTION.bat --full to reveal them.")
         return 0
     print(text)
+    return 0
+
+
+def oauth_setup() -> int:
+    config = load_json(CONFIG_FILE)
+    if not config:
+        print("Run SETUP.bat first: the base configuration does not exist yet.")
+        return 1
+    current = normalize_auth_mode(config.get("auth_mode", "legacy"))
+    print(f"\n=== Notion Local MCP Easy {VERSION}: OAuth setup ===\n")
+    print(f"Current auth mode: {current}")
+    for index, mode in enumerate(AUTH_MODE_OPTIONS, start=1):
+        print(f"  {index}. {mode} — {AUTH_MODE_DESCRIPTIONS[mode]}")
+    choice = input(f"Select auth mode [1-{len(AUTH_MODE_OPTIONS)}, Enter keeps '{current}']: ").strip()
+    mode = current
+    if choice:
+        if not choice.isdigit() or not 1 <= int(choice) <= len(AUTH_MODE_OPTIONS):
+            print("Invalid selection; nothing changed.")
+            return 1
+        mode = AUTH_MODE_OPTIONS[int(choice) - 1]
+    config["auth_mode"] = mode
+
+    if mode in ("oauth", "dual"):
+        owner_code = str(config.get("oauth_owner_code", "")).strip()
+        if owner_code and yes_no("Generate a new OAuth owner code?", False):
+            owner_code = ""
+        if not owner_code:
+            owner_code = secrets.token_urlsafe(9)
+            print("\nNew OAuth owner code (needed to approve clients on /consent):")
+            print(f"  {owner_code}")
+        config["oauth_owner_code"] = owner_code
+        if tunnel_backend(config) != "tunnellio" and not str(config.get("serveo_hostname", "")).strip():
+            print("\nWARNING: OAuth works best with a stable public URL. Configure a reserved Serveo hostname in SETUP.bat if you want stable OAuth metadata.")
+        print(
+            "\nConnection summary:\n"
+            "  - For Notion Custom MCP use the same Bearer-token flow in legacy/dual.\n"
+            "  - For OAuth clients use Streamable HTTP + OAuth against the /mcp URL.\n"
+            "  - Approve new OAuth clients on the /consent page with the owner code.\n"
+            "  - Use REGISTER_OAUTH_CLIENT.bat/.sh for Bring Your Own OAuth App flows."
+        )
+    save_json(CONFIG_FILE, config)
+    print(f"\nAuth mode saved: {mode} ({CONFIG_FILE})")
+    return 0
+
+
+def register_oauth_client() -> int:
+    from auth import ALL_SCOPES, LocalOAuthProvider, OAuthStore
+    from mcp.shared.auth import OAuthClientInformationFull
+
+    config = load_json(CONFIG_FILE)
+    if not config:
+        print("Run SETUP.bat first: the base configuration does not exist yet.")
+        return 1
+    print(f"\n=== Notion Local MCP Easy {VERSION}: register OAuth client ===\n")
+    redirect_raw = input("Redirect URI(s): ").strip()
+    redirect_uris = [item.strip() for item in redirect_raw.split(",") if item.strip()]
+    if not redirect_uris:
+        print("At least one redirect URI is required.")
+        return 1
+
+    public_client = yes_no("Public client with PKCE and no client secret?", True)
+    scopes_raw = input(f"Scopes [{' '.join(ALL_SCOPES)}]: ").strip()
+    scopes = scopes_raw.split() if scopes_raw else list(ALL_SCOPES)
+    unknown = [scope for scope in scopes if scope not in ALL_SCOPES]
+    if unknown:
+        print(f"Unknown scopes: {', '.join(unknown)}")
+        return 1
+
+    client_id = "byo-" + secrets.token_urlsafe(8)
+    client_secret = None if public_client else secrets.token_hex(32)
+    client = OAuthClientInformationFull(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uris=redirect_uris,
+        token_endpoint_auth_method="none" if public_client else "client_secret_post",
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope=" ".join(scopes),
+        client_name="Manually registered client (BYO)",
+    )
+    try:
+        LocalOAuthProvider.validate_redirect_uris(client)
+    except Exception as exc:
+        detail = getattr(exc, "error_description", None) or str(exc)
+        print(f"Invalid redirect URI: {detail}")
+        return 1
+
+    store = OAuthStore(CONFIG_DIR / "oauth_state.json")
+    store.clients[client.client_id] = client.model_dump(mode="json")
+    store.save()
+
+    print("\nClient registered. Enter these values in the MCP client:")
+    print(f"  client_id: {client_id}")
+    if client_secret:
+        print(f"  client_secret: {client_secret}")
+    else:
+        print("  client_secret: (none — public client with PKCE)")
+    print(f"  scopes: {' '.join(scopes)}")
+    print(f"Stored in: {store.state_file}")
     return 0
 
 
@@ -1242,8 +1370,10 @@ def main() -> int:
     parser.add_argument("--stop", action="store_true", help="stop background processes")
     parser.add_argument("--show", action="store_true", help="show current connection details")
     parser.add_argument(
-        "--full", action="store_true", help="with --show: reveal the full Bearer token"
+        "--full", action="store_true", help="with --show: reveal the full Bearer token and OAuth owner code"
     )
+    parser.add_argument("--oauth", action="store_true", help="configure auth mode (legacy/oauth/dual)")
+    parser.add_argument("--register-oauth-client", action="store_true", help="pre-register an OAuth client for BYO OAuth app flows")
     args = parser.parse_args()
 
     if args.stop:
@@ -1255,6 +1385,10 @@ def main() -> int:
         return 0
     if args.show:
         return show_connection(args.full)
+    if args.oauth:
+        return oauth_setup()
+    if args.register_oauth_client:
+        return register_oauth_client()
     return run()
 
 

@@ -42,16 +42,18 @@
 ## Пошаговое подключение
 1. Остановите старый запуск MCP, если он ещё работает.
 2. Обновите `%LOCALAPPDATA%\NotionMcpEasy\config.json`.
-3. Запустите `START.bat`.
-4. Дождитесь, пока launcher покажет рабочий `URL` и завершит health-check.
-5. Откройте `SHOW_CONNECTION.bat` и зафиксируйте текущий публичный MCP URL.
-6. Откройте кабинет Tunnellio и перейдите в раздел **OAuth apps**.
-7. Создайте новое приложение или обновите существующее.
-8. Вставьте в него **точный Redirect URI**, который показывает MCP-клиент.
-9. Выберите scopes `mcp.read` и `mcp.write` как базовые.
-10. Если клиенту действительно нужны административные операции, отдельно добавьте `mcp.admin`.
-11. Для public client оставьте `client_secret` пустым и используйте PKCE.
-12. Для confidential client сохраните `client_id` и `client_secret` и перенесите их в клиентский UI.
+3. При необходимости выполните `OAUTH_SETUP.bat` (или `oauth_setup.sh`) и выберите `oauth` либо `dual`.
+4. Запустите `START.bat`.
+5. Дождитесь, пока launcher покажет рабочий `URL`, discovery endpoint и завершит health-check.
+6. Откройте `SHOW_CONNECTION.bat` и зафиксируйте текущий публичный MCP URL.
+7. Если MCP-клиент работает в BYO OAuth app mode, заранее выполните `REGISTER_OAUTH_CLIENT.bat` / `register_oauth_client.sh` и сохраните выданные `client_id` / `client_secret`.
+8. Откройте кабинет Tunnellio и перейдите в раздел **OAuth apps**.
+9. Создайте новое приложение или обновите существующее.
+10. Вставьте в него **точный Redirect URI**, который показывает MCP-клиент.
+11. Выберите scopes `mcp.read` и `mcp.write` как базовые.
+12. Если клиенту действительно нужны административные операции, отдельно добавьте `mcp.admin`.
+13. Для public client оставьте `client_secret` пустым и используйте PKCE.
+14. Для confidential client сохраните `client_id` и `client_secret` и перенесите их в клиентский UI.
 
 ## Какие endpoint-ы использовать
 Если клиент поддерживает discovery-first mode, используйте базовый публичный URL и не задавайте endpoints вручную.
