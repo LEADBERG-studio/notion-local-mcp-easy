@@ -12,6 +12,8 @@ sys.path.insert(0, str(PROJECT))
 os.environ["MCP_TOKEN"] = "unit-test-token"
 os.environ["MCP_BASE_DIR"] = str(PROJECT)
 os.environ["MCP_ALLOW_COMMANDS"] = "0"
+os.environ["MCP_AUTH_MODE"] = "legacy"
+os.environ["MCP_PUBLIC_URL"] = ""
 # Tests may run inside an active MCP session; do not inherit its stable hostname.
 os.environ["MCP_SERVEO_HOSTNAME"] = ""
 
@@ -137,6 +139,18 @@ class HostCheckTests(unittest.TestCase):
     def test_foreign_host_rejected(self):
         self.assertFalse(server._host_allowed("evil.example.com"))
         self.assertFalse(server._host_allowed(""))
+
+    def test_custom_public_url_host_allowed(self):
+        import importlib
+
+        os.environ["MCP_PUBLIC_URL"] = "https://mcp.example.com"
+        try:
+            reloaded = importlib.reload(_server)
+            self.assertTrue(reloaded._host_allowed("mcp.example.com"))
+            self.assertFalse(reloaded._host_allowed("evil.example.com"))
+        finally:
+            os.environ["MCP_PUBLIC_URL"] = ""
+            importlib.reload(_server)
 
 
 if __name__ == "__main__":

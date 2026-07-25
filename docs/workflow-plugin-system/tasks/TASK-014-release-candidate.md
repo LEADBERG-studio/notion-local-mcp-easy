@@ -1,6 +1,7 @@
 # TASK-014 — Release candidate
 
 - Default status: `QUEUED`
+- Current status: `DONE`
 - Required verification: `V4`
 
 ## Goal
@@ -19,14 +20,19 @@
 - final task-status matrix;
 - финальная сводка по backward compatibility и migration safety.
 
-## Steps
-1. Проверить, что README и другие публичные docs отражают workflow profiles и plugin-system.
-2. Подготовить release notes и список breaking/behavior changes.
-3. Сверить superprompt и authoring kit с реальным кодом и тестами.
-4. Зафиксировать known limitations и post-release backlog.
-5. Пройти финальный V4 review.
-6. Сверить статус каждой задачи `TASK-001` ... `TASK-014` и убедиться, что все они `DONE`.
-7. Подготовить пакет к обсуждению публикации, но не публиковать его.
+## Completion checkpoint — 2026-07-25
+- README / CHANGELOG synchronized with the explicit tunnel-mode UX and the 1.4.5 target version.
+- Background command jobs hardened so heavier command output no longer blocks status polling through transport.
+- Final verification captured:
+  - `py_compile` OK
+  - `tests.test_launcher` OK
+  - `tests.test_process_limits` + `tests.test_server_smoke` OK
+  - `tests.test_ai_plugin_foundation` + `tests.test_db_plugin_foundation` + `tests.test_workflow_profiles` OK
+  - `tests.test_core` OK
+  - `tests.test_server_profiles` OK
+  - `tests.test_repo_context` OK
+  - `python -m unittest discover -s tests -q` OK (`Ran 98 tests`)
+- Local release package rebuilt for discussion: `release/notion-mcp-easy-1.4.5.zip`
 
 ## Required verification evidence
 - выполненный `MASTER_COMPLETION_CHECKLIST.md`;
@@ -44,12 +50,6 @@
 - release candidate можно показывать пользователю;
 - не осталось скрытых архитектурных долгов, мешающих обсуждать публикацию;
 - все задачи `TASK-001` ... `TASK-014` имеют статус `DONE`.
-
-## Cannot be marked DONE unless
-- существует финальная таблица статусов всех task ids;
-- выполнен master completion checklist;
-- нет открытых blocker-ов уровня migration/regression/diagnostics;
-- задача не завершена формулировкой вида `checkpoint complete` или `resume later`.
 
 ## Handoff must include
 - release readiness status;

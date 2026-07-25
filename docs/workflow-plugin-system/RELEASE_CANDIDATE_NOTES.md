@@ -13,12 +13,13 @@ Release-candidate discussion package for TASK-014.
 - External AI/subagent plugin foundation is proven by the OpenAI-compatible family.
 - Self-service plugin authoring docs are aligned with the real contract and implemented families.
 - Hardening docs define regression gates, migration checks, and resume safety.
+- Tunnel setup is explicit and operator-facing: setup offers `Tunnellio managed runtime`, `Serveo temporary domain`, and `Serveo stable domain`.
+- Background command jobs are hardened for heavier output so transport-facing polling remains responsive.
 
-## Discussion points before publication
-- Whether PostgreSQL should keep the current `psql` CLI path for the first public release or gain a native driver first.
-- Whether MySQL/MariaDB should remain backlog or be pulled into the first post-RC cycle.
-- Whether dynamic plugin-registry rebuild without restart is worth prioritizing after release.
-- Whether the release pipeline should require `.venv`-based lint execution when `ruff` is not available globally.
+## Publication discussion points
+- Whether to commit and push the current `stablefix` tree as `1.4.5`.
+- Whether to tag and publish `release/notion-mcp-easy-1.4.5.zip` immediately after review.
+- Whether the superseded `release/notion-mcp-easy-1.4.4.md` draft should be kept as local history or removed before publication.
 
 ## Explicitly not done in this run
 - No repository history changes.

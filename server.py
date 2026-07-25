@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -38,7 +39,11 @@ BASE_DIR = Path(os.environ.get("MCP_BASE_DIR", str(Path.home() / "Documents"))).
 SERVER_DIR = Path(__file__).resolve().parent
 PORT = int(os.environ.get("MCP_PORT", "8765"))
 STABLE_HOSTNAME = os.environ.get("MCP_SERVEO_HOSTNAME", "").strip().lower()
+PUBLIC_URL = os.environ.get("MCP_PUBLIC_URL", "").strip().rstrip("/")
+PUBLIC_HOST = urlsplit(PUBLIC_URL).hostname.lower() if PUBLIC_URL else ""
 SERVEO_SUFFIX = ".serveousercontent.com"
+AUTH_MODES = {"legacy", "oauth", "dual"}
+AUTH_MODE = os.environ.get("MCP_AUTH_MODE", "legacy").strip().lower() or "legacy"
 ALLOW_COMMANDS = os.environ.get("MCP_ALLOW_COMMANDS", "0").lower() in {"1", "true", "yes"}
 ALLOWED_COMMANDS = {
     item.strip().lower()
@@ -65,11 +70,14 @@ MAX_BACKGROUND_COMMAND_OUTPUT = max(
     MAX_COMMAND_OUTPUT,
     int(os.environ.get("MCP_MAX_BACKGROUND_COMMAND_OUTPUT", str(MAX_TEXT_FILE))),
 )
+BACKGROUND_COMMAND_READ_CHUNK = 64 * 1024
 REPO_CONTEXT_FILE = "agent-repo-config.local.json"
 REPO_CONTEXT_SCHEMA_VERSION = 3
 
 if not TOKEN:
     raise RuntimeError("MCP_TOKEN is required")
+if AUTH_MODE not in AUTH_MODES:
+    raise RuntimeError(f"Unsupported MCP_AUTH_MODE: {AUTH_MODE}")
 if not BASE_DIR.is_dir():
     raise RuntimeError(f"MCP_BASE_DIR does not exist: {BASE_DIR}")
 
@@ -104,7 +112,7 @@ class CommandJob:
     stdout_path: Path
     stderr_path: Path
     started_at: float
-    process: asyncio.subprocess.Process | None = None
+    process: object | None = None
     status: str = "running"
     cancel_requested: bool = False
     timed_out: bool = False
@@ -115,6 +123,57 @@ class CommandJob:
 
 
 COMMAND_JOBS: dict[str, CommandJob] = {}
+
+
+def _is_async_process(proc: object) -> bool:
+    return isinstance(proc, asyncio.subprocess.Process)
+
+
+def _process_returncode(proc: object) -> int | None:
+    return getattr(proc, "returncode", None)
+
+
+def _process_pid(proc: object) -> int:
+    pid = getattr(proc, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        raise ValueError("Process pid is unavailable")
+    return pid
+
+
+async def _wait_process(proc: object, timeout: float | None = None) -> int | None:
+    if _is_async_process(proc):
+        waiter = proc.wait()
+        if timeout is None:
+            return await waiter
+        return await asyncio.wait_for(waiter, timeout=timeout)
+    if timeout is None:
+        return await asyncio.to_thread(proc.wait)
+    return await asyncio.to_thread(proc.wait, timeout=timeout)
+
+
+def _kill_tree_blocking(proc: object) -> None:
+    if _process_returncode(proc) is not None:
+        return
+    pid = _process_pid(proc)
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+
+
+def _close_process_streams(proc: object) -> None:
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(proc, name, None)
+        if stream is None:
+            continue
+        with contextlib.suppress(Exception):
+            stream.close()
 
 def _clip(text) -> str:
     if text is None:
@@ -1627,24 +1686,27 @@ def _atomic_write_text(path: Path, content: str) -> None:
         raise
 
 
-async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is not None:
+async def _kill_tree(proc: object) -> None:
+    if _process_returncode(proc) is not None:
         return
-    if os.name == "nt":
-        killer = await asyncio.create_subprocess_exec(
-            "taskkill",
-            "/T",
-            "/F",
-            "/PID",
-            str(proc.pid),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await killer.wait()
+    if _is_async_process(proc):
+        if os.name == "nt":
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/T",
+                "/F",
+                "/PID",
+                str(_process_pid(proc)),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        else:
+            proc.kill()
     else:
-        proc.kill()
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(proc.wait(), timeout=5)
+        await asyncio.to_thread(_kill_tree_blocking, proc)
+    with contextlib.suppress(TimeoutError, subprocess.TimeoutExpired):
+        await _wait_process(proc, timeout=5)
 
 
 async def _capture_process(
@@ -2315,52 +2377,71 @@ def _count_running_command_jobs() -> int:
     return sum(1 for job in COMMAND_JOBS.values() if job.status == "running")
 
 
-async def _capture_process_to_job_files(
-    proc: asyncio.subprocess.Process,
+def _capture_process_to_job_files_blocking(
+    proc: subprocess.Popen[bytes],
     stdout_path: Path,
     stderr_path: Path,
     timeout: int,
 ) -> tuple[bool, bool]:
     total = 0
     truncated = False
+    total_lock = threading.Lock()
 
-    async def consume(stream: asyncio.StreamReader, target_path: Path) -> None:
+    def consume(stream, target_path: Path) -> None:
         nonlocal total, truncated
-        with target_path.open("wb") as handle:
+        with target_path.open("wb", buffering=1024 * 1024) as handle:
             while True:
-                chunk = await stream.read(8192)
+                chunk = stream.read(BACKGROUND_COMMAND_READ_CHUNK)
                 if not chunk:
-                    handle.flush()
-                    os.fsync(handle.fileno())
                     return
-                remaining = MAX_BACKGROUND_COMMAND_OUTPUT - total
-                if remaining <= 0:
-                    truncated = True
-                    continue
-                accepted = chunk[:remaining]
-                if accepted:
-                    handle.write(accepted)
-                    total += len(accepted)
-                if len(accepted) < len(chunk):
-                    truncated = True
+                with total_lock:
+                    remaining = MAX_BACKGROUND_COMMAND_OUTPUT - total
+                    if remaining <= 0:
+                        truncated = True
+                        continue
+                    accepted = chunk[:remaining]
+                    if accepted:
+                        handle.write(accepted)
+                        total += len(accepted)
+                    if len(accepted) < len(chunk):
+                        truncated = True
 
-    async def finish() -> None:
-        assert proc.stdout is not None and proc.stderr is not None
-        await asyncio.gather(
-            consume(proc.stdout, stdout_path),
-            consume(proc.stderr, stderr_path),
-            proc.wait(),
-        )
+    assert proc.stdout is not None and proc.stderr is not None
+    threads = [
+        threading.Thread(target=consume, args=(proc.stdout, stdout_path), daemon=True),
+        threading.Thread(target=consume, args=(proc.stderr, stderr_path), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
 
-    run_task = asyncio.create_task(finish())
     timed_out = False
     try:
-        await asyncio.wait_for(run_task, timeout=timeout)
-    except TimeoutError:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
         timed_out = True
-        await _kill_tree(proc)
-        await run_task
+        _kill_tree_blocking(proc)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+    finally:
+        for thread in threads:
+            thread.join(timeout=5)
+        _close_process_streams(proc)
     return timed_out, truncated
+
+
+async def _capture_process_to_job_files(
+    proc: subprocess.Popen[bytes],
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout: int,
+) -> tuple[bool, bool]:
+    return await asyncio.to_thread(
+        _capture_process_to_job_files_blocking,
+        proc,
+        stdout_path,
+        stderr_path,
+        timeout,
+    )
 
 
 async def _run_command_job(job_id: str) -> None:
@@ -2463,12 +2544,12 @@ async def start_command(
     job_id = uuid.uuid4().hex[:12]
     stdout_capture = _tool_output_path(f"command-job-{job_id}-stdout")
     stderr_capture = _tool_output_path(f"command-job-{job_id}-stderr")
-    proc = await asyncio.create_subprocess_exec(
-        executable,
-        *args_list,
+    proc = subprocess.Popen(
+        [executable, *args_list],
         cwd=str(workdir),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
         creationflags=flags,
     )
     job = CommandJob(
@@ -2605,6 +2686,8 @@ def _host_allowed(host_header: str) -> bool:
     host = host_header.split(":", 1)[0].strip().lower()
     if host in {"127.0.0.1", "localhost"}:
         return True
+    if PUBLIC_HOST and host == PUBLIC_HOST:
+        return True
     if STABLE_HOSTNAME:
         return host == f"{STABLE_HOSTNAME}{SERVEO_SUFFIX}"
     return host.endswith(SERVEO_SUFFIX)
@@ -2631,4 +2714,7 @@ if __name__ == "__main__":
     print(f"Notion Local MCP Easy: http://127.0.0.1:{PORT}/mcp")
     print(f"Workspace: {BASE_DIR}")
     print(f"Commands: {'trusted developer mode' if ALLOW_COMMANDS else 'file-only mode'}")
+    print(f"Auth mode: {AUTH_MODE}")
+    if PUBLIC_URL:
+        print(f"Public URL: {PUBLIC_URL}")
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")

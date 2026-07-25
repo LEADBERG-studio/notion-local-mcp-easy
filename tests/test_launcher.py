@@ -15,6 +15,18 @@ import launcher
 
 
 class LauncherTests(unittest.TestCase):
+    def test_config_public_url_prefers_custom_value(self):
+        self.assertEqual(
+            launcher.config_public_url({"public_url": "https://mcp.example.com/"}),
+            "https://mcp.example.com",
+        )
+
+    def test_config_public_url_uses_stable_serveo_hostname(self):
+        self.assertEqual(
+            launcher.config_public_url({"serveo_hostname": "stable-name"}),
+            "https://stable-name.serveousercontent.com",
+        )
+
     def test_current_pid_exists(self):
         self.assertTrue(launcher.pid_exists(os.getpid()))
 
@@ -275,6 +287,49 @@ class LauncherTests(unittest.TestCase):
             port = probe.getsockname()[1]
         self.assertFalse(launcher.port_is_open(port))
 
+    def test_setup_can_choose_serveo_temporary_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace-one"
+            workspace.mkdir()
+            config_file = root / "config.json"
+            connections_file = root / "connections.cfg"
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+                mock.patch("launcher.input", side_effect=[str(workspace), "2"]),
+                mock.patch("launcher.yes_no", side_effect=[False]),
+            ):
+                config = launcher.setup(force=False)
+            self.assertEqual(config["tunnel_backend"], "serveo")
+            self.assertEqual(config["tunnel_mode_preference"], "serveo_temporary")
+            self.assertEqual(config["serveo_hostname"], "")
+            self.assertEqual(config["ssh_key"], "")
+
+    def test_setup_can_choose_serveo_stable_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace-one"
+            workspace.mkdir()
+            key = root / "serveo_key"
+            key.write_text("test", encoding="utf-8")
+            config_file = root / "config.json"
+            connections_file = root / "connections.cfg"
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+                mock.patch(
+                    "launcher.input",
+                    side_effect=[str(workspace), "3", "my-notion-mcp", str(key)],
+                ),
+                mock.patch("launcher.yes_no", side_effect=[False]),
+            ):
+                config = launcher.setup(force=False)
+            self.assertEqual(config["tunnel_backend"], "serveo")
+            self.assertEqual(config["tunnel_mode_preference"], "serveo_stable")
+            self.assertEqual(config["serveo_hostname"], "my-notion-mcp")
+            self.assertEqual(config["ssh_key"], str(key.resolve()))
+
     @mock.patch("launcher.shutil.which", return_value="ssh.exe")
     def test_temporary_tunnel_command(self, _which):
         command = launcher.build_tunnel_command({"port": 8765})
@@ -342,6 +397,81 @@ class LauncherTests(unittest.TestCase):
         url = launcher.resolve_tunnel_url({}, process, lines)
         self.assertEqual(url, "https://temporary.serveousercontent.com")
         wait_for_url.assert_called_once_with(process, lines)
+
+    def test_tunnellio_tunnel_command_uses_runtime_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exe = root / "tunnellio.exe"
+            exe.write_text("binary", encoding="utf-8")
+            state_dir = root / "state"
+            command = launcher.build_tunnel_command(
+                {
+                    "tunnel_backend": "tunnellio",
+                    "tunnellio_path": str(exe),
+                    "tunnellio_state_dir": str(state_dir),
+                    "tunnellio_runtime_name": "prod-api",
+                    "tunnellio_base_url": "https://api.tunnellio.example",
+                    "tunnellio_token": "secret-token",
+                    "tunnellio_domain": "random",
+                    "tunnellio_key": "existing:mcp",
+                    "tunnellio_connection_mode": "cloud_proxy",
+                    "tunnellio_oauth_client_policy": "shared",
+                    "tunnellio_use_discovery": True,
+                    "tunnellio_enable_pkce": True,
+                    "auth_mode": "oauth",
+                    "port": 8765,
+                }
+            )
+        self.assertEqual(command[0], str(exe.resolve()))
+        self.assertIn("--state-dir", command)
+        self.assertIn(str(state_dir.resolve()), command)
+        self.assertIn("--base-url", command)
+        self.assertIn("https://api.tunnellio.example", command)
+        self.assertIn("--token", command)
+        self.assertIn("secret-token", command)
+        self.assertIn("connect", command)
+        self.assertIn("--run", command)
+        self.assertIn("--no-watch", command)
+        self.assertIn("--requested-auth-mode", command)
+        self.assertIn("oauth", command)
+        self.assertIn("--runtime-name", command)
+        self.assertIn("prod-api", command)
+
+    @mock.patch(
+        "launcher.load_tunnellio_runtime_snapshot",
+        return_value={"transport": {"publicUrl": "https://prod.example.com"}},
+    )
+    def test_resolve_tunnellio_url_uses_runtime_snapshot(self, load_snapshot):
+        process = mock.Mock()
+        process.poll.return_value = None
+        url = launcher.resolve_tunnel_url(
+            {
+                "tunnel_backend": "tunnellio",
+                "tunnellio_runtime_name": "prod-api",
+            },
+            process,
+            queue.Queue(),
+        )
+        self.assertEqual(url, "https://prod.example.com")
+        load_snapshot.assert_called()
+
+    def test_tunnellio_url_reports_early_client_failure(self):
+        class FailedProcess:
+            returncode = 2
+
+            @staticmethod
+            def poll():
+                return 2
+
+        with self.assertRaisesRegex(RuntimeError, "Tunnellio client exited with code 2"):
+            launcher.resolve_tunnel_url(
+                {
+                    "tunnel_backend": "tunnellio",
+                    "tunnellio_runtime_name": "prod-api",
+                },
+                FailedProcess(),
+                queue.Queue(),
+            )
 
     def test_mask_token(self):
         self.assertEqual(launcher.mask_token("abcdEFGHijklMNOP"), "abcd...MNOP")

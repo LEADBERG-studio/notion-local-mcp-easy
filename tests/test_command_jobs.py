@@ -3,6 +3,7 @@ import contextlib
 import importlib
 import os
 import re
+import subprocess
 import sys
 import time
 import unittest
@@ -82,6 +83,41 @@ class CommandJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("status: cancelled", cancelled)
         status = await server.get_command_status(job_id=job_id)
         self.assertIn("status: cancelled", status)
+
+    async def test_background_jobs_use_blocking_subprocesses(self):
+        started = await server.start_command(
+            program="python",
+            args=["-c", "import time; time.sleep(5)"],
+        )
+        job_id = self._extract_job_id(started)
+        try:
+            job = server.COMMAND_JOBS[job_id]
+            self.assertIsInstance(job.process, subprocess.Popen)
+            listing = await asyncio.wait_for(server.list_commands(), timeout=1)
+            self.assertIn(job_id, listing)
+        finally:
+            await server.cancel_command(job_id=job_id)
+
+    async def test_status_calls_remain_responsive_while_noisy_job_runs(self):
+        code = (
+            "import sys, time; "
+            "[sys.stdout.write('x' * 65536) or sys.stdout.flush() or time.sleep(0.01) for _ in range(40)]"
+        )
+        started = await server.start_command(
+            program="python",
+            args=["-c", code],
+            timeout=20,
+        )
+        job_id = self._extract_job_id(started)
+        try:
+            for _ in range(5):
+                listing = await asyncio.wait_for(server.list_commands(), timeout=1)
+                self.assertIn(job_id, listing)
+                status = await asyncio.wait_for(server.get_command_status(job_id=job_id), timeout=1)
+                self.assertIn(job_id, status)
+                await asyncio.sleep(0.05)
+        finally:
+            await server.cancel_command(job_id=job_id)
 
     async def test_list_commands_reports_jobs(self):
         started = await server.start_command(

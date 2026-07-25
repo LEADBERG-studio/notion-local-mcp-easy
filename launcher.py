@@ -41,6 +41,126 @@ TUNNEL_LOG = CONFIG_DIR / "tunnel.log"
 URL_PATTERN = re.compile(r"https://[a-zA-Z0-9.-]+\.serveousercontent\.com")
 PATH_SLOT_PATTERN = re.compile(r"PATH\[(\d+)\]$", re.IGNORECASE)
 DEFAULT_CONNECTION_SLOTS = 9
+AUTH_MODES = {"legacy", "oauth", "dual"}
+TUNNEL_BACKENDS = {"serveo", "tunnellio"}
+DEFAULT_TUNNELLIO_CONNECTION_MODE = "cloud_proxy"
+DEFAULT_TUNNELLIO_OAUTH_CLIENT_POLICY = "shared"
+
+
+def normalize_auth_mode(value: object) -> str:
+    mode = str(value or "legacy").strip().lower()
+    return mode if mode in AUTH_MODES else "legacy"
+
+
+def normalize_tunnel_backend(value: object) -> str:
+    backend = str(value or "serveo").strip().lower()
+    return backend if backend in TUNNEL_BACKENDS else "serveo"
+
+
+def default_tunnel_backend(existing: dict | None = None) -> str:
+    existing = existing or {}
+    raw = existing.get("tunnel_backend")
+    if raw:
+        return normalize_tunnel_backend(raw)
+    if existing.get("serveo_hostname") or existing.get("ssh_key"):
+        return "serveo"
+    return "tunnellio" if (SCRIPT_DIR / "tunnellio.exe").is_file() else "serveo"
+
+
+def tunnel_backend(config: dict) -> str:
+    return normalize_tunnel_backend(config.get("tunnel_backend", "serveo"))
+
+
+def slugify_runtime_name(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:48] or "notion-local-mcp"
+
+
+def tunnellio_executable_path(config: dict) -> Path:
+    raw = str(config.get("tunnellio_path", "")).strip()
+    candidate = Path(raw).expanduser() if raw else (SCRIPT_DIR / "tunnellio.exe")
+    return candidate.resolve()
+
+
+def tunnellio_state_dir(config: dict) -> Path:
+    raw = str(config.get("tunnellio_state_dir", "")).strip()
+    candidate = Path(raw).expanduser() if raw else (CONFIG_DIR / "tunnellio-state")
+    return candidate.resolve()
+
+
+def tunnellio_runtime_name(config: dict) -> str:
+    raw = str(config.get("tunnellio_runtime_name", "")).strip()
+    if raw:
+        return slugify_runtime_name(raw)
+    workspace_name = Path(str(config.get("workspace") or "notion-local-mcp")).name
+    return slugify_runtime_name(f"{workspace_name}-mcp")
+
+
+def prompt_input(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except (EOFError, StopIteration):
+        return ""
+
+
+def default_tunnel_mode(existing: dict | None = None) -> str:
+    existing = existing or {}
+    preferred = str(existing.get("tunnel_mode_preference", "")).strip().lower()
+    if preferred in {"tunnellio", "serveo_temporary", "serveo_stable"}:
+        return preferred
+    backend = default_tunnel_backend(existing)
+    if backend == "tunnellio":
+        return "tunnellio"
+    return "serveo_stable" if existing.get("serveo_hostname") else "serveo_temporary"
+
+
+def prompt_tunnel_mode(existing: dict) -> str:
+    tunnellio_available = tunnellio_executable_path(existing).is_file()
+    default_mode = default_tunnel_mode(existing)
+    default_choice = {
+        "tunnellio": "1",
+        "serveo_temporary": "2",
+        "serveo_stable": "3",
+    }[default_mode]
+    aliases = {
+        "1": "tunnellio",
+        "t": "tunnellio",
+        "tunnellio": "tunnellio",
+        "2": "serveo_temporary",
+        "temp": "serveo_temporary",
+        "temporary": "serveo_temporary",
+        "serveo": "serveo_temporary",
+        "3": "serveo_stable",
+        "stable": "serveo_stable",
+        "reserved": "serveo_stable",
+    }
+    print("\nTunnel mode:")
+    if tunnellio_available:
+        print(" 1. Tunnellio managed runtime (recommended)")
+    else:
+        print(" 1. Tunnellio managed runtime (unavailable: tunnellio.exe not found)")
+    print(" 2. Serveo temporary domain")
+    print(" 3. Serveo stable domain (reserved hostname + SSH key)")
+    while True:
+        raw = prompt_input(f"Choose tunnel mode [{default_choice}]: ").strip().lower()
+        selected = default_mode if not raw else aliases.get(raw)
+        if selected is None:
+            print("Enter 1, 2, or 3.")
+            continue
+        if selected == "tunnellio" and not tunnellio_available:
+            print("Tunnellio is not available yet. Put tunnellio.exe next to launcher.py or choose a Serveo mode.")
+            continue
+        return selected
+
+
+def config_public_url(config: dict) -> str:
+    custom = str(config.get("public_url", "")).strip().rstrip("/")
+    if custom:
+        return custom
+    hostname = str(config.get("serveo_hostname", "")).strip().lower()
+    if hostname:
+        return f"https://{hostname}.serveousercontent.com"
+    return ""
 
 
 def load_json(path: Path) -> dict:
@@ -408,13 +528,14 @@ def setup(force: bool = False) -> dict:
         "Enable trusted developer mode?", bool(existing.get("allow_commands", False))
     )
 
-    print("\nA reserved Serveo hostname keeps the same Custom MCP URL after restarts.")
-    stable_tunnel = yes_no(
-        "Use a reserved Serveo hostname?", bool(existing.get("serveo_hostname"))
-    )
-    serveo_hostname = str(existing.get("serveo_hostname", "")).strip().lower() if stable_tunnel else ""
-    ssh_key = str(existing.get("ssh_key", "")).strip() if stable_tunnel else ""
-    if stable_tunnel:
+    selected_tunnel_mode = prompt_tunnel_mode(existing)
+    selected_tunnel_backend = "tunnellio" if selected_tunnel_mode == "tunnellio" else "serveo"
+    serveo_hostname = ""
+    ssh_key = ""
+    if selected_tunnel_mode == "serveo_stable":
+        print("\nA reserved Serveo hostname keeps the same Custom MCP URL after restarts.")
+        serveo_hostname = str(existing.get("serveo_hostname", "")).strip().lower()
+        ssh_key = str(existing.get("ssh_key", "")).strip()
         while not serveo_hostname:
             current_hostname = serveo_hostname or ""
             prompt = (
@@ -422,7 +543,7 @@ def setup(force: bool = False) -> dict:
                 if current_hostname
                 else "Reserved hostname (without domain)"
             )
-            raw_hostname = input(f"{prompt}: ").strip().lower()
+            raw_hostname = prompt_input(f"{prompt}: ").strip().lower()
             serveo_hostname = (raw_hostname or serveo_hostname).removesuffix(
                 ".serveousercontent.com"
             )
@@ -432,12 +553,16 @@ def setup(force: bool = False) -> dict:
         default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "serveo_notion_mcp").resolve()
         key_path = default_key
         while True:
-            raw_key = input(f"Serveo private SSH key [{default_key}]: ").strip().strip('"')
+            raw_key = prompt_input(f"Serveo private SSH key [{default_key}]: ").strip().strip('"')
             key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
             if key_path.is_file():
                 break
             print(f"Private key not found: {key_path}")
         ssh_key = str(key_path)
+    elif selected_tunnel_mode == "serveo_temporary":
+        print("\nServeo temporary mode keeps a random public domain. The URL may change after reconnects.")
+    else:
+        print("\nTunnellio mode uses the managed runtime and restores public connection details from the runtime snapshot.")
 
     token = str(existing.get("token", "")).strip() or secrets.token_urlsafe(32)
     config = {
@@ -446,8 +571,23 @@ def setup(force: bool = False) -> dict:
         "workspace": str(workspace),
         "port": int(existing.get("port", 8765) or 8765),
         "allow_commands": allow_commands,
+        "auth_mode": normalize_auth_mode(existing.get("auth_mode", "legacy")),
+        "public_url": str(existing.get("public_url", "")).strip().rstrip("/"),
+        "tunnel_backend": selected_tunnel_backend,
+        "tunnel_mode_preference": selected_tunnel_mode,
         "serveo_hostname": serveo_hostname,
         "ssh_key": ssh_key,
+        "tunnellio_path": str(Path(str(existing.get("tunnellio_path") or (SCRIPT_DIR / "tunnellio.exe"))).expanduser()),
+        "tunnellio_state_dir": str(Path(str(existing.get("tunnellio_state_dir") or (CONFIG_DIR / "tunnellio-state"))).expanduser()),
+        "tunnellio_runtime_name": str(existing.get("tunnellio_runtime_name", "")).strip(),
+        "tunnellio_base_url": str(existing.get("tunnellio_base_url", "")).strip(),
+        "tunnellio_token": str(existing.get("tunnellio_token", "")).strip(),
+        "tunnellio_domain": str(existing.get("tunnellio_domain", "")).strip(),
+        "tunnellio_key": str(existing.get("tunnellio_key", "")).strip(),
+        "tunnellio_connection_mode": str(existing.get("tunnellio_connection_mode", DEFAULT_TUNNELLIO_CONNECTION_MODE)).strip() or DEFAULT_TUNNELLIO_CONNECTION_MODE,
+        "tunnellio_oauth_client_policy": str(existing.get("tunnellio_oauth_client_policy", DEFAULT_TUNNELLIO_OAUTH_CLIENT_POLICY)).strip() or DEFAULT_TUNNELLIO_OAUTH_CLIENT_POLICY,
+        "tunnellio_use_discovery": bool(existing.get("tunnellio_use_discovery", True)),
+        "tunnellio_enable_pkce": bool(existing.get("tunnellio_enable_pkce", True)),
         "allowed_commands": [
             "git",
             "make",
@@ -467,91 +607,6 @@ def setup(force: bool = False) -> dict:
     storage, active_profile = sync_workflow_profiles(config, created_from="setup")
     if active_profile is not None:
         _, config = activate_profile_config(storage, active_profile, config)
-    print(f"\nConfiguration saved in: {CONFIG_FILE}")
-    if added_to_connections:
-        print(f"Рабочая область сохранена в {CONNECTIONS_FILE} (слот {saved_slot}).")
-    else:
-        print(f"Рабочая область уже есть в {CONNECTIONS_FILE} (слот {saved_slot}).")
-    print("Access token is stored in the config and reused on later launches.\n")
-    return config
-
-
-    ensure_connections_cfg_exists()
-    existing = load_json(CONFIG_FILE)
-    if existing and not force:
-        return choose_workspace_from_connections(existing)
-
-    print(f"\n=== Notion Local MCP Easy {VERSION}: first-time setup ===\n")
-    default_workspace = (
-        normalize_workspace_path(existing["workspace"])
-        if existing.get("workspace")
-        else SCRIPT_DIR.parent.parent.resolve()
-    )
-    workspace = prompt_workspace_folder("Workspace folder", default_workspace)
-
-    print("\nFile-only mode keeps MCP file operations inside the selected workspace.")
-    print("Trusted developer mode adds Python/Git/Node commands with your Windows user rights.")
-    print("Those programs can access files and the network outside the workspace.")
-    allow_commands = yes_no(
-        "Enable trusted developer mode?", bool(existing.get("allow_commands", False))
-    )
-
-    print("\nA reserved Serveo hostname keeps the same Custom MCP URL after restarts.")
-    stable_tunnel = yes_no(
-        "Use a reserved Serveo hostname?", bool(existing.get("serveo_hostname"))
-    )
-    serveo_hostname = str(existing.get("serveo_hostname", "")).strip().lower() if stable_tunnel else ""
-    ssh_key = str(existing.get("ssh_key", "")).strip() if stable_tunnel else ""
-    if stable_tunnel:
-        while not serveo_hostname:
-            current_hostname = serveo_hostname or ""
-            prompt = (
-                f"Reserved hostname (without domain) [{current_hostname}]"
-                if current_hostname
-                else "Reserved hostname (without domain)"
-            )
-            raw_hostname = input(f"{prompt}: ").strip().lower()
-            serveo_hostname = (raw_hostname or serveo_hostname).removesuffix(
-                ".serveousercontent.com"
-            )
-            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", serveo_hostname):
-                print("Use 3-63 lowercase letters, digits or hyphens.")
-                serveo_hostname = ""
-        default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "serveo_notion_mcp").resolve()
-        key_path = default_key
-        while True:
-            raw_key = input(f"Serveo private SSH key [{default_key}]: ").strip().strip('"')
-            key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
-            if key_path.is_file():
-                break
-            print(f"Private key not found: {key_path}")
-        ssh_key = str(key_path)
-
-    token = str(existing.get("token", "")).strip() or secrets.token_urlsafe(32)
-    config = {
-        "version": VERSION,
-        "token": token,
-        "workspace": str(workspace),
-        "port": int(existing.get("port", 8765) or 8765),
-        "allow_commands": allow_commands,
-        "serveo_hostname": serveo_hostname,
-        "ssh_key": ssh_key,
-        "allowed_commands": [
-            "git",
-            "make",
-            "node",
-            "npm",
-            "npx",
-            "pip",
-            "py",
-            "pytest",
-            "python",
-            "ruff",
-            "uv",
-        ],
-    }
-    save_json(CONFIG_FILE, config)
-    saved_slot, added_to_connections = remember_workspace_path(workspace, preferred_slot=1)
     print(f"\nConfiguration saved in: {CONFIG_FILE}")
     if added_to_connections:
         print(f"Рабочая область сохранена в {CONNECTIONS_FILE} (слот {saved_slot}).")
@@ -628,8 +683,64 @@ def stop_pid(pid: int, expected: str) -> bool:
     return True
 
 
+def _tunnellio_command_prefix(config: dict, *, include_remote_auth: bool) -> list[str]:
+    executable = tunnellio_executable_path(config)
+    if not executable.is_file():
+        raise RuntimeError(f"Tunnellio executable not found: {executable}")
+    state_dir = tunnellio_state_dir(config)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    command = [str(executable), "--state-dir", str(state_dir)]
+    if include_remote_auth:
+        base_url = str(config.get("tunnellio_base_url", "")).strip()
+        token = str(config.get("tunnellio_token", "")).strip()
+        if base_url:
+            command.extend(["--base-url", base_url])
+        if token:
+            command.extend(["--token", token])
+    return command
+
+
+def run_tunnellio_local_command(
+    config: dict, args: list[str], *, timeout: int = 30, include_remote_auth: bool = False
+) -> subprocess.CompletedProcess[str]:
+    command = _tunnellio_command_prefix(
+        config, include_remote_auth=include_remote_auth
+    ) + args
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
+
+
+def request_tunnellio_stop(config: dict, runtime_name: str, *, force: bool = True) -> None:
+    args = ["stop", "--name", runtime_name, "--grace-seconds", "3"]
+    if force:
+        args.append("--force")
+    result = run_tunnellio_local_command(
+        config, args, timeout=30, include_remote_auth=False
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(details or f"tunnellio stop failed with code {result.returncode}")
+
+
 def stop_all() -> None:
     runtime = load_json(RUNTIME_FILE)
+    backend = normalize_tunnel_backend(runtime.get("tunnel_backend", "serveo"))
+    if backend == "tunnellio":
+        runtime_name = str(runtime.get("tunnellio_runtime_name", "")).strip()
+        if runtime_name:
+            stop_config = {
+                "tunnellio_path": runtime.get("tunnellio_path", ""),
+                "tunnellio_state_dir": runtime.get("tunnellio_state_dir", ""),
+            }
+            with contextlib.suppress(Exception):
+                request_tunnellio_stop(stop_config, runtime_name, force=True)
     pairs = (
         (runtime.get("tunnel_pid", 0), runtime.get("tunnel_match", "serveo.net")),
         (runtime.get("server_pid", 0), runtime.get("server_match", "server.py")),
@@ -746,6 +857,8 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
             "MCP_PORT": str(port),
             "MCP_ALLOW_COMMANDS": "1" if config.get("allow_commands", False) else "0",
             "MCP_ALLOWED_COMMANDS": ",".join(config.get("allowed_commands", [])),
+            "MCP_AUTH_MODE": normalize_auth_mode(config.get("auth_mode", "legacy")),
+            "MCP_PUBLIC_URL": config_public_url(config),
             "MCP_SERVEO_HOSTNAME": str(config.get("serveo_hostname", "")).strip().lower(),
             "MCP_PROFILE_STORAGE": profile_storage_path,
             "MCP_PROFILE_ID": profile_id,
@@ -774,7 +887,7 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
     return process, log
 
 
-def build_tunnel_command(config: dict) -> list[str]:
+def build_serveo_tunnel_command(config: dict) -> list[str]:
     if not shutil.which("ssh"):
         raise RuntimeError(
             "OpenSSH client was not found. Install Windows Optional Feature: OpenSSH Client."
@@ -807,6 +920,48 @@ def build_tunnel_command(config: dict) -> list[str]:
         remote = f"80:127.0.0.1:{port}"
     command.extend(["-R", remote, "serveo.net"])
     return command
+
+
+def build_tunnellio_tunnel_command(config: dict) -> list[str]:
+    port = int(config.get("port", 8765))
+    runtime_name = tunnellio_runtime_name(config)
+    command = _tunnellio_command_prefix(config, include_remote_auth=True)
+    command.extend(
+        [
+            "connect",
+            "--local-host",
+            "127.0.0.1",
+            "--local-port",
+            str(port),
+            "--run",
+            "--no-watch",
+            "--name",
+            runtime_name,
+            "--runtime-name",
+            runtime_name,
+            "--requested-auth-mode",
+            normalize_auth_mode(config.get("auth_mode", "legacy")),
+            "--connection-mode",
+            str(config.get("tunnellio_connection_mode", DEFAULT_TUNNELLIO_CONNECTION_MODE)).strip() or DEFAULT_TUNNELLIO_CONNECTION_MODE,
+            "--oauth-client-policy",
+            str(config.get("tunnellio_oauth_client_policy", DEFAULT_TUNNELLIO_OAUTH_CLIENT_POLICY)).strip() or DEFAULT_TUNNELLIO_OAUTH_CLIENT_POLICY,
+        ]
+    )
+    command.append("--use-discovery" if bool(config.get("tunnellio_use_discovery", True)) else "--no-use-discovery")
+    command.append("--enable-pkce" if bool(config.get("tunnellio_enable_pkce", True)) else "--no-enable-pkce")
+    domain = str(config.get("tunnellio_domain", "")).strip()
+    key = str(config.get("tunnellio_key", "")).strip()
+    if domain:
+        command.extend(["--domain", domain])
+    if key:
+        command.extend(["--key", key])
+    return command
+
+
+def build_tunnel_command(config: dict) -> list[str]:
+    if tunnel_backend(config) == "tunnellio":
+        return build_tunnellio_tunnel_command(config)
+    return build_serveo_tunnel_command(config)
 
 
 def start_tunnel(config: dict) -> tuple[subprocess.Popen, queue.Queue[str]]:
@@ -853,18 +1008,71 @@ def wait_for_url(
     raise tunnel_error("Tunnel URL was not received")
 
 
+def load_tunnellio_runtime_snapshot(config: dict, runtime_name: str) -> dict | None:
+    result = run_tunnellio_local_command(
+        config,
+        ["show-config", "--output", "json", "--name", runtime_name],
+        timeout=15,
+        include_remote_auth=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def extract_tunnellio_public_url(snapshot: dict) -> str:
+    if not isinstance(snapshot, dict):
+        return ""
+    transport = snapshot.get("transport")
+    if isinstance(transport, dict):
+        candidate = str(transport.get("publicUrl", "")).strip()
+        if candidate:
+            return candidate
+    connection = snapshot.get("connection")
+    if isinstance(connection, dict):
+        profile = connection.get("connectionProfile")
+        if isinstance(profile, dict):
+            candidate = str(profile.get("publicUrl", "")).strip()
+            if candidate:
+                return candidate
+        candidate = str(connection.get("publicUrl", "")).strip()
+        if candidate:
+            return candidate
+    return str(snapshot.get("publicUrl", "")).strip()
+
+
+def resolve_tunnellio_url(
+    config: dict, process: subprocess.Popen, timeout: float = 45.0
+) -> str:
+    runtime_name = tunnellio_runtime_name(config)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise tunnel_error(
+                f"Tunnellio client exited with code {process.returncode}"
+            )
+        snapshot = load_tunnellio_runtime_snapshot(config, runtime_name)
+        public_url = extract_tunnellio_public_url(snapshot or {})
+        if public_url:
+            return public_url
+        time.sleep(0.5)
+    raise tunnel_error(
+        f"Tunnellio runtime snapshot was not received for {runtime_name!r}"
+    )
+
+
 def resolve_tunnel_url(
     config: dict,
     process: subprocess.Popen,
     lines: queue.Queue[str],
     startup_grace: float = 2.0,
 ) -> str:
-    """Return the public tunnel URL for temporary or reserved-hostname mode.
+    if tunnel_backend(config) == "tunnellio":
+        return resolve_tunnellio_url(process=process, config=config)
 
-    Temporary Serveo tunnels announce their assigned URL in SSH output. A
-    reserved hostname is already known and Serveo may keep SSH output silent,
-    so waiting for an announcement would cause a false timeout.
-    """
     hostname = str(config.get("serveo_hostname", "")).strip().lower()
     if not hostname:
         return wait_for_url(process, lines)
@@ -882,26 +1090,40 @@ def resolve_tunnel_url(
 
 def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int) -> None:
     endpoint = url.rstrip("/") + "/mcp"
+    backend = tunnel_backend(config)
     runtime = {
         "version": VERSION,
         "server_pid": server_pid,
         "server_match": "server.py",
         "tunnel_pid": tunnel_pid,
-        "tunnel_match": "serveo.net",
+        "tunnel_match": "tunnellio.exe" if backend == "tunnellio" else "serveo.net",
+        "tunnel_backend": backend,
+        "tunnellio_runtime_name": tunnellio_runtime_name(config)
+        if backend == "tunnellio"
+        else "",
+        "tunnellio_path": str(tunnellio_executable_path(config)) if backend == "tunnellio" else "",
+        "tunnellio_state_dir": str(tunnellio_state_dir(config)) if backend == "tunnellio" else "",
         "url": endpoint,
         "started_at": datetime.now().isoformat(timespec="seconds"),
     }
     save_json(RUNTIME_FILE, runtime)
     mode = "trusted developer" if config.get("allow_commands", False) else "file-only"
+    auth_mode = normalize_auth_mode(config.get("auth_mode", "legacy"))
+    public_url = config_public_url(config)
     hostname = str(config.get("serveo_hostname", "")).strip()
-    tunnel_mode = f"stable ({hostname})" if hostname else "temporary"
+    if backend == "tunnellio":
+        tunnel_mode = f"tunnellio ({tunnellio_runtime_name(config)})"
+    else:
+        tunnel_mode = f"stable ({hostname})" if hostname else "temporary"
     CONNECTION_FILE.write_text(
         f"Notion Local MCP Easy {VERSION}\n"
         f"URL: {endpoint}\n"
         f"Bearer token: {config['token']}\n"
         f"Workspace: {config['workspace']}\n"
         f"Mode: {mode}\n"
-        f"Tunnel: {tunnel_mode}\n",
+        f"Auth: {auth_mode}\n"
+        + (f"Public URL: {public_url}\n" if public_url else "")
+        + f"Tunnel: {tunnel_mode}\n",
         encoding="utf-8",
     )
     print("\n=======================================================")
@@ -911,6 +1133,9 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     print(f" Bearer token: {config['token']}")
     print(f" Workspace: {config['workspace']}")
     print(f" Mode: {mode}")
+    print(f" Auth: {auth_mode}")
+    if public_url:
+        print(f" Public URL: {public_url}")
     print(f" Connection info: {CONNECTION_FILE}")
     print("=======================================================")
     print("Keep this window open. Press Ctrl+C to stop.\n")
@@ -930,13 +1155,16 @@ def run() -> int:
     server: subprocess.Popen | None = None
     server_log: TextIO | None = None
     tunnel: subprocess.Popen | None = None
+    current_url = ""
     try:
         server, server_log = start_server(config)
         tunnel, lines = start_tunnel(config)
-        url = resolve_tunnel_url(config, tunnel, lines)
-        if not public_health_ok(url, config["token"], process=tunnel):
-            raise tunnel_error(f"Public health check failed: {url}/health did not answer")
-        publish_connection(config, url, server.pid, tunnel.pid)
+        current_url = resolve_tunnel_url(config, tunnel, lines)
+        if not public_health_ok(current_url, config["token"], process=tunnel):
+            raise tunnel_error(
+                f"Public health check failed: {current_url}/health did not answer"
+            )
+        publish_connection(config, current_url, server.pid, tunnel.pid)
 
         while True:
             if server.poll() is not None:
@@ -946,16 +1174,21 @@ def run() -> int:
             if tunnel.poll() is not None:
                 print("Tunnel disconnected; reconnecting in 3 seconds...")
                 time.sleep(3)
+                previous_url = current_url
                 tunnel, lines = start_tunnel(config)
-                url = resolve_tunnel_url(config, tunnel, lines)
-                healthy = public_health_ok(url, config["token"], process=tunnel)
-                publish_connection(config, url, server.pid, tunnel.pid)
+                current_url = resolve_tunnel_url(config, tunnel, lines)
+                healthy = public_health_ok(current_url, config["token"], process=tunnel)
+                publish_connection(config, current_url, server.pid, tunnel.pid)
                 if not healthy:
-                    print(f"WARNING: {url}/health is not answering yet; keeping the tunnel up and retrying on next disconnect.")
-                elif config.get("serveo_hostname"):
-                    print("Stable Serveo tunnel restored with the same URL.")
-                if not config.get("serveo_hostname"):
-                    print("IMPORTANT: the tunnel URL changed. Update the Custom MCP URL in Notion.")
+                    print(
+                        f"WARNING: {current_url}/health is not answering yet; keeping the tunnel up and retrying on next disconnect."
+                    )
+                elif current_url == previous_url:
+                    print("Tunnel restored with the same URL.")
+                else:
+                    print(
+                        "IMPORTANT: the tunnel URL changed. Update the Custom MCP URL in Notion."
+                    )
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nStopping...")
@@ -965,7 +1198,13 @@ def run() -> int:
         return 1
     finally:
         if tunnel is not None and tunnel.poll() is None:
-            stop_pid(tunnel.pid, "serveo.net")
+            if tunnel_backend(config) == "tunnellio":
+                with contextlib.suppress(Exception):
+                    request_tunnellio_stop(config, tunnellio_runtime_name(config), force=True)
+            stop_pid(
+                tunnel.pid,
+                "tunnellio.exe" if tunnel_backend(config) == "tunnellio" else "serveo.net",
+            )
         if server is not None and server.poll() is None:
             stop_pid(server.pid, "server.py")
         if server_log is not None:

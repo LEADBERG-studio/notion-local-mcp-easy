@@ -50,6 +50,8 @@ class ServerSmokeTests(unittest.TestCase):
                 "MCP_BASE_DIR": str(PROJECT),
                 "MCP_PORT": str(port),
                 "MCP_ALLOW_COMMANDS": "0",
+                "MCP_AUTH_MODE": "legacy",
+                "MCP_PUBLIC_URL": "https://mcp.example.com",
                 # Do not inherit a stable hostname from an active MCP session.
                 "MCP_SERVEO_HOSTNAME": "",
                 "PYTHONDONTWRITEBYTECODE": "1",
@@ -108,7 +110,7 @@ class ServerSmokeTests(unittest.TestCase):
                 f"http://127.0.0.1:{port}/mcp",
                 TOKEN,
                 initialize,
-                "random.serveousercontent.com",
+                "mcp.example.com",
             )
             with urllib.request.urlopen(external_request, timeout=3) as response:
                 self.assertEqual(response.status, 200)
