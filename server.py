@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import datetime as dt
 import fnmatch
 import functools
 import hmac
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,32 +21,86 @@ import uuid
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from core import (
     DEFAULT_ALLOWED_COMMANDS,
     DEFAULT_EXCLUDES,
+    _consteq,
     normalized_program_name,
     resolve_program,
     safe_path,
     should_skip,
 )
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.routes import TOKEN_PATH
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from plugin_runtime import PluginError, PluginManager
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
+
+from auth import (
+    ALL_SCOPES,
+    AUTH_MODE_DUAL,
+    AUTH_MODE_LEGACY,
+    AUTH_MODE_OAUTH,
+    ConsentHandler,
+    LegacyTokenVerifier,
+    LocalOAuthProvider,
+    OAuthStore,
+    SCOPE_COMMANDS_RUN,
+    SCOPE_FILES_READ,
+    SCOPE_FILES_WRITE,
+    SCOPE_GIT,
+    build_auth_settings,
+    parse_auth_mode,
+    protected_resource_document,
+    resource_url_for,
+)
+from auth.oauth import hash_client_secret
 
 TOKEN = os.environ.get("MCP_TOKEN", "").strip()
 BASE_DIR = Path(os.environ.get("MCP_BASE_DIR", str(Path.home() / "Documents"))).resolve()
 SERVER_DIR = Path(__file__).resolve().parent
 PORT = int(os.environ.get("MCP_PORT", "8765"))
 STABLE_HOSTNAME = os.environ.get("MCP_SERVEO_HOSTNAME", "").strip().lower()
-PUBLIC_URL = os.environ.get("MCP_PUBLIC_URL", "").strip().rstrip("/")
-PUBLIC_HOST = urlsplit(PUBLIC_URL).hostname.lower() if PUBLIC_URL else ""
 SERVEO_SUFFIX = ".serveousercontent.com"
-AUTH_MODES = {"legacy", "oauth", "dual"}
-AUTH_MODE = os.environ.get("MCP_AUTH_MODE", "legacy").strip().lower() or "legacy"
+SERVER_NAME = "Notion Local MCP Easy"
+SERVER_VERSION = (SERVER_DIR / "VERSION").read_text(encoding="utf-8").strip() if (SERVER_DIR / "VERSION").is_file() else "dev"
+try:
+    AUTH_MODE = parse_auth_mode(os.environ.get("MCP_AUTH_MODE"))
+except ValueError as exc:
+    raise RuntimeError(str(exc)) from exc
+OAUTH_ENABLED = AUTH_MODE in (AUTH_MODE_OAUTH, AUTH_MODE_DUAL)
+OWNER_CODE = os.environ.get("MCP_OAUTH_OWNER_CODE", "").strip()
+_default_public_url = (
+    f"https://{STABLE_HOSTNAME}{SERVEO_SUFFIX}"
+    if STABLE_HOSTNAME
+    else f"http://127.0.0.1:{PORT}"
+)
+PUBLIC_URL = (os.environ.get("MCP_PUBLIC_URL", "").strip() or _default_public_url).rstrip("/")
+PUBLIC_HOST = (urlsplit(PUBLIC_URL).hostname or "").lower()
+OAUTH_STATE_DIR = Path(
+    os.environ.get("MCP_OAUTH_STATE_DIR", "").strip()
+    or Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "LocalMcpEasy"
+)
+OAUTH_ACCESS_TTL = int(os.environ.get("MCP_OAUTH_ACCESS_TTL", "3600"))
+OAUTH_REFRESH_TTL = int(os.environ.get("MCP_OAUTH_REFRESH_TTL", str(30 * 24 * 3600)))
+OAUTH_MAX_CLIENTS = int(os.environ.get("MCP_OAUTH_MAX_CLIENTS", "100"))
+OAUTH_UNUSED_CLIENT_TTL = int(os.environ.get("MCP_OAUTH_UNUSED_CLIENT_TTL", "3600"))
+OAUTH_CONSENT_MAX_ATTEMPTS = int(os.environ.get("MCP_OAUTH_CONSENT_MAX_ATTEMPTS", "5"))
+OAUTH_CONSENT_FAILURE_WINDOW = int(
+    os.environ.get("MCP_OAUTH_CONSENT_FAILURE_WINDOW_SECONDS", "60")
+)
+OAUTH_CONSENT_MAX_FAILURES = int(
+    os.environ.get("MCP_OAUTH_CONSENT_MAX_FAILURES", "10")
+)
+OAUTH_OWNER_GRANT_SCOPES = [
+    scope
+    for scope in os.environ.get("MCP_OAUTH_OWNER_GRANT_SCOPES", "").split()
+    if scope in ALL_SCOPES
+]
 ALLOW_COMMANDS = os.environ.get("MCP_ALLOW_COMMANDS", "0").lower() in {"1", "true", "yes"}
 ALLOWED_COMMANDS = {
     item.strip().lower()
@@ -76,13 +133,43 @@ REPO_CONTEXT_SCHEMA_VERSION = 3
 
 if not TOKEN:
     raise RuntimeError("MCP_TOKEN is required")
-if AUTH_MODE not in AUTH_MODES:
-    raise RuntimeError(f"Unsupported MCP_AUTH_MODE: {AUTH_MODE}")
 if not BASE_DIR.is_dir():
     raise RuntimeError(f"MCP_BASE_DIR does not exist: {BASE_DIR}")
+if OAUTH_ENABLED:
+    if not OWNER_CODE:
+        raise RuntimeError(
+            "MCP_OAUTH_OWNER_CODE is required in oauth/dual mode. "
+            "Run OAUTH_SETUP.bat (launcher.py --oauth) to configure it."
+        )
+    _is_local_issuer = PUBLIC_HOST in {"127.0.0.1", "localhost"}
+    if not PUBLIC_URL.startswith("https://") and not _is_local_issuer:
+        raise RuntimeError(
+            "OAuth requires a stable https public URL (or 127.0.0.1 for local "
+            f"testing); got: {PUBLIC_URL}"
+        )
+
+oauth_provider: LocalOAuthProvider | None = None
+_fastmcp_auth_kwargs = {}
+if OAUTH_ENABLED:
+    _legacy_verifier = LegacyTokenVerifier(TOKEN) if AUTH_MODE == AUTH_MODE_DUAL else None
+    oauth_provider = LocalOAuthProvider(
+        store=OAuthStore(OAUTH_STATE_DIR / "oauth_state.json"),
+        issuer_url=PUBLIC_URL,
+        canonical_resource=resource_url_for(PUBLIC_URL),
+        legacy_verifier=_legacy_verifier,
+        access_ttl=OAUTH_ACCESS_TTL,
+        refresh_ttl=OAUTH_REFRESH_TTL,
+        max_clients=OAUTH_MAX_CLIENTS,
+        unused_client_ttl=OAUTH_UNUSED_CLIENT_TTL,
+        owner_grant_scopes=OAUTH_OWNER_GRANT_SCOPES or None,
+    )
+    _fastmcp_auth_kwargs = {
+        "auth": build_auth_settings(PUBLIC_URL, SERVER_NAME),
+        "auth_server_provider": oauth_provider,
+    }
 
 mcp = FastMCP(
-    "Notion Local MCP Easy",
+    SERVER_NAME,
     host="127.0.0.1",
     port=PORT,
     stateless_http=True,
@@ -91,6 +178,7 @@ mcp = FastMCP(
     # Serveo, so it is disabled and replaced by the Host check inside
     # SecurityMiddleware (localhost + *.serveousercontent.com).
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    **_fastmcp_auth_kwargs,
 )
 
 PLUGIN_MANAGER = PluginManager(
@@ -190,11 +278,27 @@ def _clip(text) -> str:
     return text
 
 
-def tool():
-    """Like @tool() but clips every result through _clip()."""
+def _require_scope(scope: str | None) -> None:
+    if scope is None or AUTH_MODE == AUTH_MODE_LEGACY:
+        return
+    access = get_access_token()
+    if access is None:
+        raise PermissionError("Authentication context is missing; the request was not authorized.")
+    if scope not in access.scopes:
+        raise PermissionError(
+            f"Access denied: this operation requires OAuth scope {scope!r}. "
+            f"Granted scopes: {', '.join(access.scopes) or '(none)'}."
+        )
+
+
+def tool(scope: str | None = None):
+    """Like @tool() but optionally enforces an OAuth scope and clips results."""
+    if scope is not None and scope not in ALL_SCOPES:
+        raise RuntimeError(f"Tool registered with unknown scope: {scope}")
     def deco(fn):
         @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
+            _require_scope(scope)
             return _clip(await fn(*args, **kwargs))
         return mcp.tool()(wrapper)
     return deco
@@ -1759,7 +1863,7 @@ async def _capture_process(
     return bytes(stdout_buffer), bytes(stderr_buffer), timed_out, truncated
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def workspace_info() -> str:
     """Show the allowed workspace, active mode, and git repo-context status."""
     commands = ", ".join(sorted(ALLOWED_COMMANDS)) if ALLOW_COMMANDS else "disabled"
@@ -1785,19 +1889,19 @@ async def workspace_info() -> str:
     )
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def list_plugins() -> str:
     """List discoverable plugins and their current attachment/effective state."""
     return await asyncio.to_thread(PLUGIN_MANAGER.list_plugins_text)
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def plugin_status() -> str:
     """Show active profile, plugin scope, effective mode, and loader diagnostics."""
     return await asyncio.to_thread(PLUGIN_MANAGER.diagnostics_text)
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def attach_plugin(
     plugin_id: str,
     scope: str = "current",
@@ -1820,13 +1924,13 @@ async def attach_plugin(
     )
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def detach_plugin(plugin_id: str, scope: str = "current") -> str:
     """Detach a plugin from current or global scope. Restart MCP after detaching to rebuild the tool registry."""
     return await asyncio.to_thread(PLUGIN_MANAGER.detach_plugin, plugin_id, scope)
 
 
-@tool()
+@tool(scope=SCOPE_GIT)
 async def repo_context_status(cwd: str = ".") -> str:
     """Show the current repo-context configuration, git detection, and next setup step."""
     workdir = _path(cwd)
@@ -1835,7 +1939,7 @@ async def repo_context_status(cwd: str = ".") -> str:
     return await asyncio.to_thread(_repo_context_summary, workdir)
 
 
-@tool()
+@tool(scope=SCOPE_GIT)
 async def inspect_git_repository(cwd: str = ".") -> str:
     """Inspect the git repository in this workspace without running any mutating git command."""
     workdir = _path(cwd)
@@ -1844,7 +1948,7 @@ async def inspect_git_repository(cwd: str = ".") -> str:
     return await asyncio.to_thread(_inspect_git_repository_text, workdir)
 
 
-@tool()
+@tool(scope=SCOPE_GIT)
 async def configure_repo_context(
     repository_url: str,
     is_fork: bool,
@@ -1908,7 +2012,7 @@ async def configure_repo_context(
     return f"Saved repo context to {config_path.relative_to(BASE_DIR)}\n\n{summary}"
 
 
-@tool()
+@tool(scope=SCOPE_GIT)
 async def setup_git_context(
     mode: str,
     repository_url: str = "",
@@ -1946,7 +2050,7 @@ async def setup_git_context(
     )
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def list_dir(
 
     path: str = ".",
@@ -1993,7 +2097,7 @@ async def list_dir(
     return _direct_or_saved_output("list-dir", "\n".join(rows) + suffix)
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def file_info(path: str) -> str:
     """Show file or directory metadata."""
     item = _path(path)
@@ -2008,7 +2112,7 @@ async def file_info(path: str) -> str:
     )
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def read_file(path: str, offset: int = 0, limit: int = 0, char_offset: int = 0) -> str:
     """Read a text file in chunks with a character budget that takes priority over line count."""
     item, is_temp_file = _resolve_read_file_path(path)
@@ -2040,7 +2144,7 @@ async def read_file(path: str, offset: int = 0, limit: int = 0, char_offset: int
 
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def write_file(path: str, content: str, overwrite: bool = True) -> str:
     """Write a UTF-8 text file inside the workspace."""
     encoded_size = len(content.encode("utf-8"))
@@ -2058,7 +2162,7 @@ async def write_file(path: str, content: str, overwrite: bool = True) -> str:
     return f"Wrote {len(content):,} characters to {item.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def append_file(path: str, content: str) -> str:
     """Append UTF-8 text while keeping the resulting file under the size limit."""
     encoded_size = len(content.encode("utf-8"))
@@ -2078,7 +2182,7 @@ async def append_file(path: str, content: str) -> str:
     return f"Appended {len(content):,} characters to {item.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def edit_file(
     path: str,
     old_string: str,
@@ -2116,7 +2220,7 @@ async def edit_file(
     return f"Replaced {count} occurrence(s) in {item.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def create_dir(path: str) -> str:
     """Create a directory and missing parents. Existing directories are accepted."""
     item = _path(path)
@@ -2124,7 +2228,7 @@ async def create_dir(path: str) -> str:
     return f"Directory ready: {item.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def delete_file(path: str) -> str:
     """Delete one file or one empty directory. Recursive deletion is unavailable."""
     item = _path(path)
@@ -2137,7 +2241,7 @@ async def delete_file(path: str) -> str:
     return f"Deleted: {item.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def copy_file(src: str, dst: str, overwrite: bool = False) -> str:
     """Copy one file inside the workspace."""
     source, target = _path(src), _path(dst)
@@ -2150,7 +2254,7 @@ async def copy_file(src: str, dst: str, overwrite: bool = False) -> str:
     return f"Copied {source.relative_to(BASE_DIR)} -> {target.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_WRITE)
 async def move_file(src: str, dst: str, overwrite: bool = False) -> str:
     """Move or rename one file inside the workspace."""
     source, target = _path(src), _path(dst)
@@ -2163,7 +2267,7 @@ async def move_file(src: str, dst: str, overwrite: bool = False) -> str:
     return f"Moved {source.relative_to(BASE_DIR)} -> {target.relative_to(BASE_DIR)}"
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def glob_files(pattern: str, path: str = ".", max_results: int = 300) -> str:
     """Find workspace files using a glob such as **/*.py."""
     root = _path(path)
@@ -2179,7 +2283,7 @@ async def glob_files(pattern: str, path: str = ".", max_results: int = 300) -> s
     return "\n".join(sorted(rows)) if rows else "No files matched."
 
 
-@tool()
+@tool(scope=SCOPE_FILES_READ)
 async def grep_files(
     pattern: str,
     path: str = ".",
@@ -2525,7 +2629,24 @@ async def _job_result(job: CommandJob) -> str:
     return formatted
 
 
-@tool()
+def _background_only_reason(program: str, args: list[str] | None) -> str | None:
+    name = normalized_program_name(program)
+    lowered = [str(item).strip().lower() for item in (args or [])]
+    if name in {"python", "py"} and "-m" in lowered:
+        idx = lowered.index("-m")
+        module_name = lowered[idx + 1] if idx + 1 < len(lowered) else ""
+        if module_name in {"unittest", "pytest"}:
+            return f"{program} -m {module_name} usually outlives one Streamable HTTP request"
+    if name == "pytest":
+        return "pytest runs are safer as background command jobs"
+    if name == "git" and lowered and lowered[0] in {"push", "pull", "fetch", "clone", "merge", "rebase"}:
+        return f"git {lowered[0]} is safer as a background command job"
+    if name in {"npm", "npx"} and lowered and lowered[0] in {"install", "ci", "test", "run", "build"}:
+        return f"{name} {lowered[0]} is safer as a background command job"
+    return None
+
+
+@tool(scope=SCOPE_COMMANDS_RUN)
 async def start_command(
     program: str,
     args: list[str] | None = None,
@@ -2575,7 +2696,7 @@ async def start_command(
     )
 
 
-@tool()
+@tool(scope=SCOPE_COMMANDS_RUN)
 async def get_command_status(job_id: str) -> str:
     """Get the current status or final result of a background command job."""
     _prune_command_jobs()
@@ -2589,7 +2710,7 @@ async def get_command_status(job_id: str) -> str:
     return await _job_result(job)
 
 
-@tool()
+@tool(scope=SCOPE_COMMANDS_RUN)
 async def cancel_command(job_id: str) -> str:
     """Cancel a running background command job."""
     _prune_command_jobs()
@@ -2607,7 +2728,7 @@ async def cancel_command(job_id: str) -> str:
     return _job_status_summary(job)
 
 
-@tool()
+@tool(scope=SCOPE_COMMANDS_RUN)
 async def list_commands() -> str:
     """List tracked background command jobs."""
     _prune_command_jobs()
@@ -2623,7 +2744,7 @@ async def list_commands() -> str:
     return "\n".join(rows)
 
 
-@tool()
+@tool(scope=SCOPE_COMMANDS_RUN)
 async def run_command(
     program: str,
     args: list[str] | None = None,
@@ -2636,6 +2757,12 @@ async def run_command(
     through the same chunked reading model as read_file().
     """
     executable, workdir, args_list, seconds = await _prepare_command(program, args, cwd, timeout)
+    reason = _background_only_reason(program, args_list)
+    if reason:
+        raise ValueError(
+            "This command is likely to outlive a single Streamable HTTP request. "
+            f"Use start_command(...) and poll get_command_status(...). Reason: {reason}."
+        )
     flags = 0x00000200 if os.name == "nt" else 0
 
     stdout_capture = _tool_output_path("run-command-stdout")
@@ -2694,15 +2821,182 @@ def _host_allowed(host_header: str) -> bool:
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
+    """Legacy-mode gate: host allowlist + static master token on every route."""
+
     async def dispatch(self, request, call_next):
         if not _host_allowed(request.headers.get("host", "")):
             return JSONResponse({"error": "forbidden host"}, status_code=403)
         incoming = _extract_token(request)
-        if not incoming or not hmac.compare_digest(incoming, TOKEN):
+        if not incoming or not _consteq(incoming, TOKEN):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         if request.url.path == "/health":
             return JSONResponse({"status": "ok"})
         return await call_next(request)
+
+
+class HostCheckMiddleware(BaseHTTPMiddleware):
+    """OAuth-mode gate: host allowlist only; auth is enforced per route."""
+
+    async def dispatch(self, request, call_next):
+        if not _host_allowed(request.headers.get("host", "")):
+            return JSONResponse({"error": "forbidden host"}, status_code=403)
+        return await call_next(request)
+
+
+class XApiKeyCompatMiddleware:
+    """Dual mode: let legacy clients send the master token via X-API-Key."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = list(scope.get("headers", []))
+            has_auth = any(name == b"authorization" for name, _ in headers)
+            api_key = next((value for name, value in headers if name == b"x-api-key"), b"")
+            if not has_auth and api_key:
+                headers.append((b"authorization", b"Bearer " + api_key))
+                scope = dict(scope)
+                scope["headers"] = headers
+        await self.app(scope, receive, send)
+
+
+_AUTHORIZE_HINT_STYLE = """
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 34rem; margin: 8vh auto; padding: 0 1.25rem; line-height: 1.5; }
+  h1 { font-size: 1.25rem; }
+  .card { border: 1px solid rgba(128,128,128,.35); border-radius: 10px;
+          padding: 1.25rem 1.5rem; }
+  ol { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  code { background: rgba(128,128,128,.15); padding: .1rem .3rem; border-radius: 4px; }
+  .muted { opacity: .65; font-size: .85rem; }
+"""
+
+
+def _authorize_hint_html() -> str:
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finish connecting &mdash; {SERVER_NAME}</title>
+<style>{_AUTHORIZE_HINT_STYLE}</style></head>
+<body><div class="card">
+<h1>Almost there &mdash; finish the connection</h1>
+<p>The OAuth request reached this server without the required query parameters.</p>
+<ol>
+  <li>Return to the MCP client and start the connection again.</li>
+  <li>If you are using Serveo or another public tunnel, open the URL once in a browser and let any interstitial finish loading.</li>
+  <li>Then retry the MCP connection flow.</li>
+</ol>
+<p class="muted">A normal OAuth request is not interrupted. This page only appears when the incoming authorize URL is incomplete.</p>
+</div></body></html>"""
+
+
+class AuthorizeHintMiddleware(BaseHTTPMiddleware):
+    _REQUIRED_PARAMS = ("client_id", "response_type", "code_challenge")
+
+    async def dispatch(self, request, call_next):
+        if request.method == "GET" and request.url.path == "/authorize":
+            if any(not request.query_params.get(name) for name in self._REQUIRED_PARAMS):
+                response = HTMLResponse(_authorize_hint_html(), status_code=400)
+                response.headers["Cache-Control"] = "no-store"
+                response.headers["X-Content-Type-Options"] = "nosniff"
+                response.headers["X-Frame-Options"] = "DENY"
+                return response
+        return await call_next(request)
+
+
+def _presented_client_secret(request, form, client_id: str, auth_method: str) -> str | None:
+    if auth_method == "client_secret_basic":
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            return None
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+        except (ValueError, UnicodeDecodeError, binascii.Error):
+            return None
+        if ":" not in decoded:
+            return None
+        basic_client_id, secret = decoded.split(":", 1)
+        if unquote(basic_client_id) != client_id:
+            return None
+        return unquote(secret)
+    if auth_method == "client_secret_post":
+        raw = form.get("client_secret")
+        return raw if isinstance(raw, str) else None
+    return None
+
+
+class ClientSecretAuthMiddleware(BaseHTTPMiddleware):
+    """Enforce confidential-client secret authentication on POST /token."""
+
+    async def dispatch(self, request, call_next):
+        if request.method != "POST" or request.url.path != TOKEN_PATH:
+            return await call_next(request)
+        assert oauth_provider is not None
+        try:
+            await request.body()
+            form = await request.form()
+        except Exception:
+            return await call_next(request)
+        client_id = form.get("client_id")
+        if not isinstance(client_id, str) or not client_id:
+            return await call_next(request)
+        stored = oauth_provider.store.clients.get(client_id)
+        secret_hash = stored.get("client_secret") if isinstance(stored, dict) else None
+        if not secret_hash:
+            return await call_next(request)
+        auth_method = str(stored.get("token_endpoint_auth_method") or "")
+        presented = _presented_client_secret(request, form, client_id, auth_method)
+        if not presented or not _consteq(hash_client_secret(presented), secret_hash):
+            return JSONResponse(
+                {
+                    "error": "invalid_client",
+                    "error_description": "client authentication failed",
+                },
+                status_code=401,
+            )
+        return await call_next(request)
+
+
+if OAUTH_ENABLED:
+    assert oauth_provider is not None
+    _consent_handler = ConsentHandler(
+        provider=oauth_provider,
+        owner_code=OWNER_CODE,
+        server_name=SERVER_NAME,
+        server_version=SERVER_VERSION,
+        max_attempts_per_txn=OAUTH_CONSENT_MAX_ATTEMPTS,
+        failure_window_seconds=OAUTH_CONSENT_FAILURE_WINDOW,
+        max_failures_per_window=OAUTH_CONSENT_MAX_FAILURES,
+    )
+
+    @mcp.custom_route("/consent", methods=["GET", "POST"])
+    async def consent_route(request):
+        return await _consent_handler.handle(request)
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_route(request):
+        incoming = _extract_token(request)
+        if not incoming or not _consteq(incoming, TOKEN):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse({"status": "ok"})
+
+    @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET", "OPTIONS"])
+    async def protected_resource_alias(request):
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "mcp-protocol-version",
+        }
+        if request.method == "OPTIONS":
+            return JSONResponse(None, status_code=204, headers=headers)
+        return JSONResponse(protected_resource_document(PUBLIC_URL), headers=headers)
+
+
+def _configure_logging() -> None:
+    logging.getLogger("mcp.server.streamable_http").setLevel(logging.WARNING)
 
 
 if __name__ == "__main__":
@@ -2710,11 +3004,27 @@ if __name__ == "__main__":
 
     _cleanup_temp_files()
     app = mcp.streamable_http_app()
-    app.add_middleware(SecurityMiddleware)
-    print(f"Notion Local MCP Easy: http://127.0.0.1:{PORT}/mcp")
+    if AUTH_MODE == AUTH_MODE_LEGACY:
+        app.add_middleware(SecurityMiddleware)
+    else:
+        if AUTH_MODE == AUTH_MODE_DUAL:
+            app.add_middleware(XApiKeyCompatMiddleware)
+        app.add_middleware(AuthorizeHintMiddleware)
+        app.add_middleware(ClientSecretAuthMiddleware)
+        app.add_middleware(HostCheckMiddleware)
+    print(f"{SERVER_NAME} {SERVER_VERSION}: http://127.0.0.1:{PORT}/mcp")
     print(f"Workspace: {BASE_DIR}")
     print(f"Commands: {'trusted developer mode' if ALLOW_COMMANDS else 'file-only mode'}")
     print(f"Auth mode: {AUTH_MODE}")
-    if PUBLIC_URL:
+    if OAUTH_ENABLED:
+        print(f"OAuth issuer: {PUBLIC_URL}")
+        print(f"OAuth resource: {resource_url_for(PUBLIC_URL)}")
+        print(
+            "OAuth discovery: "
+            f"{PUBLIC_URL}/.well-known/oauth-authorization-server | "
+            f"{PUBLIC_URL}/.well-known/oauth-protected-resource/mcp"
+        )
+    elif PUBLIC_URL:
         print(f"Public URL: {PUBLIC_URL}")
+    _configure_logging()
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")

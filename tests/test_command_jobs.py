@@ -141,6 +141,24 @@ class CommandJobTests(unittest.IsolatedAsyncioTestCase):
         finally:
             server.ALLOW_COMMANDS = original
 
+    async def test_run_command_rejects_transport_risky_test_invocations(self):
+        with self.assertRaises(ValueError) as caught:
+            await server.run_command(
+                program="python",
+                args=["-m", "unittest", "tests.test_core"],
+                timeout=60,
+            )
+        self.assertIn("start_command", str(caught.exception))
+        self.assertIn("Streamable HTTP request", str(caught.exception))
+
+    async def test_run_command_still_allows_short_inline_python(self):
+        result = await server.run_command(
+            program="python",
+            args=["-c", "print('inline ok')"],
+            timeout=5,
+        )
+        self.assertIn("inline ok", result)
+
     async def test_concurrency_cap_blocks_extra_jobs(self):
         original = server.MAX_COMMAND_JOBS
         server.MAX_COMMAND_JOBS = 1

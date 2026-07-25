@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hmac
 import os
 import shutil
 from pathlib import Path
+
+
+def _consteq(a: str, b: str) -> bool:
+    """Constant-time string comparison that fails closed on hostile input."""
+    return hmac.compare_digest(a.encode("utf-8", "ignore"), b.encode("utf-8", "ignore"))
 
 DEFAULT_EXCLUDES = {
     ".git",
