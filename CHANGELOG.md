@@ -6,6 +6,16 @@
 
 
 
+## 1.4.6 — 2026-07-25
+
+- Updated operator documentation for the production OAuth path through Tunnellio after the upstream server/client rollout.
+
+- Added explicit guidance for `auth_mode = oauth` / `dual`, stable Tunnellio domains, redirect URI registration, scopes, and public-vs-confidential client setup.
+
+- Refreshed the local release bundle to include the updated root-level `tunnellio.exe` together with the existing Python launcher/runtime changes from 1.4.5.
+
+- Added a dedicated OAuth setup guide for Tunnellio-backed MCP publishing and updated the release notes for the bumped package version.
+
 ## 1.4.5 — 2026-07-25
 
 
