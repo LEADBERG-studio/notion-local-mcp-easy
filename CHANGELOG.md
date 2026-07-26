@@ -1,3 +1,12 @@
+## 1.7.3 - 2026-07-26
+
+### Documentation
+
+- Expanded the Russian beginner documentation with a dedicated Tunnellio page.
+- Documented Tunnellio as a full publishing contour: self-hosted server, web cabinet, API token, SSH reverse tunnel, persistent domains, session lifecycle, server-side OAuth, and Tunnellio API client.
+- Added practical Local MCP Easy via Tunnellio instructions, including persistent URL setup, `connect --run --watch`, `show-config --name`, Tunnellio OAuth discovery, API endpoints, and the distinction between Local MCP Easy bearer/OAuth and Tunnellio API/OAuth layers.
+
+
 ## 1.7.2 - 2026-07-26
 
 - Changed launcher connection output from `Bearer token: <token>` to `Authorization=Bearer <token> (Bearer token)` so users see the exact copy-ready authorization form.
