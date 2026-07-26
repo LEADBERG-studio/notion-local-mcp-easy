@@ -7,6 +7,7 @@ import argparse
 import contextlib
 
 import json
+import logging
 
 import os
 
@@ -33,6 +34,7 @@ import urllib.error
 import urllib.request
 
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
 from pathlib import Path
 
@@ -41,6 +43,7 @@ from urllib.parse import urlsplit
 
 
 
+from core import DEFAULT_ALLOWED_COMMANDS
 from profiles import (
 
     access_mode_from_allow_commands,
@@ -61,7 +64,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -117,6 +120,10 @@ def normalize_auth_mode(value: object) -> str:
     return mode if mode in AUTH_MODES else "legacy"
 
 
+def config_auth_mode(config: dict) -> str:
+    return normalize_auth_mode(config.get("auth_mode", "legacy"))
+
+
 
 
 
@@ -147,6 +154,31 @@ def default_tunnel_backend(existing: dict | None = None) -> str:
 
 def tunnel_backend(config: dict) -> str:
     return normalize_tunnel_backend(config.get("tunnel_backend", "serveo"))
+
+
+def config_tunnel_backend(config: dict) -> str:
+    raw = str(config.get("tunnel_backend", "serveo")).strip().lower()
+    if raw == "custom-ssh":
+        return "custom-ssh"
+    return tunnel_backend(config)
+
+
+def config_uses_serveo(config: dict) -> bool:
+    backend = config_tunnel_backend(config)
+    if backend in {"custom-ssh", "custom_proxy"}:
+        return False
+    return not custom_public_url(config)
+
+
+def tunnel_process_match(config: dict) -> str:
+    backend = config_tunnel_backend(config)
+    if backend == "tunnellio":
+        return "tunnellio.exe"
+    if backend == "sish":
+        return sish_tunnel_match(config)
+    if backend in {"custom-ssh", "custom_proxy"}:
+        return "custom_proxy"
+    return "serveo.net"
 
 
 def custom_public_url(config: dict) -> str:
@@ -1633,6 +1665,22 @@ def wait_for_server(
 
 
 
+def make_log_writer(path: Path, max_bytes: int = 1_000_000, backups: int = 3) -> logging.Logger:
+    """Return a rotating file logger dedicated to a launcher log file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger(f"local_mcp_easy.log.{path.resolve()}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        with contextlib.suppress(Exception):
+            handler.close()
+    handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    return logger
+
+
 def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
 
     port = int(config.get("port", 8765))
@@ -2445,6 +2493,35 @@ def show_connection(full: bool) -> int:
 
 
 
+
+
+def tunnel_setup() -> int:
+    config = load_json(CONFIG_FILE)
+    if not config:
+        print("Run setup first: the base configuration does not exist yet.")
+        return 1
+    print("\nTunnel backend:")
+    print(" 1. Serveo")
+    print(" 2. Self-hosted sish relay")
+    print(" 3. Custom public URL / reverse proxy")
+    choice = prompt_input("Choose tunnel backend [1]: ").strip().lower() or "1"
+    if choice in {"2", "sish"}:
+        config["tunnel_backend"] = "sish"
+        config["tunnel_host"] = prompt_input("sish SSH host: ").strip()
+        ssh_port = prompt_input(f"sish SSH port [{DEFAULT_SISH_SSH_PORT}]: ").strip()
+        if ssh_port:
+            config["tunnel_ssh_port"] = ssh_port
+        config["tunnel_domain"] = prompt_input("public wildcard domain: ").strip().lower().strip(".")
+        config["serveo_hostname"] = prompt_input("reserved subdomain: ").strip().lower()
+        config["ssh_key"] = prompt_input("private key path: ").strip()
+    elif choice in {"3", "custom", "reverse", "proxy"}:
+        config["tunnel_backend"] = "custom_proxy"
+        config["public_url"] = prompt_public_url(config)
+    else:
+        config["tunnel_backend"] = "serveo"
+    save_json(CONFIG_FILE, config)
+    print(f"Tunnel settings saved: {CONFIG_FILE}")
+    return 0
 
 
 def oauth_setup() -> int:
