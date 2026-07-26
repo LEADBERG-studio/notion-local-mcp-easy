@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Туннели и публичный URL · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link active" href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Туннели и публичный URL</h1>
+<p>Локальный MCP слушает <code>127.0.0.1:8765</code>. Чтобы внешний клиент подключился к нему, нужен публичный URL.</p>
+
+<h2>Варианты</h2>
+<table><thead><tr><th>Backend</th><th>Что делает</th><th>Когда выбирать</th></tr></thead><tbody>
+<tr><td><code>tunnellio</code></td><td>Managed runtime через <code>tunnellio.exe</code></td><td>Рекомендуемый вариант, если доступен.</td></tr>
+<tr><td><code>serveo</code> temporary</td><td>Временный домен Serveo</td><td>Быстрый тест.</td></tr>
+<tr><td><code>serveo</code> stable</td><td>Reserved hostname + SSH key</td><td>Нужен стабильный адрес без своего proxy.</td></tr>
+<tr><td><code>sish</code></td><td>Ваш SSH reverse tunnel relay</td><td>Вы контролируете relay/DNS.</td></tr>
+<tr><td><code>custom_proxy</code></td><td>Launcher не поднимает туннель, а использует ваш URL</td><td>Production/self-hosted reverse proxy.</td></tr>
+</tbody></table>
+
+<h2>Tunnellio</h2>
+<ol class="steps">
+  <li>Положите <code>tunnellio.exe</code> рядом с <code>launcher.py</code>.</li>
+  <li>Запустите <code>SETUP.bat</code> или <code>START.bat</code>.</li>
+  <li>Выберите Tunnellio managed runtime.</li>
+  <li>Если нужен стабильный OAuth URL, задайте domain/reservation параметры, если они требуются вашим Tunnellio runtime.</li>
+  <li>Проверьте итоговый public URL через <code>SHOW_CONNECTION.bat</code>.</li>
+</ol>
+
+<h2>Serveo temporary</h2>
+<p>Подходит для пробы. Минус: URL может поменяться, а OAuth-клиенты любят стабильный issuer/redirect setup.</p>
+
+<h2>Serveo stable</h2>
+<ol class="steps">
+  <li>Подготовьте reserved hostname.</li>
+  <li>Подготовьте SSH key, который принимает Serveo.</li>
+  <li>В setup выберите Serveo stable domain.</li>
+  <li>Укажите hostname и путь к key.</li>
+</ol>
+
+<h2>Self-hosted sish</h2>
+<ol class="steps">
+  <li>Поднимите sish relay на сервере.</li>
+  <li>Настройте DNS wildcard, например <code>*.tunnel.example.com</code>.</li>
+  <li>Подготовьте SSH private key для relay.</li>
+  <li>Выберите self-hosted sish relay в <code>tunnel_setup</code>.</li>
+  <li>Укажите <code>tunnel_host</code>, <code>tunnel_ssh_port</code>, <code>tunnel_domain</code>, reserved subdomain и key path.</li>
+</ol>
+
+<h2>Что проверять</h2>
+<ul>
+  <li>Public URL открывается снаружи.</li>
+  <li>MCP endpoint заканчивается на <code>/mcp</code>.</li>
+  <li>Host совпадает с <code>MCP_PUBLIC_URL</code> / <code>public_url</code>.</li>
+  <li>Для OAuth URL стабилен и HTTPS.</li>
+</ul>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Авторизация · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link active" href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Авторизация: какой режим выбрать</h1>
+<table><thead><tr><th>Режим</th><th>Что значит</th><th>Когда выбирать</th></tr></thead><tbody>
+<tr><td><code>legacy</code></td><td>Один статический Bearer token</td><td>Notion Custom MCP или клиент, который просит просто URL + token.</td></tr>
+<tr><td><code>oauth</code></td><td>Только OAuth 2.1</td><td>Клиент умеет OAuth MCP flow и не принимает статический токен.</td></tr>
+<tr><td><code>dual</code></td><td>Bearer token и OAuth на одном <code>/mcp</code></td><td>Переходный период: часть клиентов старая, часть OAuth.</td></tr>
+</tbody></table>
+
+<h2>Bearer token простыми словами</h2>
+<p>Сервер генерирует секретный токен. Клиент отправляет заголовок:</p>
+<pre><code>Authorization: Bearer ВАШ_ТОКЕН</code></pre>
+<p>Это проще всего, но если клиент требует OAuth — этот режим не подойдёт.</p>
+
+<h2>OAuth простыми словами</h2>
+<p>OAuth — это способ, при котором MCP-клиент регистрируется как приложение и получает access token через стандартный flow. В этом проекте сервер сам предоставляет OAuth endpoints.</p>
+
+<h2>Scopes</h2>
+<table><thead><tr><th>Scope</th><th>Что разрешает</th></tr></thead><tbody>
+<tr><td><code>mcp.read</code></td><td>Чтение файлов/данных.</td></tr>
+<tr><td><code>mcp.write</code></td><td>Изменение файлов.</td></tr>
+<tr><td><code>mcp.commands.run</code></td><td>Запуск разрешённых команд в trusted developer mode.</td></tr>
+<tr><td><code>mcp.git</code></td><td>Git-операции, если включён developer mode и repo context.</td></tr>
+<tr><td><code>mcp.admin</code></td><td>Административные действия. Не выдавайте без необходимости.</td></tr>
+</tbody></table>
+
+<div class="callout warn">
+  <strong>Новичку:</strong> для обычной работы начинайте с <code>mcp.read mcp.write</code>. Добавляйте команды/git/admin только если понимаете зачем.
+</div>
+
+<h2>Что править вручную</h2>
+<p>Обычно ничего вручную править не нужно: используйте <code>OAUTH_SETUP.bat</code>, <code>REGISTER_OAUTH_CLIENT.bat</code> и <code>SHOW_CONNECTION.bat</code>. Если всё-таки редактируете config, файл здесь:</p>
+<pre><code>%LOCALAPPDATA%\NotionMcpEasy\config.json</code></pre>
+<p>Ключевые поля: <code>auth_mode</code>, <code>token</code>, <code>oauth_owner_code</code>, <code>public_url</code>, <code>tunnel_backend</code>, <code>serveo_hostname</code>, <code>tunnellio_domain</code>, <code>tunnel_host</code>, <code>tunnel_domain</code>.</p>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

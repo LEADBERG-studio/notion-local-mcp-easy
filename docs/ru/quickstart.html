@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Быстрый старт · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link active" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Быстрый старт</h1>
+<p>Этот путь подходит, если вы хотите быстро подключить MCP-сервер и пока не разбираетесь в OAuth.</p>
+
+<ol class="steps">
+  <li><strong>Распакуйте архив</strong><br>Положите папку проекта в место без кириллических/проблемных символов в пути, если возможно.</li>
+  <li><strong>Запустите <code>START.bat</code></strong><br>Двойной клик в Windows. На Linux/macOS используйте <code>./start.sh</code> или <code>python launcher.py</code>.</li>
+  <li><strong>Выберите workspace</strong><br>Это папка, в которой агент сможет работать. Для начала выберите отдельную тестовую папку.</li>
+  <li><strong>Выберите tunnel mode</strong><br>Если есть <code>tunnellio.exe</code>, обычно выбирайте Tunnellio. Если нет — Serveo temporary для пробы.</li>
+  <li><strong>Оставьте trusted developer mode выключенным</strong><br>Пока вам нужны только файлы — отвечайте <code>n</code>.</li>
+  <li><strong>Скопируйте параметры подключения</strong><br>Launcher покажет URL и токен либо OAuth endpoints. Также можно открыть <code>SHOW_CONNECTION.bat</code>.</li>
+  <li><strong>Добавьте Custom MCP в клиенте</strong><br>Для legacy/Bearer укажите URL <code>https://.../mcp</code> и Bearer token. Для OAuth используйте OAuth flow клиента.</li>
+</ol>
+
+<div class="callout info">
+  <strong>Не закрывайте окно сервера.</strong> Пока окно запущено, туннель и MCP доступны. Если закрыли — запустите <code>START.bat</code> снова.
+</div>
+
+<h2>Если клиент требует OAuth</h2>
+<p>Не пытайтесь вручную угадывать OAuth endpoints. Идите в <a href="oauth.html">OAuth пошагово</a>: там расписано, что запускать и что копировать.</p>
+
+<h2>Минимальная проверка</h2>
+<ul class="checklist">
+  <li>Открыли <code>SHOW_CONNECTION.bat</code> и видите public URL.</li>
+  <li>В клиенте URL заканчивается на <code>/mcp</code>.</li>
+  <li>Для Bearer token включён auth mode <code>legacy</code> или <code>dual</code>.</li>
+  <li>Для OAuth включён auth mode <code>oauth</code> или <code>dual</code>.</li>
+</ul>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

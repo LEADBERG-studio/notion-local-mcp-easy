@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Шпаргалки · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link active" href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Шпаргалки</h1>
+
+<h2>Файлы</h2>
+<table><thead><tr><th>Файл</th><th>Назначение</th></tr></thead><tbody>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\config.json</code></td><td>Основная локальная конфигурация.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\oauth_state.json</code></td><td>OAuth state/clients/tokens.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code></td><td>Profiles и plugin state.</td></tr>
+<tr><td><code>connections.cfg</code></td><td>Слоты workspace и меню.</td></tr>
+<tr><td><code>plugins/*/plugin.json</code></td><td>Manifest плагина.</td></tr>
+</tbody></table>
+
+<h2>Auth modes</h2>
+<pre><code>legacy  = Bearer token
+oauth   = OAuth only
+dual    = Bearer + OAuth</code></pre>
+
+<h2>Tunnel backends</h2>
+<pre><code>tunnellio
+serveo
+sish
+custom_proxy</code></pre>
+
+<h2>OAuth endpoints</h2>
+<pre><code>/.well-known/oauth-authorization-server
+/.well-known/oauth-protected-resource
+/oauth/authorize
+/oauth/token
+/oauth/introspect
+/mcp</code></pre>
+
+<h2>Тесты</h2>
+<pre><code>python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py
+python -m unittest discover -s tests -v</code></pre>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Что это такое · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link active" href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Что это такое</h1>
+<p><strong>Notion Local MCP Easy</strong> запускает MCP-сервер на вашем компьютере. MCP-клиент, например Notion Agent или другой агент, подключается к этому серверу и получает инструменты для работы с выбранной папкой.</p>
+
+<div class="callout danger">
+  <strong>Важно:</strong> это не публичный многопользовательский сервис. Это локальный инструмент для вашего компьютера и доверенного агента.
+</div>
+
+<h2>Из каких частей состоит система</h2>
+<div class="grid">
+  <div class="card"><h3>Локальный сервер</h3><p>Python/FastMCP сервер слушает <code>127.0.0.1:8765</code> и работает только с выбранным workspace.</p></div>
+  <div class="card"><h3>Публичный URL</h3><p>Нужен, если MCP-клиент находится не на той же машине. URL даёт Tunnellio, Serveo, sish или ваш reverse proxy.</p></div>
+  <div class="card"><h3>Авторизация</h3><p><code>legacy</code> = Bearer token, <code>oauth</code> = OAuth 2.1, <code>dual</code> = оба способа одновременно.</p></div>
+  <div class="card"><h3>Workspace</h3><p>Папка, в которой агенту разрешено читать/писать файлы. Выход наружу блокируется.</p></div>
+</div>
+
+<h2>Режимы доступа</h2>
+<table><thead><tr><th>Режим</th><th>Что умеет</th><th>Когда использовать</th></tr></thead><tbody>
+<tr><td><code>file-only</code></td><td>Файлы внутри workspace</td><td>По умолчанию. Самый безопасный режим.</td></tr>
+<tr><td><code>trusted developer mode</code></td><td>Дополнительно запускает разрешённые команды: Python, Git, Node, npm и т.п.</td><td>Только для доверенного агента и доверенной папки.</td></tr>
+</tbody></table>
+
+<h2>Где хранятся настройки</h2>
+<ul>
+  <li><code>%LOCALAPPDATA%\NotionMcpEasy\config.json</code> — основная локальная конфигурация.</li>
+  <li><code>%LOCALAPPDATA%\NotionMcpEasy\runtime.json</code> — текущий runtime/tunnel state.</li>
+  <li><code>%LOCALAPPDATA%\NotionMcpEasy\connection.txt</code> — summary подключения.</li>
+  <li><code>%LOCALAPPDATA%\NotionMcpEasy\oauth_state.json</code> — OAuth clients/tokens/state.</li>
+  <li><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code> — workflow profiles и plugin state.</li>
+  <li><code>connections.cfg</code> рядом с <code>launcher.py</code> — меню сохранённых workspace.</li>
+</ul>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

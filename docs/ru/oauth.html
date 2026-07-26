@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OAuth пошагово · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link active" href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>OAuth пошагово для новичка</h1>
+<p>Эта страница отвечает на вопрос: “что от меня требуется, где что менять и что копировать”.</p>
+
+<div class="callout info">
+  <strong>Главная идея:</strong> сначала сервер должен иметь стабильный публичный HTTPS URL. Потом OAuth-клиент должен знать redirect URI и endpoints вашего MCP-сервера.
+</div>
+
+<h2>Вариант A: OAuth через встроенный setup</h2>
+<ol class="steps">
+  <li><strong>Запустите <code>OAUTH_SETUP.bat</code></strong><br>Выберите auth mode: <code>oauth</code> или <code>dual</code>. Если вы переходите со старого Bearer token и не хотите сломать старое подключение — выберите <code>dual</code>.</li>
+  <li><strong>Сохраните или перевыпустите owner code</strong><br>Owner code нужен, чтобы подтвердить владение локальным сервером при OAuth consent/registration flow. Не публикуйте его.</li>
+  <li><strong>Запустите <code>START.bat</code></strong><br>Дождитесь public URL. Для OAuth лучше стабильный URL: Tunnellio domain, Serveo stable, sish или reverse proxy.</li>
+  <li><strong>Откройте <code>SHOW_CONNECTION.bat</code></strong><br>Скопируйте public MCP URL, issuer/discovery endpoints и owner code, если клиент его запрашивает.</li>
+  <li><strong>В MCP-клиенте выберите OAuth-подключение</strong><br>Если клиент умеет discovery-first, укажите public base URL или MCP URL. Если просит endpoints вручную — используйте список ниже.</li>
+</ol>
+
+<h2>Endpoints, если клиент просит вручную</h2>
+<p>Пусть ваш публичный адрес:</p>
+<pre><code>https://mcp.example.com</code></pre>
+<p>Тогда:</p>
+<pre><code>MCP endpoint:                         https://mcp.example.com/mcp
+Authorization server discovery:       https://mcp.example.com/.well-known/oauth-authorization-server
+Protected resource discovery:         https://mcp.example.com/.well-known/oauth-protected-resource
+Authorize endpoint:                   https://mcp.example.com/oauth/authorize
+Token endpoint:                       https://mcp.example.com/oauth/token
+Introspection endpoint:               https://mcp.example.com/oauth/introspect</code></pre>
+
+<h2>Вариант B: заранее зарегистрировать OAuth client</h2>
+<p>Если клиент не умеет dynamic client registration или вы хотите BYO OAuth app:</p>
+<ol class="steps">
+  <li>Запустите <code>REGISTER_OAUTH_CLIENT.bat</code>.</li>
+  <li>Введите имя клиента, redirect URI, scopes и тип клиента.</li>
+  <li>Для <strong>public client</strong> используйте PKCE, <code>client_secret</code> не нужен.</li>
+  <li>Для <strong>confidential client</strong> сохраните и <code>client_id</code>, и <code>client_secret</code>.</li>
+  <li>Вставьте эти значения в UI вашего MCP-клиента.</li>
+</ol>
+
+<h2>Redirect URI — самое частое место ошибки</h2>
+<div class="callout danger">
+  <strong>Не придумывайте redirect URI.</strong> Его показывает MCP-клиент. Скопируйте ровно тот URI, который показывает UI клиента, включая путь, порт, slash и регистр.
+</div>
+
+<h2>Какой public URL нужен</h2>
+<table><thead><tr><th>Сценарий</th><th>Подходит для OAuth?</th><th>Комментарий</th></tr></thead><tbody>
+<tr><td>Tunnellio stable domain</td><td>Да</td><td>Рекомендуемый вариант, если доступен.</td></tr>
+<tr><td>Serveo temporary</td><td>Для тестов</td><td>URL может меняться, OAuth clients могут сломаться.</td></tr>
+<tr><td>Serveo stable</td><td>Да</td><td>Нужен reserved hostname и SSH key.</td></tr>
+<tr><td>Self-hosted sish</td><td>Да</td><td>Если вы контролируете SSH relay и DNS.</td></tr>
+<tr><td>Reverse proxy/custom URL</td><td>Да</td><td>Лучше для production/self-hosted setup.</td></tr>
+<tr><td><code>http://127.0.0.1</code></td><td>Только локальный тест</td><td>Для внешних клиентов нужен HTTPS.</td></tr>
+</tbody></table>
+
+<h2>Если OAuth не работает</h2>
+<ul>
+  <li>Проверьте, что <code>auth_mode</code> = <code>oauth</code> или <code>dual</code>.</li>
+  <li>Проверьте, что public URL начинается с <code>https://</code>, если это не локальный тест.</li>
+  <li>Проверьте, что redirect URI в регистрации совпадает с URI клиента byte-for-byte.</li>
+  <li>Проверьте, что owner code не старый, если вы его перевыпускали.</li>
+  <li>Откройте <code>SHOW_CONNECTION.bat</code> и сравните endpoints.</li>
+</ul>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

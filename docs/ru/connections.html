@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Способы подключения · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link active" href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Способы подключения</h1>
+<p>Есть два независимых выбора: <strong>как клиент авторизуется</strong> и <strong>как он добирается до локального сервера</strong>.</p>
+
+<h2>Матрица выбора</h2>
+<table><thead><tr><th>Мне нужно</th><th>Выбирайте</th><th>Что запускать</th></tr></thead><tbody>
+<tr><td>Быстро попробовать с токеном</td><td>Legacy + Tunnellio/Serveo temporary</td><td><code>START.bat</code></td></tr>
+<tr><td>Клиент требует OAuth</td><td>OAuth или dual + стабильный HTTPS URL</td><td><code>OAUTH_SETUP.bat</code>, потом <code>START.bat</code></td></tr>
+<tr><td>Свой домен</td><td>Custom public URL / reverse proxy</td><td><code>SETUP.bat</code>, настройка nginx/Caddy/Traefik</td></tr>
+<tr><td>Свой SSH relay</td><td>Self-hosted sish</td><td><code>tunnel_setup.bat</code> или <code>python launcher.py tunnel_setup</code></td></tr>
+<tr><td>Разные папки/workspace</td><td>connections.cfg + workflow profiles</td><td><code>START.bat</code>, меню workspace</td></tr>
+</tbody></table>
+
+<h2>Windows команды</h2>
+<ul>
+  <li><code>START.bat</code> — старт сервера и туннеля.</li>
+  <li><code>STOP.bat</code> — остановить процессы этого MCP.</li>
+  <li><code>SETUP.bat</code> — заново пройти мастер настройки.</li>
+  <li><code>SHOW_CONNECTION.bat</code> — показать URL/token/auth mode/discovery endpoints.</li>
+  <li><code>OAUTH_SETUP.bat</code> — настроить OAuth/dual/legacy.</li>
+  <li><code>REGISTER_OAUTH_CLIENT.bat</code> — заранее зарегистрировать OAuth client.</li>
+  <li><code>BUILD_RELEASE.bat</code> — собрать release archive.</li>
+</ul>
+
+<h2>POSIX команды</h2>
+<pre><code>./setup.sh
+./start.sh
+./show_connection.sh
+./tunnel_setup.sh
+./oauth_setup.sh
+./register_oauth_client.sh
+./stop.sh
+./build_release.sh</code></pre>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

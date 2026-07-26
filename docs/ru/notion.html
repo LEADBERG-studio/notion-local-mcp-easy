@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Подключение MCP-клиента · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link active" href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Подключение Notion Agent или другого MCP-клиента</h1>
+
+<h2>Legacy/Bearer подключение</h2>
+<ol class="steps">
+  <li>Убедитесь, что auth mode: <code>legacy</code> или <code>dual</code>.</li>
+  <li>Запустите <code>SHOW_CONNECTION.bat</code>.</li>
+  <li>Скопируйте MCP URL вида <code>https://.../mcp</code>.</li>
+  <li>Скопируйте Bearer token.</li>
+  <li>В Custom MCP клиента вставьте URL и token.</li>
+</ol>
+
+<h2>OAuth подключение</h2>
+<ol class="steps">
+  <li>Убедитесь, что auth mode: <code>oauth</code> или <code>dual</code>.</li>
+  <li>Убедитесь, что public URL стабильный и HTTPS.</li>
+  <li>Если клиент умеет discovery: укажите public base URL или MCP URL, как требует UI.</li>
+  <li>Если клиент просит endpoints вручную — используйте страницу <a href="oauth.html">OAuth пошагово</a>.</li>
+  <li>При запросе scopes начните с <code>mcp.read mcp.write</code>.</li>
+</ol>
+
+<h2>Что копировать из SHOW_CONNECTION</h2>
+<table><thead><tr><th>Поле</th><th>Куда вставлять</th></tr></thead><tbody>
+<tr><td>Public MCP URL</td><td>Endpoint MCP-клиента.</td></tr>
+<tr><td>Bearer token</td><td>Token/password field для legacy auth.</td></tr>
+<tr><td>OAuth discovery endpoints</td><td>В OAuth/manual setup клиента.</td></tr>
+<tr><td>Owner code</td><td>Только если клиент/setup явно просит подтвердить ownership.</td></tr>
+</tbody></table>
+
+<div class="callout danger">
+  Не вставляйте <code>client_secret</code>, bearer token или owner code в публичные issue/чат/репозиторий.
+</div>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Custom public URL / reverse proxy · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link active" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Свой домен и reverse proxy</h1>
+<p>Этот режим нужен, если у вас есть сервер/домен и вы хотите сами проксировать HTTPS-трафик на локальный MCP.</p>
+
+<div class="callout info">
+  В режиме <code>custom_proxy</code> launcher не поднимает Tunnellio/Serveo/sish. Он просто считает указанный <code>public_url</code> каноническим внешним адресом.
+</div>
+
+<h2>Что нужно поднять на сервере</h2>
+<ul>
+  <li>DNS-запись для домена, например <code>mcp.example.com</code>.</li>
+  <li>HTTPS certificate.</li>
+  <li>Reverse proxy: nginx, Caddy, Traefik или аналог.</li>
+  <li>Маршрут на локальный сервер <code>127.0.0.1:8765</code> или на машину, где он доступен.</li>
+</ul>
+
+<h2>Что выбрать в setup</h2>
+<ol class="steps">
+  <li>Запустите <code>SETUP.bat</code>.</li>
+  <li>Выберите <strong>Custom public URL / reverse proxy</strong>.</li>
+  <li>Введите только base origin, например <code>https://mcp.example.com</code>.</li>
+  <li>Не добавляйте <code>/mcp</code>, query string или trailing path.</li>
+</ol>
+
+<h2>Пример nginx</h2>
+<pre><code>server {
+    listen 443 ssl;
+    server_name mcp.example.com;
+
+    ssl_certificate     /path/fullchain.pem;
+    ssl_certificate_key /path/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}</code></pre>
+
+<h2>Для OAuth</h2>
+<p>Используйте один и тот же origin для всего:</p>
+<pre><code>Public base URL: https://mcp.example.com
+MCP endpoint:    https://mcp.example.com/mcp
+Issuer:          https://mcp.example.com</code></pre>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

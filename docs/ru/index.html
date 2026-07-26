@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Русская документация для начинающих · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link active" href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link " href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <section class="hero">
+  <h1>Notion Local MCP Easy: понятная инструкция</h1>
+  <p class="lead">Локальный сайт для людей, которые хотят подключить MCP-сервер к Notion Agent или другому MCP-клиенту и не хотят гадать, где что менять.</p>
+  <div class="grid three">
+    <div class="card"><h3>1. Выберите сценарий</h3><p>Bearer token, OAuth, dual mode, Tunnellio, Serveo, sish или свой домен.</p></div>
+    <div class="card"><h3>2. Настройте сервер</h3><p>Через <code>START.bat</code>, <code>SETUP.bat</code>, <code>OAUTH_SETUP.bat</code> и <code>SHOW_CONNECTION.bat</code>.</p></div>
+    <div class="card"><h3>3. Подключите клиента</h3><p>Скопируйте правильный URL, токен или OAuth discovery endpoints в MCP-клиент.</p></div>
+  </div>
+  <p><a class="badge" href="quickstart.html">Начать с быстрого старта →</a></p>
+</section>
+
+<h2>Что здесь есть</h2>
+<div class="grid">
+  <div class="card"><h3>OAuth для начинающих</h3><p>Что такое owner code, redirect URI, client_id/client_secret, PKCE, public/confidential client и когда выбирать <code>oauth</code> или <code>dual</code>.</p></div>
+  <div class="card"><h3>Все способы подключения</h3><p>Tunnellio, Serveo temporary/stable, self-hosted sish, reverse proxy/custom public URL, локальная отладка.</p></div>
+  <div class="card"><h3>Плагины</h3><p>Как работают workflow profiles, global/current plugin scope, sqlite/postgres/openai_compat и где хранить секреты.</p></div>
+  <div class="card"><h3>Эксплуатация</h3><p>Где лежит config, как показать подключение, как остановить сервер, как безопасно включать trusted developer mode.</p></div>
+</div>
+
+<div class="callout warn">
+  <strong>Для новичка:</strong> если вы не знаете, что выбрать, начните с <a href="quickstart.html">быстрого старта</a>. Если клиент требует OAuth — идите в <a href="oauth.html">OAuth пошагово</a>.
+</div>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

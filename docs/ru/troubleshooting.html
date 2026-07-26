@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ошибки и диагностика · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.1</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav><a class="nav-link " href="index.html">Старт</a>
+<a class="nav-link " href="concepts.html">Что это такое</a>
+<a class="nav-link " href="quickstart.html">Быстрый старт</a>
+<a class="nav-link " href="auth.html">Авторизация</a>
+<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+<a class="nav-link " href="connections.html">Способы подключения</a>
+<a class="nav-link " href="tunnels.html">Туннели и URL</a>
+<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link " href="notion.html">Подключение клиента</a>
+<a class="nav-link " href="plugins.html">Плагины</a>
+<a class="nav-link " href="profiles.html">Профили</a>
+<a class="nav-link " href="operations.html">Эксплуатация</a>
+<a class="nav-link active" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Ошибки и диагностика</h1>
+
+<h2>Клиент не подключается</h2>
+<ul>
+  <li>Проверьте, что окно <code>START.bat</code> открыто.</li>
+  <li>Проверьте URL через <code>SHOW_CONNECTION.bat</code>.</li>
+  <li>URL MCP должен заканчиваться на <code>/mcp</code>.</li>
+  <li>Проверьте auth mode: Bearer требует <code>legacy</code> или <code>dual</code>, OAuth требует <code>oauth</code> или <code>dual</code>.</li>
+</ul>
+
+<h2>OAuth ошибка redirect_uri</h2>
+<p>Redirect URI должен совпадать с тем, что показывает клиент. Нельзя менять slash, порт, path или схему.</p>
+
+<h2>OAuth требует HTTPS</h2>
+<p>Для внешнего OAuth используйте стабильный <code>https://</code> URL. Исключение — локальная отладка на <code>127.0.0.1</code>.</p>
+
+<h2>GitHub не даёт push workflow</h2>
+<p>Для файлов <code>.github/workflows/*.yml</code> credential должен иметь permission/scope <code>workflow</code>. Classic PAT: <code>repo</code> + <code>workflow</code>. Fine-grained PAT: <code>Contents: Read and write</code> + <code>Workflows: Read and write</code>.</p>
+
+<h2>Туннель не поднялся</h2>
+<ul>
+  <li>Tunnellio: проверьте наличие <code>tunnellio.exe</code> и runtime config.</li>
+  <li>Serveo: проверьте SSH/key/hostname.</li>
+  <li>sish: проверьте DNS wildcard, relay host, SSH key и port.</li>
+  <li>reverse proxy: проверьте HTTPS certificate и proxy_pass на <code>127.0.0.1:8765</code>.</li>
+</ul>
+
+<h2>Плагины не появились</h2>
+<ul>
+  <li>Проверьте manifest <code>plugins/&lt;name&gt;/plugin.json</code>.</li>
+  <li>Проверьте secrets/env variables.</li>
+  <li>Перезапустите сервер.</li>
+  <li>Смотрите <code>server.log</code>.</li>
+</ul>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
