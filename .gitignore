@@ -8,3 +8,12 @@ temp/
 release/
 agent-repo-instructions.local.md
 agent-repo-config.local.json
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+oauth_state.json
