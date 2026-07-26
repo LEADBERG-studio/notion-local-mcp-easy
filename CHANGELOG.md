@@ -1,3 +1,13 @@
+## 1.7.1 - 2026-07-26
+
+- Hardened workspace write/copy/move/delete paths, git command policy, child-process environment handling, temporary-file cleanup, newline-preserving edits, and bounded process capture.
+
+- Added regression coverage for command allowlists, async filesystem tools, trust-anchor protection, copy/move limits, CRLF preservation, environment sanitization, git hardening, logging hygiene, process capture, temp cleanup, tunnel backend helpers, dependency expectations, and version consistency.
+
+- Added dependency update configuration, issue/PR templates, community files, English quick-start documentation, POSIX helper scripts, and self-hosted sish setup guidance.
+
+- Rebuilt the 1.7.1 release package after compile, targeted regression, full unittest, diff hygiene, and source-marker checks.
+
 ## 1.7.0 — 2026-07-26
 
 - Finalized the perimeter merge line by converging configuration, operator docs, and release packaging across embedded OAuth, Tunnellio, Serveo, reverse-proxy, and self-hosted `sish` paths.
