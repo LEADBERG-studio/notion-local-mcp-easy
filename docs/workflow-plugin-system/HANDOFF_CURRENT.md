@@ -1,23 +1,23 @@
 Phase: Milestone 7 — OAuth / perimeter convergence
-Task ID: TASK-016
-Task title: Launcher OAuth UX and BYO client registration
-Status: RELEASE CANDIDATE
-Date: 2026-07-25
-Target release: 1.5.0
+Task ID: TASK-018
+Task title: Self-hosted sish backend
+Status: DONE
+Date: 2026-07-26
+Target release: 1.6.1
 
 ## Current objective
-Close the second OAuth milestone by exposing the embedded OAuth server through launcher/operator flows, BYO client registration, and release packaging/documentation.
+Close the next perimeter follow-up milestone by making a self-hosted `sish` relay a first-class tunnel backend.
 
 ## What has been documented
 - master plan: `docs/workflow-plugin-system/OAUTH_PERIMETER_MERGE_PLAN.md`
 - task breakdown: TASK-015 ... TASK-019 under `docs/workflow-plugin-system/tasks/`
 
 ## Immediate next steps
-1. DONE: full stage-1 embedded OAuth core landed and the complete first-stage regression batch passed, including `tests.test_repo_context`.
-2. DONE: launcher now supports OAuth operator flows via `--oauth` and `--register-oauth-client`.
-3. DONE: wrapper scripts added for Windows and POSIX (`OAUTH_SETUP.*`, `REGISTER_OAUTH_CLIENT.*`).
-4. DONE: launcher tests cover owner-code handling, masked connection display, and BYO client registration.
-5. NEXT: cut the 1.5.1 release package, publish the archive and release note, and then continue with custom public URL / reverse proxy work.
+1. DONE: launcher now recognizes `sish` as an explicit tunnel backend and preserves it even when `public_url` is set.
+2. DONE: launcher setup can collect `sish` relay host/port/user/alias plus stable `public_url`.
+3. DONE: built-in SSH tunnel command generation now supports self-hosted `sish` relays.
+4. DONE: operator docs were added/adapted (`docs/SISH_SETUP.md`, README, SECURITY).
+5. NEXT: move to TASK-019 for perimeter convergence and the full regression gate.
 
 ## Resume rule
-On restart, continue TASK-015 from the first incomplete checkpoint. Do not redesign the perimeter layer from scratch; transfer donor code first, adapt second.
+On restart, continue from the first non-DONE task after TASK-018. Do not redesign the perimeter layer from scratch; converge the imported perimeter pieces under TASK-019 and keep the full regression gate green.

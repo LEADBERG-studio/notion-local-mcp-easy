@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.5.1
+# Notion Local MCP Easy 1.6.1
 
 
 
@@ -42,7 +42,7 @@ One-click Windows MCP-сервер для личного использован�
 
 
 
-4. Затем выберите tunnel mode: **Tunnellio managed runtime**, **Serveo temporary domain** или **Serveo stable domain** с reserved hostname и SSH key.
+4. Затем выберите tunnel mode: **Tunnellio managed runtime**, **Serveo temporary domain**, **Serveo stable domain** с reserved hostname и SSH key, **Self-hosted sish relay** для собственного SSH relay, либо **Custom public URL / reverse proxy** без встроенного туннеля.
 
 
 
@@ -96,6 +96,28 @@ One-click Windows MCP-сервер для личного использован�
 8. Если клиент умеет discovery-first flow, используйте публичный базовый URL MCP/Tunnellio и стандартные discovery endpoints. Если клиент требует ручной ввод, используйте: `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, `/oauth/authorize`, `/oauth/token`, `/oauth/introspect`.
 
 Подробная пошаговая инструкция вынесена в `docs/OAUTH_WITH_TUNNELLIO.md`.
+
+## Self-hosted sish relay
+
+Начиная с 1.6.1 launcher поддерживает отдельный self-hosted backend **sish** для случаев, когда публичный SSH relay принадлежит вам, а lifecycle туннеля всё ещё должен управляться самим launcher-ом.
+
+1. В `SETUP.bat` выберите **Self-hosted sish relay (SSH reverse tunnel)**.
+2. Укажите `tunnel_host`, `tunnel_ssh_port`, публичный wildcard-домен `tunnel_domain` и reserved subdomain label.
+3. Подключите приватный SSH-ключ, который принимает ваш relay.
+4. Используйте итоговый публичный origin вида `https://<serveo_hostname>.<tunnel_domain>` как MCP endpoint base URL.
+
+В этом режиме launcher сам поднимает SSH reverse tunnel, а стабильный внешний URL вычисляется из `serveo_hostname + tunnel_domain`. Полная инструкция вынесена в `docs/SISH_SETUP.md`.
+
+## Собственный домен и reverse proxy
+
+Начиная с perimeter milestone 1.6.0 launcher поддерживает режим **Custom public URL / reverse proxy**:
+
+1. В `SETUP.bat` выберите **Custom public URL / reverse proxy (no built-in tunnel)**.
+2. Укажите публичный базовый URL вида `https://mcp.example.com`.
+3. Настройте nginx / Caddy / Traefik или другой proxy так, чтобы он проксировал этот host на локальный MCP порт `127.0.0.1`.
+4. Используйте этот же origin для MCP endpoint (`/mcp`), OAuth issuer и discovery endpoints.
+
+В этом режиме launcher **не** поднимает Serveo/Tunnellio и использует `public_url` как канонический внешний адрес. Подробности и инварианты вынесены в `REVERSE_PROXY.md`.
 
 ## Управление
 
@@ -319,6 +341,8 @@ FastMCP server
 
 Serveo остаётся режимом совместимости: launcher использует его, если в конфигурации уже сохранены `serveo_hostname` / `ssh_key` или если Tunnellio-клиент недоступен. Для stable Serveo mode по-прежнему можно зарезервировать hostname и подключить SSH-ключ.
 
+Для self-hosted relay появился отдельный backend **sish**: launcher поднимает обычный SSH reverse tunnel на ваш relay и выводит стабильный внешний origin из пары `serveo_hostname + tunnel_domain`. Это удобно, когда tunnel endpoint принадлежит вам, но не хочется поддерживать отдельный reverse proxy path без встроенного SSH-туннеля. Пошаговая настройка вынесена в `docs/SISH_SETUP.md`.
+
 
 
 
@@ -505,7 +529,7 @@ Regex-поиск отключён, чтобы исключить зависан�
 
 
 
-- встроенный OpenSSH Client (`ssh.exe`) только для Serveo-совместимости;
+- встроенный OpenSSH Client (`ssh.exe`) для Serveo-совместимости и self-hosted `sish` relay;
 
 
 

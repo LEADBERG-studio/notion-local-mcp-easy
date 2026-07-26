@@ -1,6 +1,6 @@
 # TASK-018 — Self-hosted sish backend
 
-Status: TODO
+Status: DONE
 Target release: 1.6.1
 
 ## Objective
@@ -13,7 +13,7 @@ Add self-hosted SSH reverse-tunnel support as a first-class backend.
 - tests for backend behavior
 
 ## Checkpoints
-- CP1: `sish` backend config recognized
-- CP2: tunnel command generation works
-- CP3: setup docs imported/adapted
-- CP4: tunnel backend tests pass
+- CP1: `sish` backend config recognized (DONE)
+- CP2: tunnel command generation works (DONE)
+- CP3: setup docs imported/adapted (DONE)
+- CP4: tunnel backend tests pass (DONE)

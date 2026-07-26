@@ -1,3 +1,13 @@
+## 1.6.1 — 2026-07-26
+
+- Added a first-class self-hosted `sish` tunnel backend to the launcher, including setup flow, stable public URL derivation, SSH command generation, runtime connection metadata, and reconnect-safe URL resolution.
+
+- Imported and adapted operator documentation for self-hosted relay publishing: `docs/SISH_SETUP.md`, refreshed `README.md`, and expanded `SECURITY.md` guidance for relay ownership and SSH-key handling.
+
+- Marked TASK-018 done in the workflow handoff/task docs and advanced the perimeter plan toward TASK-019.
+
+- Re-ran the launcher/auth/repo-context regression batches and kept the targeted TASK-018 validation green before cutting the release package.
+
 ## 1.5.1 — 2026-07-26
 
 - Imported the donor embedded OAuth core into the local product: `auth/` package, embedded provider/store, discovery/protected-resource metadata, consent flow, and `legacy` / `oauth` / `dual` server modes.

@@ -14,6 +14,12 @@ The setup wizard can enable commands such as Python, Git and Node. This mode is 
 
 Serveo is a third-party SSH tunnel. The public URL and Bearer token must be treated as secrets. Anonymous Serveo URLs are temporary. A reserved hostname authenticated with a dedicated SSH key keeps the URL stable; the private SSH key must never be shared or included in an archive.
 
+If you use a self-hosted `sish` relay, treat it like production ingress under your control: keep TLS and relay access on infrastructure you trust, protect the private SSH key, and make sure the configured `public_url` exactly matches the client-facing hostname that the relay publishes.
+
+## Reverse proxy / own domain
+
+If you use `public_url` with your own reverse proxy, the configured origin becomes the canonical public issuer and host allowlist entry for the server. Keep TLS termination on infrastructure you control, preserve the public `Host` header, and forward traffic to the local MCP port on `127.0.0.1`. Do not append `/mcp` or another path to `public_url`; the base origin and the actual client-facing hostname must match exactly.
+
 ## Secret handling
 
 Configuration is stored in `%LOCALAPPDATA%\NotionMcpEasy`, not in the project folder or release archive. Large temporary MCP outputs are stored in `temp/` next to `server.py`, not inside the selected workspace. Release ZIP files are built into `release/` inside the project, and that folder is intentionally excluded from both Git sync and the release archive itself. The local git binding file `agent-repo-config.local.json` stays in the project root and is intentionally excluded from release archives and normal Git sync. This file records whether git is configured, rebound, or explicitly disabled for the folder, plus the chosen commit-branch policy, so MCP can safely recover after a restart. Never post `connection.txt`, `config.json`, the tunnel URL, the token, or `@temp/...` output files in a public chat.
