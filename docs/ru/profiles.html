@@ -14,27 +14,45 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.1</small>
+        <small>документация для начинающих · v1.7.3</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
   </header>
   <div class="shell">
     <aside class="sidebar">
-      <nav><a class="nav-link " href="index.html">Старт</a>
-<a class="nav-link " href="concepts.html">Что это такое</a>
-<a class="nav-link " href="quickstart.html">Быстрый старт</a>
-<a class="nav-link " href="auth.html">Авторизация</a>
-<a class="nav-link " href="oauth.html">OAuth пошагово</a>
-<a class="nav-link " href="connections.html">Способы подключения</a>
-<a class="nav-link " href="tunnels.html">Туннели и URL</a>
-<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
-<a class="nav-link " href="notion.html">Подключение клиента</a>
-<a class="nav-link " href="plugins.html">Плагины</a>
+      <nav class="nav-main">
+<a class="nav-link" href="index.html">Старт</a>
+<a class="nav-link" href="concepts.html">Что это такое</a>
+<a class="nav-link" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link" href="auth.html">Авторизация</a>
+<a class="nav-link" href="oauth.html">OAuth пошагово</a>
+<a class="nav-link" href="connections.html">Способы подключения</a>
+<a class="nav-link" href="tunnels.html">Туннели и URL</a>
+<details class="nav-group">
+  <summary class="nav-link nav-summary">Tunnellio</summary>
+  <div class="nav-submenu">
+    <a class="nav-sublink" href="tunnellio.html">Обзор страницы</a>
+    <a class="nav-sublink" href="tunnellio.html#overview">Что это</a>
+    <a class="nav-sublink" href="tunnellio.html#addresses">Адреса сервиса</a>
+    <a class="nav-sublink" href="tunnellio.html#auth-layers">Токены и OAuth</a>
+    <a class="nav-sublink" href="tunnellio.html#cabinet">Кабинет</a>
+    <a class="nav-sublink" href="tunnellio.html#connection">Постоянное подключение</a>
+    <a class="nav-sublink" href="tunnellio.html#oauth">OAuth Tunnellio</a>
+    <a class="nav-sublink" href="tunnellio.html#api">API</a>
+    <a class="nav-sublink" href="tunnellio.html#client">CLI-клиент</a>
+    <a class="nav-sublink" href="tunnellio.html#recipes">Рецепты</a>
+    <a class="nav-sublink" href="tunnellio.html#troubleshooting">Ошибки</a>
+  </div>
+</details>
+<a class="nav-link" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link" href="notion.html">Подключение клиента</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
 <a class="nav-link active" href="profiles.html">Профили</a>
-<a class="nav-link " href="operations.html">Эксплуатация</a>
-<a class="nav-link " href="troubleshooting.html">Ошибки</a>
-<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+<a class="nav-link" href="operations.html">Эксплуатация</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link" href="reference.html">Шпаргалки</a>
+</nav>
       <div class="sidebar-note">
         <strong>Главное правило</strong>
         <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>

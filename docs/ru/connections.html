@@ -14,27 +14,45 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.1</small>
+        <small>документация для начинающих · v1.7.3</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
   </header>
   <div class="shell">
     <aside class="sidebar">
-      <nav><a class="nav-link " href="index.html">Старт</a>
-<a class="nav-link " href="concepts.html">Что это такое</a>
-<a class="nav-link " href="quickstart.html">Быстрый старт</a>
-<a class="nav-link " href="auth.html">Авторизация</a>
-<a class="nav-link " href="oauth.html">OAuth пошагово</a>
+      <nav class="nav-main">
+<a class="nav-link" href="index.html">Старт</a>
+<a class="nav-link" href="concepts.html">Что это такое</a>
+<a class="nav-link" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link" href="auth.html">Авторизация</a>
+<a class="nav-link" href="oauth.html">OAuth пошагово</a>
 <a class="nav-link active" href="connections.html">Способы подключения</a>
-<a class="nav-link " href="tunnels.html">Туннели и URL</a>
-<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
-<a class="nav-link " href="notion.html">Подключение клиента</a>
-<a class="nav-link " href="plugins.html">Плагины</a>
-<a class="nav-link " href="profiles.html">Профили</a>
-<a class="nav-link " href="operations.html">Эксплуатация</a>
-<a class="nav-link " href="troubleshooting.html">Ошибки</a>
-<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+<a class="nav-link" href="tunnels.html">Туннели и URL</a>
+<details class="nav-group">
+  <summary class="nav-link nav-summary">Tunnellio</summary>
+  <div class="nav-submenu">
+    <a class="nav-sublink" href="tunnellio.html">Обзор страницы</a>
+    <a class="nav-sublink" href="tunnellio.html#overview">Что это</a>
+    <a class="nav-sublink" href="tunnellio.html#addresses">Адреса сервиса</a>
+    <a class="nav-sublink" href="tunnellio.html#auth-layers">Токены и OAuth</a>
+    <a class="nav-sublink" href="tunnellio.html#cabinet">Кабинет</a>
+    <a class="nav-sublink" href="tunnellio.html#connection">Постоянное подключение</a>
+    <a class="nav-sublink" href="tunnellio.html#oauth">OAuth Tunnellio</a>
+    <a class="nav-sublink" href="tunnellio.html#api">API</a>
+    <a class="nav-sublink" href="tunnellio.html#client">CLI-клиент</a>
+    <a class="nav-sublink" href="tunnellio.html#recipes">Рецепты</a>
+    <a class="nav-sublink" href="tunnellio.html#troubleshooting">Ошибки</a>
+  </div>
+</details>
+<a class="nav-link" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link" href="notion.html">Подключение клиента</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
+<a class="nav-link" href="profiles.html">Профили</a>
+<a class="nav-link" href="operations.html">Эксплуатация</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link" href="reference.html">Шпаргалки</a>
+</nav>
       <div class="sidebar-note">
         <strong>Главное правило</strong>
         <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
@@ -48,7 +66,7 @@
 <table><thead><tr><th>Мне нужно</th><th>Выбирайте</th><th>Что запускать</th></tr></thead><tbody>
 <tr><td>Быстро попробовать с токеном</td><td>Legacy + Tunnellio/Serveo temporary</td><td><code>START.bat</code></td></tr>
 <tr><td>Клиент требует OAuth</td><td>OAuth или dual + стабильный HTTPS URL</td><td><code>OAUTH_SETUP.bat</code>, потом <code>START.bat</code></td></tr>
-<tr><td>Свой домен</td><td>Custom public URL / reverse proxy</td><td><code>SETUP.bat</code>, настройка nginx/Caddy/Traefik</td></tr>
+<tr><td>Свой домен</td><td>Custom public URL / reverse proxy</td><td><code>SETUP.bat</code>, настройка nginx/reverse proxy/Traefik</td></tr>
 <tr><td>Свой SSH relay</td><td>Self-hosted sish</td><td><code>tunnel_setup.bat</code> или <code>python launcher.py tunnel_setup</code></td></tr>
 <tr><td>Разные папки/workspace</td><td>connections.cfg + workflow profiles</td><td><code>START.bat</code>, меню workspace</td></tr>
 </tbody></table>
@@ -73,14 +91,14 @@
 ./register_oauth_client.sh
 ./stop.sh
 ./build_release.sh</code></pre>
-      <footer class="page-footer">
-        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
-      </footer>
 
     <section class="card">
       <h2>Сценарий: постоянный MCP URL через Tunnellio</h2>
-      <p>Если нужен стабильный внешний адрес и управляемая авторизация, поднимите Tunnellio server, создайте persistent domain, запустите <code>tunnellio.exe connect --run --watch --name notion-mcp</code>, затем возьмите public URL через <code>show-config --name notion-mcp</code> и используйте его как MCP endpoint. Пошаговая схема - в разделе <a href="tunnellio.html">Tunnellio</a>.</p>
+      <p>Если нужен стабильный внешний адрес и управляемая авторизация, используйте Tunnellio: настройте подключение в <a href="https://console.tunnellio.ru">https://console.tunnellio.ru</a>, запустите <code>tunnellio connect --run --watch --name notion-mcp</code>, затем возьмите public URL через <code>tunnellio show-config --name notion-mcp</code>. Подробности — в разделе <a href="tunnellio.html">Tunnellio</a>.</p>
     </section>
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
   </main>
   </div>
 </body>

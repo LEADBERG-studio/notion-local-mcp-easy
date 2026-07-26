@@ -2,10 +2,12 @@
 
 ### Documentation
 
-- Expanded the Russian beginner documentation with a dedicated Tunnellio page.
-- Documented Tunnellio as a full publishing contour: self-hosted server, web cabinet, API token, SSH reverse tunnel, persistent domains, session lifecycle, server-side OAuth, and Tunnellio API client.
-- Added practical Local MCP Easy via Tunnellio instructions, including persistent URL setup, `connect --run --watch`, `show-config --name`, Tunnellio OAuth discovery, API endpoints, and the distinction between Local MCP Easy bearer/OAuth and Tunnellio API/OAuth layers.
-
+- Expanded and corrected the Russian beginner documentation for Tunnellio.
+- Added a standard-layout `docs/ru/tunnellio.html` page with the same header, shell, left navigation, and footer style as the rest of the local documentation.
+- Added a collapsible Tunnellio submenu in the left navigation.
+- Reworked the content as public client-facing documentation: cabinet URL, public tunnel URL pattern, API documentation link, Local MCP Easy connection steps, Tunnellio CLI usage, OAuth guidance, API token guidance, and troubleshooting.
+- Removed internal implementation/repository/deployment details from public Tunnellio documentation.
+- Clarified the production service addresses: `https://console.tunnellio.ru`, `https://api.tunnellio.ru/docs`, and `https://*.tunnellio.site`.
 
 ## 1.7.2 - 2026-07-26
 
@@ -181,7 +183,7 @@
 
 
 
-- Added a reusable DB plugin family foundation, refactored SQLite onto it, and added PostgreSQL as the second confirmed DB-family implementation.
+- Added a reusable DB plugin family foundation, refactored внутреннее хранилище onto it, and added PostgreSQL as the second confirmed DB-family implementation.
 
 
 

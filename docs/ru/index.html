@@ -14,27 +14,45 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.1</small>
+        <small>документация для начинающих · v1.7.3</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
   </header>
   <div class="shell">
     <aside class="sidebar">
-      <nav><a class="nav-link active" href="index.html">Старт</a>
-<a class="nav-link " href="concepts.html">Что это такое</a>
-<a class="nav-link " href="quickstart.html">Быстрый старт</a>
-<a class="nav-link " href="auth.html">Авторизация</a>
-<a class="nav-link " href="oauth.html">OAuth пошагово</a>
-<a class="nav-link " href="connections.html">Способы подключения</a>
-<a class="nav-link " href="tunnels.html">Туннели и URL</a>
-<a class="nav-link " href="reverse-proxy.html">Reverse proxy</a>
-<a class="nav-link " href="notion.html">Подключение клиента</a>
-<a class="nav-link " href="plugins.html">Плагины</a>
-<a class="nav-link " href="profiles.html">Профили</a>
-<a class="nav-link " href="operations.html">Эксплуатация</a>
-<a class="nav-link " href="troubleshooting.html">Ошибки</a>
-<a class="nav-link " href="reference.html">Шпаргалки</a></nav>
+      <nav class="nav-main">
+<a class="nav-link active" href="index.html">Старт</a>
+<a class="nav-link" href="concepts.html">Что это такое</a>
+<a class="nav-link" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link" href="auth.html">Авторизация</a>
+<a class="nav-link" href="oauth.html">OAuth пошагово</a>
+<a class="nav-link" href="connections.html">Способы подключения</a>
+<a class="nav-link" href="tunnels.html">Туннели и URL</a>
+<details class="nav-group">
+  <summary class="nav-link nav-summary">Tunnellio</summary>
+  <div class="nav-submenu">
+    <a class="nav-sublink" href="tunnellio.html">Обзор страницы</a>
+    <a class="nav-sublink" href="tunnellio.html#overview">Что это</a>
+    <a class="nav-sublink" href="tunnellio.html#addresses">Адреса сервиса</a>
+    <a class="nav-sublink" href="tunnellio.html#auth-layers">Токены и OAuth</a>
+    <a class="nav-sublink" href="tunnellio.html#cabinet">Кабинет</a>
+    <a class="nav-sublink" href="tunnellio.html#connection">Постоянное подключение</a>
+    <a class="nav-sublink" href="tunnellio.html#oauth">OAuth Tunnellio</a>
+    <a class="nav-sublink" href="tunnellio.html#api">API</a>
+    <a class="nav-sublink" href="tunnellio.html#client">CLI-клиент</a>
+    <a class="nav-sublink" href="tunnellio.html#recipes">Рецепты</a>
+    <a class="nav-sublink" href="tunnellio.html#troubleshooting">Ошибки</a>
+  </div>
+</details>
+<a class="nav-link" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link" href="notion.html">Подключение клиента</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
+<a class="nav-link" href="profiles.html">Профили</a>
+<a class="nav-link" href="operations.html">Эксплуатация</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link" href="reference.html">Шпаргалки</a>
+</nav>
       <div class="sidebar-note">
         <strong>Главное правило</strong>
         <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
@@ -56,7 +74,7 @@
 <div class="grid">
   <div class="card"><h3>OAuth для начинающих</h3><p>Что такое owner code, redirect URI, client_id/client_secret, PKCE, public/confidential client и когда выбирать <code>oauth</code> или <code>dual</code>.</p></div>
   <div class="card"><h3>Все способы подключения</h3><p>Tunnellio, Serveo temporary/stable, self-hosted sish, reverse proxy/custom public URL, локальная отладка.</p></div>
-  <div class="card"><h3>Плагины</h3><p>Как работают workflow profiles, global/current plugin scope, sqlite/postgres/openai_compat и где хранить секреты.</p></div>
+  <div class="card"><h3>Плагины</h3><p>Как работают workflow profiles, global/current plugin scope, SQLite/postgres/openai_compat и где хранить секреты.</p></div>
   <div class="card"><h3>Эксплуатация</h3><p>Где лежит config, как показать подключение, как остановить сервер, как безопасно включать trusted developer mode.</p></div>
 </div>
 
@@ -68,8 +86,8 @@
       </footer>
 
       <article class="tile">
-        <h3><a href="tunnellio.html">Tunnellio: сервер, API и постоянные подключения</a></h3>
-        <p>Отдельный контур публикации: VPS, домены, Tunnellio API, server-side OAuth, persistent domains и CLI-клиент с <code>connect --run --watch</code>.</p>
+        <h3><a href="tunnellio.html">Tunnellio: постоянный публичный доступ</a></h3>
+        <p>Кабинет <code>console.tunnellio.ru</code>, публичные адреса <code>*.tunnellio.site</code>, API-документация и настройка CLI/OAuth без внутренних деталей сервиса.</p>
       </article>
 
   </main>

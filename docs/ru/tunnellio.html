@@ -2,263 +2,280 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Tunnellio: сервер, API, OAuth и постоянные туннели - Notion Local MCP Easy</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tunnellio: постоянный публичный доступ · Notion Local MCP Easy</title>
+  <meta name="description" content="Настройка Tunnellio для публикации Local MCP Easy">
   <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div>
-      <p class="eyebrow">Notion Local MCP Easy</p>
-      <h1>Tunnellio: полноценный контур публикации</h1>
-      <p class="lead">Tunnellio - это не просто "ещё один туннель". Это сервер на вашем VPS, API, web-кабинет, OAuth-контур, постоянные домены и клиент, который умеет держать туннель живым и отдавать приложению готовые connection params.</p>
-    </div>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.3</small>
+      </span>
+    </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
   </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav class="nav-main">
+<a class="nav-link" href="index.html">Старт</a>
+<a class="nav-link" href="concepts.html">Что это такое</a>
+<a class="nav-link" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link" href="auth.html">Авторизация</a>
+<a class="nav-link" href="oauth.html">OAuth пошагово</a>
+<a class="nav-link" href="connections.html">Способы подключения</a>
+<a class="nav-link" href="tunnels.html">Туннели и URL</a>
+<details class="nav-group" open>
+  <summary class="nav-link nav-summary active">Tunnellio</summary>
+  <div class="nav-submenu">
+    <a class="nav-sublink" href="tunnellio.html">Обзор страницы</a>
+    <a class="nav-sublink" href="tunnellio.html#overview">Что это</a>
+    <a class="nav-sublink" href="tunnellio.html#addresses">Адреса сервиса</a>
+    <a class="nav-sublink" href="tunnellio.html#auth-layers">Токены и OAuth</a>
+    <a class="nav-sublink" href="tunnellio.html#cabinet">Кабинет</a>
+    <a class="nav-sublink" href="tunnellio.html#connection">Постоянное подключение</a>
+    <a class="nav-sublink" href="tunnellio.html#oauth">OAuth Tunnellio</a>
+    <a class="nav-sublink" href="tunnellio.html#api">API</a>
+    <a class="nav-sublink" href="tunnellio.html#client">CLI-клиент</a>
+    <a class="nav-sublink" href="tunnellio.html#recipes">Рецепты</a>
+    <a class="nav-sublink" href="tunnellio.html#troubleshooting">Ошибки</a>
+  </div>
+</details>
+<a class="nav-link" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link" href="notion.html">Подключение клиента</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
+<a class="nav-link" href="profiles.html">Профили</a>
+<a class="nav-link" href="operations.html">Эксплуатация</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link" href="reference.html">Шпаргалки</a>
+</nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
 
-  <nav class="side-nav">
-    <a href="index.html">Главная</a>
-    <a href="quickstart.html">Быстрый старт</a>
-    <a href="connections.html">Способы подключения</a>
-    <a href="tunnels.html">Туннели</a>
-    <a href="tunnellio.html" class="active">Tunnellio</a>
-    <a href="auth.html">Авторизация</a>
-    <a href="oauth.html">OAuth</a>
-    <a href="notion.html">Notion / MCP-клиент</a>
-    <a href="plugins.html">Плагины</a>
-    <a href="troubleshooting.html">Проблемы</a>
-    <a href="reference.html">Справочник</a>
-  </nav>
+<h1 id="overview">Tunnellio: постоянный публичный доступ</h1>
+<p class="lead">Tunnellio — управляемый сервис публикации локального MCP-сервера в интернет. Для пользователя это кабинет, API, постоянный публичный адрес вида <code>https://имя.tunnellio.site</code>, CLI-клиент и отдельный OAuth-контур на стороне Tunnellio.</p>
 
-  <main class="content">
-    <section class="card">
-      <h2>Коротко: что такое Tunnellio</h2>
-      <p><strong>Tunnellio</strong> публикует локальный MCP/web-сервер в интернет через ваш VPS и ваши домены. В отличие от временного туннеля, Tunnellio даёт управляемый контур:</p>
-      <ul>
-        <li><strong>сервер</strong> <code>LEADBERG-studio/tunnellio</code>: web-кабинет, API, OAuth, SSH reverse tunnel, домены, ключи, сессии;</li>
-        <li><strong>клиент</strong> <code>LEADBERG-studio/tunnellio-api-client</code>: CLI/бинарник, который ходит в API, строит launch spec, запускает SSH, следит за туннелем и сохраняет runtime snapshot;</li>
-        <li><strong>постоянный URL</strong>: например <code>https://mcp.tunnel.example.net/mcp</code>, который можно вписать в Notion/MCP-клиент;</li>
-        <li><strong>server-side OAuth</strong>: OAuth-контур на стороне Tunnellio для proxy/MCP-доступа, discovery endpoints, refresh tokens и introspection.</li>
-      </ul>
-      <p>Local MCP Easy при этом остаётся локальным MCP-сервером на вашей машине. Tunnellio - внешний слой публикации и управления доступом.</p>
-    </section>
+<div class="callout warn">
+  <strong>Важно:</strong> эта страница описывает пользовательскую настройку и клиентское использование Tunnellio. Внутренние детали реализации сервиса здесь намеренно не публикуются.
+</div>
 
-    <section class="card">
-      <h2>Три разных токена и два OAuth-контура</h2>
-      <p>Новичкам легко запутаться, потому что здесь несколько уровней авторизации. Их важно не смешивать.</p>
-      <table>
-        <thead><tr><th>Что</th><th>Где живёт</th><th>Для чего нужно</th></tr></thead>
-        <tbody>
-          <tr>
-            <td><code>Authorization=Bearer &lt;token&gt; (Bearer token)</code> Local MCP Easy</td>
-            <td><code>config.json</code> Local MCP Easy</td>
-            <td>Прямой bearer-доступ к вашему локальному MCP endpoint, если клиент работает в legacy/dual режиме.</td>
-          </tr>
-          <tr>
-            <td>OAuth Local MCP Easy</td>
-            <td>Local MCP Easy: <code>OAUTH_SETUP.bat</code>, <code>REGISTER_OAUTH_CLIENT.bat</code>, <code>oauth_state.json</code></td>
-            <td>OAuth 2.1 непосредственно на MCP-сервере Local MCP Easy.</td>
-          </tr>
-          <tr>
-            <td>Tunnellio API token</td>
-            <td>Web-кабинет Tunnellio / API tokens</td>
-            <td>Клиент <code>tunnellio.exe</code> использует его как <code>Authorization: Bearer ...</code> для POST-only API.</td>
-          </tr>
-          <tr>
-            <td>Tunnellio server-side OAuth</td>
-            <td>Сервер Tunnellio: OAuth apps, redirect URI, scopes, client secret</td>
-            <td>OAuth-контур на уровне proxy/cloud-публикации: <code>proxy.connect</code>, <code>proxy.inspect</code>, <code>mcp.read</code>, <code>mcp.write</code>, <code>mcp.admin</code>.</td>
-          </tr>
-        </tbody>
-      </table>
-      <p><strong>Практическое правило:</strong> сначала решите, кто должен проверять пользователя: сам Local MCP Easy или Tunnellio перед ним. Для постоянного облачного URL обычно полезен Tunnellio-контур, а Local MCP Easy можно оставить в совместимом legacy/dual режиме.</p>
-    </section>
+<section class="card" id="addresses">
+  <h2>Адреса сервиса</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Что</th><th>Адрес</th><th>Для чего</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Кабинет Tunnellio</td>
+          <td><a href="https://console.tunnellio.ru">https://console.tunnellio.ru</a></td>
+          <td>Вход, управление подключениями, токенами, доменами, OAuth-приложениями и параметрами доступа.</td>
+        </tr>
+        <tr>
+          <td>API-документация</td>
+          <td><a href="https://api.tunnellio.ru/docs">https://api.tunnellio.ru/docs</a></td>
+          <td>Официальная справка по API Tunnellio.</td>
+        </tr>
+        <tr>
+          <td>Публичные адреса туннелей</td>
+          <td><code>https://*.tunnellio.site</code></td>
+          <td>Итоговый HTTPS-адрес вашего опубликованного Local MCP Easy.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 
-    <section class="card">
-      <h2>Сервер Tunnellio: что нужно поднять</h2>
-      <p>Серверный репозиторий: <a href="https://github.com/LEADBERG-studio/tunnellio">github.com/LEADBERG-studio/tunnellio</a>.</p>
-      <h3>Компоненты</h3>
-      <ul>
-        <li><strong>sish</strong> - SSH-сервер для reverse tunnel;</li>
-        <li><strong>Caddy</strong> - TLS и маршрутизация HTTPS;</li>
-        <li><strong>Flask</strong> - web-кабинет и API;</li>
-        <li><strong>SQLite</strong> - резервации, SSH-ключи, OAuth apps, redirect URI, scopes, client secret;</li>
-        <li><strong>Docker Compose</strong> - запуск стека.</li>
-      </ul>
-      <h3>Домены</h3>
-      <ul>
-        <li><code>SITE_DOMAIN</code> - web-кабинет, например <code>hub.example.com</code>;</li>
-        <li><code>API_DOMAIN</code> - HTTP API, например <code>api.example.com</code>;</li>
-        <li><code>TUNNEL_DOMAIN</code> - домен туннелей, например <code>tunnel.example.net</code>;</li>
-        <li><code>*.TUNNEL_DOMAIN</code> - wildcard-запись для публичных поддоменов.</li>
-      </ul>
-      <p>Текущий серверный контур рассчитан на Cloudflare DNS, чтобы Caddy мог выпускать сертификаты через DNS challenge.</p>
-      <h3>Bootstrap</h3>
-      <p>На VPS выполняется bootstrap-команда из README Tunnellio. В ней вы передаёте домены, Cloudflare token, admin password и target dir. Важная гарантия: при штатном update/reinstall каталог <code>/opt/tunnellio/data</code> сохраняется. В нём лежат резервации, ключи, OAuth apps, redirect URI, scopes и client secret.</p>
-      <pre><code>bash bootstrap.sh \
-  --site-domain hub.example.com \
-  --api-domain api.example.com \
-  --tunnel-domain tunnel.example.net \
-  --acme-email ops@example.com \
-  --cloudflare-token YOUR_CLOUDFLARE_API_TOKEN \
-  --admin-password "длинный-пароль" \
-  --target-dir /opt/tunnellio</code></pre>
-    </section>
+<section class="card" id="auth-layers">
+  <h2>Не путайте четыре уровня доступа</h2>
+  <p>В связке Local MCP Easy + Tunnellio есть несколько разных сущностей. Они похожи по названию, но используются в разных местах.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Уровень</th><th>Где используется</th><th>Что вводить пользователю</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Bearer token Local MCP Easy</td>
+          <td>Когда MCP-клиент подключается к Local MCP Easy в legacy/dual режиме.</td>
+          <td>Строку из запуска сервера: <code>Authorization=Bearer &lt;token&gt; (Bearer token)</code>.</td>
+        </tr>
+        <tr>
+          <td>OAuth Local MCP Easy</td>
+          <td>Если сам Local MCP Easy выступает OAuth-сервером для MCP-клиента.</td>
+          <td>Данные, которые выдаются через <code>OAUTH_SETUP.bat</code> и <code>REGISTER_OAUTH_CLIENT.bat</code>.</td>
+        </tr>
+        <tr>
+          <td>Tunnellio API token</td>
+          <td>Для CLI-клиента и автоматизации, которые обращаются к API Tunnellio.</td>
+          <td>Токен из кабинета Tunnellio. В API он передаётся как <code>Authorization: Bearer &lt;Tunnellio API token&gt;</code>.</td>
+        </tr>
+        <tr>
+          <td>Tunnellio OAuth</td>
+          <td>Когда доступ к опубликованному адресу защищается OAuth-контуром Tunnellio.</td>
+          <td>OAuth-приложение, redirect URI, scopes и client credentials из кабинета Tunnellio.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 
-    <section class="card">
-      <h2>Что сделать в web-кабинете Tunnellio</h2>
-      <ol>
-        <li>Откройте <code>https://SITE_DOMAIN</code> и войдите с admin password.</li>
-        <li>Создайте или проверьте <strong>API token</strong> для CLI/интеграций.</li>
-        <li>Добавьте SSH public key машины, где запускается Local MCP Easy.</li>
-        <li>Создайте постоянный домен, например <code>mcp</code>, чтобы получить <code>https://mcp.TUNNEL_DOMAIN</code>.</li>
-        <li>Укажите локальную цель: обычно <code>127.0.0.1</code> и порт, на котором слушает Local MCP Easy.</li>
-        <li>Если нужен OAuth на стороне Tunnellio, поставьте <code>authMode=oauth</code> и включите требование стабильного URL (<code>stableUrlRequired</code>).</li>
-        <li>Создайте OAuth app: redirect URI, scopes, client_id, при необходимости client_secret для confidential client.</li>
-      </ol>
-      <p>Для OAuth-домена постоянный URL принципиален: OAuth redirect URI и issuer/discovery должны быть стабильными.</p>
-    </section>
+<section class="card" id="cabinet">
+  <h2>Что настроить в кабинете Tunnellio</h2>
+  <p>Откройте <a href="https://console.tunnellio.ru">https://console.tunnellio.ru</a>. В интерфейсе вам нужны не технические детали сервиса, а прикладные настройки вашего подключения.</p>
+  <ol class="steps">
+    <li>
+      <h3>Создайте или выберите подключение</h3>
+      <p>Подключение — это связка локального сервера, публичного адреса и правил доступа. Для Local MCP Easy обычно нужен постоянный адрес.</p>
+    </li>
+    <li>
+      <h3>Выберите имя публичного адреса</h3>
+      <p>Итоговый URL будет в зоне <code>https://*.tunnellio.site</code>, например <code>https://my-mcp.tunnellio.site</code>. В документации не используйте временные example-домены — ориентируйтесь на реальную зону сервиса.</p>
+    </li>
+    <li>
+      <h3>Укажите локальную цель</h3>
+      <p>Это адрес, куда Tunnellio-клиент будет отправлять входящий трафик на вашей машине. Для Local MCP Easy это обычно <code>127.0.0.1</code> и порт, показанный при запуске сервера.</p>
+    </li>
+    <li>
+      <h3>Выберите режим авторизации</h3>
+      <p>Если доступ должен проверять Tunnellio, выберите OAuth на стороне Tunnellio. Если клиент работает напрямую с Local MCP Easy bearer/OAuth, оставьте соответствующий режим Local MCP Easy и не смешивайте токены.</p>
+    </li>
+    <li>
+      <h3>Сохраните значения для клиента</h3>
+      <p>Вам понадобятся: публичный URL, Tunnellio API token для CLI, а при OAuth — client id, redirect URI, scopes и, если применимо, client secret.</p>
+    </li>
+  </ol>
+</section>
 
-    <section class="card">
-      <h2>Tunnellio OAuth: endpoints и scopes</h2>
-      <p>Tunnellio публикует OAuth metadata и protected-resource metadata. Клиент может загружать их автоматически.</p>
-      <table>
-        <thead><tr><th>Endpoint</th><th>Назначение</th></tr></thead>
-        <tbody>
-          <tr><td><code>GET /.well-known/oauth-authorization-server</code></td><td>OAuth discovery metadata.</td></tr>
-          <tr><td><code>GET /.well-known/oauth-protected-resource</code></td><td>Metadata защищённого ресурса.</td></tr>
-          <tr><td><code>POST /oauth/authorize</code></td><td>Authorization Code flow.</td></tr>
-          <tr><td><code>POST /oauth/token</code></td><td>Получение/refresh token.</td></tr>
-          <tr><td><code>POST /oauth/introspect</code></td><td>Проверка access token.</td></tr>
-          <tr><td><code>POST /oauth/clients/register</code></td><td>Dynamic client registration, если включён на сервере.</td></tr>
-        </tbody>
-      </table>
-      <p>Поддерживаются grant types <code>authorization_code</code> и <code>refresh_token</code>, PKCE <code>S256</code>, token auth methods <code>none</code> и <code>client_secret_post</code>.</p>
-      <p>Основные scopes: <code>mcp.read</code>, <code>mcp.write</code>, <code>mcp.admin</code>, <code>proxy.connect</code>, <code>proxy.inspect</code>.</p>
-      <p>Это отдельный контур от OAuth Local MCP Easy. Его настраивают на сервере Tunnellio в OAuth apps.</p>
-    </section>
+<section class="card" id="connection">
+  <h2>Постоянное подключение Local MCP Easy через Tunnellio</h2>
+  <ol class="steps">
+    <li>
+      <h3>Запустите Local MCP Easy локально</h3>
+      <p>Запустите <code>START.bat</code> и дождитесь строки с локальным адресом и авторизацией. Если клиент просит bearer header, используйте формат <code>Authorization=Bearer &lt;token&gt; (Bearer token)</code>.</p>
+    </li>
+    <li>
+      <h3>Подготовьте подключение в Tunnellio</h3>
+      <p>В кабинете <a href="https://console.tunnellio.ru">https://console.tunnellio.ru</a> создайте постоянное подключение в зоне <code>https://*.tunnellio.site</code> и укажите локальный порт Local MCP Easy.</p>
+    </li>
+    <li>
+      <h3>Запустите Tunnellio CLI</h3>
+      <pre><code>tunnellio connect --run --watch --name notion-mcp</code></pre>
+      <p>Ключ <code>--watch</code> нужен, чтобы клиент следил за процессом и поднимал соединение повторно при сбоях.</p>
+    </li>
+    <li>
+      <h3>Получите итоговые параметры</h3>
+      <pre><code>tunnellio show-config --name notion-mcp</code></pre>
+      <p>Используйте полученный публичный URL в MCP-клиенте. Для постоянных подключений это будет адрес в зоне <code>https://*.tunnellio.site</code>.</p>
+    </li>
+    <li>
+      <h3>Проверьте состояние</h3>
+      <pre><code>tunnellio status
+tunnellio status --name notion-mcp</code></pre>
+    </li>
+  </ol>
+</section>
 
-    <section class="card">
-      <h2>Tunnellio Integration API</h2>
-      <p>API работает через <code>Authorization: Bearer &lt;Tunnellio API token&gt;</code> и в основном использует POST-only endpoints.</p>
-      <h3>Meta</h3>
-      <ul>
-        <li><code>POST /v1/meta</code> - API metadata: домены, SSH host/port/user, install URLs, OAuth metadata.</li>
-        <li><code>POST /v1/capabilities</code> - лимиты и feature flags для ключей, доменов и ephemeral-сессий.</li>
-        <li><code>GET /healthz</code>, <code>GET /readyz</code> - liveness/readiness.</li>
-      </ul>
-      <h3>Keys</h3>
-      <ul>
-        <li><code>POST /v1/keys</code>, <code>/list</code>, <code>/get</code>, <code>/update</code>, <code>/delete</code> - управление SSH public keys.</li>
-      </ul>
-      <h3>Domains</h3>
-      <ul>
-        <li><code>POST /v1/domains</code> - создать постоянный домен;</li>
-        <li><code>POST /v1/domains/list</code>, <code>/check</code>, <code>/get</code>, <code>/update</code>, <code>/delete</code> - управление доменами;</li>
-        <li><code>POST /v1/domains/connection-profile</code> - получить готовый SSH connection profile для домена.</li>
-      </ul>
-      <h3>Sessions</h3>
-      <ul>
-        <li><code>POST /v1/sessions/ephemeral</code> - временный случайный домен;</li>
-        <li><code>POST /v1/sessions/open</code> - открыть session protocol v1;</li>
-        <li><code>POST /v1/sessions/heartbeat</code> - heartbeat активной сессии;</li>
-        <li><code>POST /v1/sessions/resume</code> - resume ранее открытой сессии;</li>
-        <li><code>POST /v1/sessions/close</code> - закрыть сессию;</li>
-        <li><code>POST /v1/sessions/status</code> - статус;</li>
-        <li><code>POST /v1/sessions/complete</code> - graceful completion ephemeral-сессии.</li>
-      </ul>
-      <h3>Launch spec</h3>
-      <p><code>POST /v1/launch-spec</code> - orchestration endpoint. Он позволяет за один запрос использовать существующий домен/ключ или создать недостающие ресурсы и получить готовые параметры запуска.</p>
-    </section>
+<section class="card" id="oauth">
+  <h2>OAuth на стороне Tunnellio</h2>
+  <p>Tunnellio может быть отдельным OAuth-слоем перед опубликованным MCP endpoint. Это удобно, когда нужен постоянный публичный URL и централизованное управление доступом в кабинете.</p>
+  <h3>Что подготовить</h3>
+  <ul class="checklist">
+    <li>Публичный адрес в зоне <code>https://*.tunnellio.site</code>.</li>
+    <li>OAuth-приложение в кабинете Tunnellio.</li>
+    <li>Redirect URI, который ожидает ваш клиент.</li>
+    <li>Нужные scopes, например <code>proxy.connect</code>, <code>proxy.inspect</code>, <code>mcp.read</code>, <code>mcp.write</code>.</li>
+    <li>Client id и, если выбран confidential client, client secret.</li>
+  </ul>
+  <h3>Discovery и metadata</h3>
+  <p>Если клиент умеет OAuth discovery, используйте metadata Tunnellio. Точные URL и параметры смотрите в API-документации: <a href="https://api.tunnellio.ru/docs">https://api.tunnellio.ru/docs</a>.</p>
+  <pre><code>/.well-known/oauth-authorization-server
+/.well-known/oauth-protected-resource</code></pre>
+  <h3>CLI-команды</h3>
+  <pre><code>tunnellio oauth-login --token-name notion-mcp --use-discovery --enable-pkce
+tunnellio oauth-refresh --token-name notion-mcp
+tunnellio oauth-introspect --token-name notion-mcp</code></pre>
+  <div class="callout info">
+    <strong>Подсказка:</strong> OAuth Tunnellio и OAuth Local MCP Easy — разные контуры. Если сомневаетесь, выберите один главный слой авторизации и не включайте два OAuth одновременно без необходимости.
+  </div>
+</section>
 
-    <section class="card">
-      <h2>Tunnellio API client: что умеет</h2>
-      <p>Клиентский репозиторий: <a href="https://github.com/LEADBERG-studio/tunnellio-api-client">github.com/LEADBERG-studio/tunnellio-api-client</a>.</p>
-      <p>Клиент - это CLI/helper поверх Tunnellio API и системного OpenSSH. Он нужен, чтобы приложение не собирало SSH-команду вручную.</p>
-      <ul>
-        <li>Bearer auth к POST-only API;</li>
-        <li>orchestration через <code>POST /v1/launch-spec</code>;</li>
-        <li>запуск SSH через <code>connect --run</code>;</li>
-        <li>supervised mode через <code>connect --run --watch</code>;</li>
-        <li>session-aware lifecycle: <code>open -> heartbeat -> resume -> close</code>;</li>
-        <li>получение runtime config / connection params через <code>show-config --name</code>;</li>
-        <li>OAuth discovery, protected-resource metadata, Authorization Code + PKCE flow;</li>
-        <li>команды <code>oauth-login</code>, <code>oauth-refresh</code>, <code>oauth-introspect</code>;</li>
-        <li>локальное хранение token record: <code>accessToken</code>, <code>refreshToken</code>, scopes, issuer, endpoints, привязка к client/domain.</li>
-      </ul>
-      <h3>Пример постоянного туннеля</h3>
-      <pre><code>.\tunnellio.exe --token YOUR_TOKEN connect ^
-  --domain existing:mcp ^
-  --local-port 3000 ^
-  --run ^
-  --watch ^
-  --name notion-mcp ^
-  --health-path / ^
-  --log-file .\logs\tunnel.log</code></pre>
-      <p>После запуска можно получить итоговые параметры:</p>
-      <pre><code>.\tunnellio.exe show-config --name notion-mcp</code></pre>
-      <p>Это особенно важно для random/ephemeral-доменов: приложение не угадывает итоговый hostname, а читает его после запуска.</p>
-      <h3>Управление</h3>
-      <pre><code>.\tunnellio.exe status
-.\tunnellio.exe status --name notion-mcp
-.\tunnellio.exe stop --name notion-mcp
-.\tunnellio.exe stop --all</code></pre>
-      <h3>OAuth-команды клиента</h3>
-      <pre><code>.\tunnellio.exe --token YOUR_TOKEN oauth-login ^
-  --domain existing:mcp ^
-  --client-id YOUR_CLIENT_ID ^
-  --redirect-uri http://localhost:3333/callback ^
-  --scopes "proxy.connect proxy.inspect" ^
-  --token-name notion-mcp ^
-  --use-discovery ^
-  --enable-pkce
+<section class="card" id="api">
+  <h2>API Tunnellio</h2>
+  <p>Для автоматизации используйте официальную API-документацию: <a href="https://api.tunnellio.ru/docs">https://api.tunnellio.ru/docs</a>.</p>
+  <p>Авторизация API:</p>
+  <pre><code>Authorization: Bearer &lt;Tunnellio API token&gt;</code></pre>
+  <p>На уровне пользователя обычно нужны группы операций:</p>
+  <ul>
+    <li><strong>metadata</strong> — узнать параметры сервиса и доступные возможности;</li>
+    <li><strong>keys / credentials</strong> — подготовить клиентский доступ;</li>
+    <li><strong>domains / public URLs</strong> — управлять постоянными адресами в зоне <code>https://*.tunnellio.site</code>;</li>
+    <li><strong>launch / connection profile</strong> — получить параметры запуска клиента;</li>
+    <li><strong>sessions</strong> — отслеживать активное подключение, heartbeat, resume и закрытие.</li>
+  </ul>
+  <p>Не копируйте API token в публичные issue, README, скриншоты или PromptQL-артефакты.</p>
+</section>
 
-.\tunnellio.exe --token YOUR_TOKEN oauth-refresh --token-name notion-mcp
-.\tunnellio.exe --token YOUR_TOKEN oauth-introspect --token-name notion-mcp</code></pre>
-    </section>
+<section class="card" id="client">
+  <h2>Tunnellio CLI-клиент</h2>
+  <p>CLI-клиент нужен, чтобы не собирать параметры подключения вручную. Он получает настройки из Tunnellio, запускает соединение, следит за ним и сохраняет runtime snapshot.</p>
+  <h3>Основные команды</h3>
+  <pre><code>tunnellio connect --run --watch --name notion-mcp
+tunnellio show-config --name notion-mcp
+tunnellio status
+tunnellio status --name notion-mcp
+tunnellio stop --name notion-mcp
+tunnellio stop --all</code></pre>
+  <h3>Что хранить у себя</h3>
+  <ul>
+    <li>имя подключения, например <code>notion-mcp</code>;</li>
+    <li>публичный URL в зоне <code>https://*.tunnellio.site</code>;</li>
+    <li>локальный порт Local MCP Easy;</li>
+    <li>Tunnellio API token — только в защищённом локальном хранилище;</li>
+    <li>OAuth token record, если используется OAuth Tunnellio.</li>
+  </ul>
+</section>
 
-    <section class="card">
-      <h2>Сценарий: Local MCP Easy через Tunnellio с постоянным URL</h2>
-      <ol>
-        <li>Запустите Local MCP Easy локально и убедитесь, что он слушает <code>127.0.0.1:&lt;PORT&gt;</code>.</li>
-        <li>На сервере Tunnellio создайте постоянный домен, например <code>mcp</code>.</li>
-        <li>Привяжите к домену SSH key вашей машины.</li>
-        <li>Если нужен OAuth на стороне Tunnellio, включите <code>authMode=oauth</code> и <code>stableUrlRequired</code>, затем создайте OAuth app.</li>
-        <li>На машине с Local MCP Easy запустите <code>tunnellio.exe connect --run --watch --name notion-mcp</code>.</li>
-        <li>Проверьте <code>tunnellio.exe show-config --name notion-mcp</code> и найдите публичный URL.</li>
-        <li>В MCP-клиенте используйте <code>https://mcp.TUNNEL_DOMAIN/mcp</code> или URL из show-config.</li>
-        <li>Если клиент просит bearer header Local MCP Easy, используйте строку из запуска сервера: <code>Authorization=Bearer &lt;token&gt; (Bearer token)</code>.</li>
-        <li>Если клиент работает через Tunnellio OAuth, используйте Tunnellio discovery URL и OAuth app credentials.</li>
-      </ol>
-    </section>
+<section class="card" id="recipes">
+  <h2>Рецепты</h2>
+  <h3>Хочу просто постоянный MCP URL</h3>
+  <ol>
+    <li>Запустите Local MCP Easy через <code>START.bat</code>.</li>
+    <li>Создайте подключение в <a href="https://console.tunnellio.ru">console.tunnellio.ru</a>.</li>
+    <li>Запустите <code>tunnellio connect --run --watch --name notion-mcp</code>.</li>
+    <li>Возьмите URL через <code>tunnellio show-config --name notion-mcp</code>.</li>
+    <li>Вставьте URL в MCP-клиент.</li>
+  </ol>
+  <h3>Хочу OAuth на уровне Tunnellio</h3>
+  <ol>
+    <li>Создайте постоянный публичный адрес в зоне <code>https://*.tunnellio.site</code>.</li>
+    <li>В кабинете создайте OAuth-приложение и укажите redirect URI клиента.</li>
+    <li>Выберите scopes.</li>
+    <li>Настройте клиент на discovery/metadata Tunnellio.</li>
+    <li>Проверьте login, refresh и introspect через CLI или клиент.</li>
+  </ol>
+</section>
 
-    <section class="card">
-      <h2>Что где менять: шпаргалка</h2>
-      <table>
-        <thead><tr><th>Место</th><th>Что настраивается</th></tr></thead>
-        <tbody>
-          <tr><td>DNS / Cloudflare</td><td><code>SITE_DOMAIN</code>, <code>API_DOMAIN</code>, <code>TUNNEL_DOMAIN</code>, wildcard <code>*.TUNNEL_DOMAIN</code>.</td></tr>
-          <tr><td>VPS / bootstrap Tunnellio</td><td>Домены, Cloudflare token, admin password, target dir, сохранение <code>/opt/tunnellio/data</code>.</td></tr>
-          <tr><td>Web-кабинет Tunnellio</td><td>API tokens, SSH keys, persistent domains, OAuth apps, redirect URI, scopes.</td></tr>
-          <tr><td>Tunnellio API client</td><td><code>--token</code>, <code>--base-url</code>, <code>--domain</code>, <code>--local-port</code>, <code>--name</code>, <code>--watch</code>, OAuth token name.</td></tr>
-          <tr><td>Local MCP Easy</td><td>Локальный порт, auth mode <code>legacy/oauth/dual</code>, Local MCP bearer/OAuth.</td></tr>
-          <tr><td>Notion/MCP-клиент</td><td>Публичный MCP URL, bearer header или OAuth discovery/client credentials.</td></tr>
-        </tbody>
-      </table>
-    </section>
+<section class="card" id="troubleshooting">
+  <h2>Типичные ошибки</h2>
+  <ul>
+    <li><strong>Клиент просит bearer, а вы вводите Tunnellio API token.</strong> Это разные токены. Bearer Local MCP Easy берите из окна запуска сервера.</li>
+    <li><strong>OAuth redirect URI не совпадает.</strong> В кабинете Tunnellio должен быть ровно тот redirect URI, который использует клиент.</li>
+    <li><strong>Неясно, какой URL вставлять в MCP-клиент.</strong> Используйте результат <code>tunnellio show-config --name ...</code>, а не придумывайте адрес вручную.</li>
+    <li><strong>После перезапуска клиент не подключается.</strong> Проверьте <code>tunnellio status --name ...</code>, затем перезапустите supervised connection.</li>
+    <li><strong>Два OAuth-контура одновременно.</strong> Для начала выберите один: OAuth Tunnellio или OAuth Local MCP Easy.</li>
+  </ul>
+</section>
 
-    <section class="card">
-      <h2>Типичные ошибки</h2>
-      <ul>
-        <li><strong>OAuth не работает на случайном URL.</strong> Для OAuth нужен стабильный public URL и корректный redirect URI.</li>
-        <li><strong>Путаются API token и MCP bearer token.</strong> Tunnellio API token нужен CLI/серверному API; Local MCP bearer token нужен MCP-клиенту, если он идёт напрямую в MCP endpoint.</li>
-        <li><strong>Туннель поднялся, но клиент не знает URL.</strong> Используйте <code>show-config --name</code>, особенно для random/ephemeral-доменов.</li>
-        <li><strong>После reconnect меняется состояние.</strong> Для постоянного режима используйте persistent domain, session lifecycle и supervised <code>--watch</code>.</li>
-        <li><strong>Удалили <code>/opt/tunnellio/data</code>.</strong> Это потеря резерваций, ключей, OAuth apps и secrets. Обновляйте через штатный reinstall/update-flow.</li>
-      </ul>
-    </section>
-  </main>
-
-  <script src="assets/site.js"></script>
+      <footer class="page-footer">
+        <p>Если меняете публичный URL, auth mode или OAuth-настройки, после этого перезапустите сервер и заново проверьте подключение клиента.</p>
+      </footer>
+    </main>
+  </div>
 </body>
 </html>

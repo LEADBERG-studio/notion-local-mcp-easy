@@ -19,4 +19,4 @@ docs/ru/index.html
 - `plugins.html` — подключение и устройство плагинов.
 - `troubleshooting.html` — диагностика частых ошибок.
 
-- `tunnellio.html` - Tunnellio server/API/client, server-side OAuth, persistent domains and supervised tunnels.
+- `tunnellio.html` — пользовательская настройка Tunnellio: кабинет, публичный URL, API docs, CLI, OAuth и типовые сценарии.

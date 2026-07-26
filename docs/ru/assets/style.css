@@ -184,3 +184,30 @@ th { text-align: left; background: #f8fafc; }
   .grid, .grid.three { grid-template-columns: 1fr; }
   .hero { padding: 24px; }
 }
+
+.nav-main { display: block; }
+.nav-group { margin: 2px 0; }
+.nav-summary { cursor: pointer; list-style: none; }
+.nav-summary::-webkit-details-marker { display: none; }
+.nav-summary::after {
+  content: "▸";
+  float: right;
+  transition: transform .15s ease;
+}
+.nav-group[open] > .nav-summary::after { transform: rotate(90deg); }
+.nav-submenu {
+  margin: 2px 0 8px 12px;
+  padding-left: 10px;
+  border-left: 2px solid #e5e7eb;
+}
+.nav-sublink {
+  display: block;
+  padding: 7px 10px;
+  margin: 1px 0;
+  color: #475467;
+  text-decoration: none;
+  border-radius: 9px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.nav-sublink:hover { color: var(--accent); background: #eff6ff; }
