@@ -1328,7 +1328,7 @@ class LauncherTests(unittest.TestCase):
 
             connection_file.write_text(
 
-                "Bearer token: super-secret-token\nOAuth owner code: owner-secret-code\n",
+                "Authorization=Bearer super-secret-token (Bearer token)\nOAuth owner code: owner-secret-code\n",
 
                 encoding="utf-8",
 

@@ -51,7 +51,7 @@
   <li><strong>Выберите tunnel mode</strong><br>Если есть <code>tunnellio.exe</code>, обычно выбирайте Tunnellio. Если нет — Serveo temporary для пробы.</li>
   <li><strong>Оставьте trusted developer mode выключенным</strong><br>Пока вам нужны только файлы — отвечайте <code>n</code>.</li>
   <li><strong>Скопируйте параметры подключения</strong><br>Launcher покажет URL и токен либо OAuth endpoints. Также можно открыть <code>SHOW_CONNECTION.bat</code>.</li>
-  <li><strong>Добавьте Custom MCP в клиенте</strong><br>Для legacy/Bearer укажите URL <code>https://.../mcp</code> и Bearer token. Для OAuth используйте OAuth flow клиента.</li>
+  <li><strong>Добавьте Custom MCP в клиенте</strong><br>Для legacy/Bearer укажите URL <code>https://.../mcp</code> и Authorization=Bearer &lt;token&gt; (Bearer token). Для OAuth используйте OAuth flow клиента.</li>
 </ol>
 
 <div class="callout info">
@@ -65,7 +65,7 @@
 <ul class="checklist">
   <li>Открыли <code>SHOW_CONNECTION.bat</code> и видите public URL.</li>
   <li>В клиенте URL заканчивается на <code>/mcp</code>.</li>
-  <li>Для Bearer token включён auth mode <code>legacy</code> или <code>dual</code>.</li>
+  <li>Для Authorization=Bearer &lt;token&gt; (Bearer token) включён auth mode <code>legacy</code> или <code>dual</code>.</li>
   <li>Для OAuth включён auth mode <code>oauth</code> или <code>dual</code>.</li>
 </ul>
       <footer class="page-footer">

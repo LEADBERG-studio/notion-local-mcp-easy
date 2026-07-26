@@ -48,7 +48,7 @@
   <li>Убедитесь, что auth mode: <code>legacy</code> или <code>dual</code>.</li>
   <li>Запустите <code>SHOW_CONNECTION.bat</code>.</li>
   <li>Скопируйте MCP URL вида <code>https://.../mcp</code>.</li>
-  <li>Скопируйте Bearer token.</li>
+  <li>Скопируйте Authorization=Bearer &lt;token&gt; (Bearer token).</li>
   <li>В Custom MCP клиента вставьте URL и token.</li>
 </ol>
 
@@ -64,7 +64,7 @@
 <h2>Что копировать из SHOW_CONNECTION</h2>
 <table><thead><tr><th>Поле</th><th>Куда вставлять</th></tr></thead><tbody>
 <tr><td>Public MCP URL</td><td>Endpoint MCP-клиента.</td></tr>
-<tr><td>Bearer token</td><td>Token/password field для legacy auth.</td></tr>
+<tr><td>Authorization=Bearer &lt;token&gt; (Bearer token)</td><td>Token/password field для legacy auth.</td></tr>
 <tr><td>OAuth discovery endpoints</td><td>В OAuth/manual setup клиента.</td></tr>
 <tr><td>Owner code</td><td>Только если клиент/setup явно просит подтвердить ownership.</td></tr>
 </tbody></table>

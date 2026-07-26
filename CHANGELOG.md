@@ -1,3 +1,9 @@
+## 1.7.2 - 2026-07-26
+
+- Changed launcher connection output from `Bearer token: <token>` to `Authorization=Bearer <token> (Bearer token)` so users see the exact copy-ready authorization form.
+- Published the post-1.7.1 cloud/release state with GitHub Actions CI and the Russian beginner documentation site included.
+- Bumped canonical version metadata to `1.7.2` and rebuilt the release package after compile, targeted, full unittest, diff hygiene, and source-marker checks.
+
 ## 1.7.1 - 2026-07-26
 
 - Hardened workspace write/copy/move/delete paths, git command policy, child-process environment handling, temporary-file cleanup, newline-preserving edits, and bounded process capture.

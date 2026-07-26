@@ -43,12 +43,12 @@
     <main class="content">
       <h1>Авторизация: какой режим выбрать</h1>
 <table><thead><tr><th>Режим</th><th>Что значит</th><th>Когда выбирать</th></tr></thead><tbody>
-<tr><td><code>legacy</code></td><td>Один статический Bearer token</td><td>Notion Custom MCP или клиент, который просит просто URL + token.</td></tr>
+<tr><td><code>legacy</code></td><td>Один статический Authorization=Bearer &lt;token&gt; (Bearer token)</td><td>Notion Custom MCP или клиент, который просит просто URL + token.</td></tr>
 <tr><td><code>oauth</code></td><td>Только OAuth 2.1</td><td>Клиент умеет OAuth MCP flow и не принимает статический токен.</td></tr>
-<tr><td><code>dual</code></td><td>Bearer token и OAuth на одном <code>/mcp</code></td><td>Переходный период: часть клиентов старая, часть OAuth.</td></tr>
+<tr><td><code>dual</code></td><td>Authorization=Bearer &lt;token&gt; (Bearer token) и OAuth на одном <code>/mcp</code></td><td>Переходный период: часть клиентов старая, часть OAuth.</td></tr>
 </tbody></table>
 
-<h2>Bearer token простыми словами</h2>
+<h2>Authorization=Bearer &lt;token&gt; (Bearer token) простыми словами</h2>
 <p>Сервер генерирует секретный токен. Клиент отправляет заголовок:</p>
 <pre><code>Authorization: Bearer ВАШ_ТОКЕН</code></pre>
 <p>Это проще всего, но если клиент требует OAuth — этот режим не подойдёт.</p>

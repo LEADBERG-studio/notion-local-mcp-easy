@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.7.1
+# Notion Local MCP Easy 1.7.2
 
 
 
@@ -62,7 +62,7 @@ docs/ru/index.html
 
 
 
-6. Для bearer-only сценария используйте показанные `URL` и `Bearer token` в Custom MCP вашего Notion Agent. Для OAuth/dual сценария сначала выполните `OAUTH_SETUP.bat`, затем используйте публичный MCP URL, discovery endpoint и owner code, который показывает launcher.
+6. Для bearer-only сценария используйте показанные `URL` и `Authorization=Bearer <token> (Bearer token)` в Custom MCP вашего Notion Agent. Для OAuth/dual сценария сначала выполните `OAUTH_SETUP.bat`, затем используйте публичный MCP URL, discovery endpoint и owner code, который показывает launcher.
 
 
 

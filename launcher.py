@@ -64,7 +64,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "1.7.1"
+VERSION = "1.7.2"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -2334,7 +2334,7 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     CONNECTION_FILE.write_text(
         f"Notion Local MCP Easy {VERSION}\n"
         f"URL: {endpoint}\n"
-        f"Bearer token: {config['token']}\n"
+        f"Authorization=Bearer {config['token']} (Bearer token)\n"
         f"Workspace: {config['workspace']}\n"
         f"Mode: {mode}\n"
         f"Auth: {auth_mode}\n"
@@ -2347,7 +2347,7 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     print(f" Notion Local MCP Easy {VERSION} is running")
     print("=======================================================")
     print(f" URL: {endpoint}")
-    print(f" Bearer token: {config['token']}")
+    print(f" Authorization=Bearer {config['token']} (Bearer token)")
     print(f" Workspace: {config['workspace']}")
     print(f" Mode: {mode}")
     print(f" Auth: {auth_mode}")
