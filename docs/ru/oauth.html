@@ -104,7 +104,12 @@ Introspection endpoint:               https://mcp.example.com/oauth/introspect</
       <footer class="page-footer">
         <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
       </footer>
-    </main>
+
+    <section class="card">
+      <h2>Tunnellio server-side OAuth</h2>
+      <p>Помимо OAuth Local MCP Easy существует отдельный OAuth-контур на сервере Tunnellio. Он настраивается в web-кабинете Tunnellio через OAuth apps, redirect URI, scopes и client credentials. Discovery endpoints: <code>/.well-known/oauth-authorization-server</code> и <code>/.well-known/oauth-protected-resource</code>; основные endpoints: <code>/oauth/authorize</code>, <code>/oauth/token</code>, <code>/oauth/introspect</code>. Подробнее см. <a href="tunnellio.html">страницу Tunnellio</a>.</p>
+    </section>
+  </main>
   </div>
 </body>
 </html>

@@ -77,7 +77,12 @@ python -m unittest discover -s tests -v</code></pre>
       <footer class="page-footer">
         <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
       </footer>
-    </main>
+
+    <section class="card">
+      <h2>Tunnellio API endpoints</h2>
+      <p>Для интеграций Tunnellio предоставляет POST-only API: <code>/v1/meta</code>, <code>/v1/capabilities</code>, <code>/v1/keys*</code>, <code>/v1/domains*</code>, <code>/v1/domains/connection-profile</code>, <code>/v1/launch-spec</code>, <code>/v1/sessions/open</code>, <code>/v1/sessions/heartbeat</code>, <code>/v1/sessions/resume</code>, <code>/v1/sessions/close</code>, <code>/v1/sessions/status</code>. Авторизация API: <code>Authorization: Bearer &lt;Tunnellio API token&gt;</code>. Подробное объяснение - в <a href="tunnellio.html">Tunnellio</a>.</p>
+    </section>
+  </main>
   </div>
 </body>
 </html>

@@ -18,3 +18,5 @@ docs/ru/index.html
 - `reverse-proxy.html` — свой домен и reverse proxy.
 - `plugins.html` — подключение и устройство плагинов.
 - `troubleshooting.html` — диагностика частых ошибок.
+
+- `tunnellio.html` - Tunnellio server/API/client, server-side OAuth, persistent domains and supervised tunnels.

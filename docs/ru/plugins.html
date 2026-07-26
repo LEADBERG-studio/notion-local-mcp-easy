@@ -44,34 +44,34 @@
     <main class="content">
       <h1>Плагины</h1>
       <p>Плагины расширяют MCP-сервер прикладными инструментами. В текущей версии уже есть foundation для DB-family и AI/subagent-family плагинов.</p>
-      
+
       <div class="callout info">
         <strong>Главное правило:</strong> сам факт наличия папки в <code>plugins/</code> только делает плагин обнаруживаемым. Плагин не подключается автоматически: его нужно явно прикрепить к <code>current</code> или <code>global</code> scope и перезапустить MCP, чтобы пересобрался registry tools.
       </div>
-      
+
       <h2>Что уже есть в комплекте</h2>
       <table><thead><tr><th>Плагин</th><th>Папка</th><th>Tools</th><th>Для чего</th></tr></thead><tbody>
       <tr><td>SQLite</td><td><code>plugins/sqlite</code></td><td><code>sqlite_list_connections</code>, <code>sqlite_list_tables</code>, <code>sqlite_describe_table</code>, <code>sqlite_query</code>, <code>sqlite_execute</code></td><td>Локальная SQLite DB внутри workspace.</td></tr>
       <tr><td>PostgreSQL</td><td><code>plugins/postgres</code></td><td><code>postgres_list_connections</code>, <code>postgres_list_tables</code>, <code>postgres_describe_table</code>, <code>postgres_query</code>, <code>postgres_execute</code></td><td>Подключение к PostgreSQL через установленный <code>psql</code>.</td></tr>
       <tr><td>OpenAI-compatible provider</td><td><code>plugins/openai_compat</code></td><td><code>openai_compat_list_models</code>, <code>openai_compat_describe_provider</code>, <code>openai_compat_generate_text</code>, <code>openai_compat_run_subagent</code></td><td>AI provider или subagent через OpenAI-compatible chat completions API.</td></tr>
       </tbody></table>
-      
+
       <h2>Global или current scope</h2>
       <table><thead><tr><th>Scope</th><th>Что значит</th><th>Когда использовать</th></tr></thead><tbody>
       <tr><td><code>global</code></td><td>Плагин доступен во всех workflow profiles, если его не переопределили в current profile.</td><td>Общий AI provider или общая DB.</td></tr>
       <tr><td><code>current</code></td><td>Плагин привязан к текущему workspace/profile.</td><td>Проектная DB, проектный AI profile, локальный SQLite.</td></tr>
       </tbody></table>
-      
+
       <h2>Effective mode</h2>
       <ul>
         <li><code>read_only</code> — регистрируются только read-only tools.</li>
         <li><code>full_access</code> — регистрируются и mutating/subagent tools, но только если активный profile находится в trusted mode.</li>
       </ul>
-      
+
       <div class="callout warn">
         <strong>Важно:</strong> <code>full_access</code> невозможен вне trusted mode. Это сделано специально, чтобы плагин не мог обойти общий safety gate.
       </div>
-      
+
       <h2>Где хранится plugin state</h2>
       <pre><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code></pre>
       <p>Внутри файла есть два места:</p>
@@ -79,7 +79,7 @@
         <li><code>globalPlugins</code> — глобальные подключения;</li>
         <li><code>profiles[activeProfileId].plugins</code> — подключения текущей рабочей области.</li>
       </ul>
-      
+
       <h2>Как подключить плагин: общий порядок</h2>
       <ol class="steps">
         <li><strong>Выберите текущий workspace</strong><br>Запустите <code>START.bat</code> и выберите нужный slot/path, если меню включено.</li>
@@ -89,7 +89,7 @@
         <li><strong>Перезапустите MCP</strong><br>Hot reload tools не реализован: после attach/detach нужен restart.</li>
         <li><strong>Проверьте диагностику</strong><br>Смотрите <code>server.log</code>, healthcheck/diagnostic output и список tools в MCP-клиенте.</li>
       </ol>
-      
+
       <h2>SQLite plugin: пример current attach</h2>
       <p>SQLite connection path должен оставаться внутри workspace.</p>
       <pre><code>{
@@ -112,10 +112,10 @@
           }
         }
       }</code></pre>
-      
+
       <h3>SQLite full access</h3>
       <p>Для <code>sqlite_execute</code> нужен <code>requestedMode: "full_access"</code> и trusted profile. Используйте только если агенту реально можно менять базу.</p>
-      
+
       <h2>PostgreSQL plugin: пример current attach</h2>
       <p>Плагин использует <code>psql</code>, поэтому <code>psql</code> должен быть доступен в PATH. Пароль передаётся через environment variable, указанную в <code>password_env</code>.</p>
       <pre><code>{
@@ -143,11 +143,11 @@
           }
         }
       }</code></pre>
-      
+
       <div class="callout danger">
         Не пишите реальный пароль PostgreSQL в <code>workflow-profiles.json</code>. Создайте переменную окружения <code>APP_POSTGRES_PASSWORD</code> и храните пароль там.
       </div>
-      
+
       <h2>OpenAI-compatible plugin: пример global attach</h2>
       <p>Подходит для OpenAI API, локального OpenAI-compatible endpoint или любого совместимого chat-completions provider.</p>
       <pre><code>{
@@ -175,10 +175,10 @@
           }
         }
       }</code></pre>
-      
+
       <h3>Subagent mode</h3>
       <p><code>openai_compat_run_subagent</code> требует <code>full_access</code> under trusted profile. Для обычной генерации текста достаточно <code>openai_compat_generate_text</code> в <code>read_only</code>.</p>
-      
+
       <h2>Как узнать activeProfileId</h2>
       <ol>
         <li>Откройте <code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code>.</li>
@@ -186,7 +186,7 @@
         <li>В секции <code>profiles</code> найдите объект с таким ключом.</li>
         <li>Добавляйте current plugins именно в этот объект.</li>
       </ol>
-      
+
       <h2>Manifest плагина</h2>
       <p>Каждый plugin folder должен содержать <code>plugin.json</code>. Минимальные поля:</p>
       <pre><code>{
@@ -203,7 +203,7 @@
         "install_scope_support": "both",
         "tools": []
       }</code></pre>
-      
+
       <h2>Как написать свой плагин</h2>
       <ol class="steps">
         <li>Создайте папку <code>plugins/my_plugin</code>.</li>
@@ -213,7 +213,7 @@
         <li>Не регистрируйте tools напрямую в обход общего registry.</li>
         <li>Добавьте тесты и прогоните стандартный gate.</li>
       </ol>
-      
+
       <h2>Где читать внутренние спецификации</h2>
       <ul>
         <li><code>docs/workflow-plugin-system/PLUGIN_MANIFEST_AND_REGISTRY_MODEL.md</code></li>

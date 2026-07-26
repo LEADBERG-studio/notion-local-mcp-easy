@@ -76,7 +76,12 @@
       <footer class="page-footer">
         <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
       </footer>
-    </main>
+
+    <section class="card">
+      <h2>Сценарий: постоянный MCP URL через Tunnellio</h2>
+      <p>Если нужен стабильный внешний адрес и управляемая авторизация, поднимите Tunnellio server, создайте persistent domain, запустите <code>tunnellio.exe connect --run --watch --name notion-mcp</code>, затем возьмите public URL через <code>show-config --name notion-mcp</code> и используйте его как MCP endpoint. Пошаговая схема - в разделе <a href="tunnellio.html">Tunnellio</a>.</p>
+    </section>
+  </main>
   </div>
 </body>
 </html>
