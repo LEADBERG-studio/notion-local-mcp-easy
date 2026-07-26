@@ -112,6 +112,9 @@ ALLOWED_COMMANDS = {
 EXCLUDES = set(DEFAULT_EXCLUDES)
 MAX_TEXT_FILE = 5 * 1024 * 1024
 MAX_WRITE = 2 * 1024 * 1024
+MAX_COPY_MOVE_BYTES = int(
+    os.environ.get("MCP_MAX_COPY_MOVE_BYTES", "") or 100 * 1024 * 1024
+)
 MAX_COMMAND_OUTPUT = 200_000
 MAX_RESULTS = 1000
 MAX_OUTPUT_CHARS = 10_000
@@ -120,6 +123,7 @@ CHUNK_CHAR_LIMIT = 9_500
 TEMP_DIRNAME = "temp"
 TEMP_PATH_PREFIX = "@temp/"
 TEMP_FILE_TTL_SECONDS = 24 * 60 * 60
+ORPHAN_SWEEP_MIN_INTERVAL_SECONDS = 60.0
 MAX_COMMAND_TIMEOUT = 300
 MAX_COMMAND_JOBS = max(1, int(os.environ.get("MCP_MAX_COMMAND_JOBS", "4")))
 JOB_RETENTION_SECONDS = max(60, int(os.environ.get("MCP_COMMAND_JOB_RETENTION_SECONDS", "600")))
@@ -308,6 +312,21 @@ def _path(value: str = ".") -> Path:
     return safe_path(BASE_DIR, value)
 
 
+def _ensure_writable(path: Path) -> None:
+    """Reject writes to git-policy trust anchors."""
+    if path.name == REPO_CONTEXT_FILE:
+        raise ValueError(
+            f"Refusing to modify the repo-context trust anchor '{REPO_CONTEXT_FILE}'. "
+            "Use setup_git_context(...) / configure_repo_context(...) instead."
+        )
+    try:
+        parts = path.relative_to(BASE_DIR).parts
+    except ValueError:
+        parts = path.parts
+    if ".git" in parts:
+        raise ValueError("Refusing to modify anything inside a .git directory.")
+
+
 def _is_binary_bytes(data: bytes) -> bool:
     return b"\x00" in data[:8192]
 
@@ -327,6 +346,34 @@ def _cleanup_temp_files() -> None:
                 item.unlink()
         except OSError:
             continue
+
+
+_last_orphan_sweep: float = float("-inf")
+
+
+def _cleanup_orphan_mcp_tmp() -> None:
+    """Sweep stale atomic-write temp files left beside workspace targets."""
+    global _last_orphan_sweep
+    now_mono = time.monotonic()
+    if now_mono - _last_orphan_sweep < ORPHAN_SWEEP_MIN_INTERVAL_SECONDS:
+        return
+    _last_orphan_sweep = now_mono
+    cutoff = dt.datetime.now().timestamp() - TEMP_FILE_TTL_SECONDS
+    for root, dirs, files in os.walk(BASE_DIR, topdown=True):
+        root_path = Path(root)
+        dirs[:] = [
+            d for d in dirs
+            if not should_skip(root_path / d, False, EXCLUDES)
+        ]
+        for name in files:
+            if not name.endswith(".mcp-tmp"):
+                continue
+            candidate = root_path / name
+            try:
+                if candidate.stat().st_mtime < cutoff:
+                    candidate.unlink()
+            except OSError:
+                continue
 
 
 def _temp_virtual_path(path: Path) -> str:
@@ -352,6 +399,7 @@ def _resolve_read_file_path(path: str) -> tuple[Path, bool]:
 
 def _tool_output_path(prefix: str) -> Path:
     _cleanup_temp_files()
+    _cleanup_orphan_mcp_tmp()
     safe_prefix = "".join(
         ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in prefix
     ).strip("-") or "output"
@@ -621,6 +669,17 @@ def _require_git_executable() -> str:
     return executable
 
 
+_UNSAFE_GIT_GLOBAL_OPTIONS = {
+    "-c",
+    "-C",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--config-env",
+}
+
+
 def _split_git_global_args(git_args: list[str]) -> tuple[list[str], str]:
     options_with_value = {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
     prefix: list[str] = []
@@ -649,6 +708,20 @@ def _split_git_global_args(git_args: list[str]) -> tuple[list[str], str]:
     return prefix, subcommand
 
 
+def _sanitized_env() -> dict[str, str]:
+    """Return os.environ minus server secrets for child processes."""
+    secret_keys = {
+        "MCP_TOKEN",
+        "MCP_OAUTH_OWNER_CODE",
+        "MCP_OAUTH_OWNER_GRANT_SCOPES",
+    }
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in secret_keys and not key.startswith("MCP_OAUTH_")
+    }
+
+
 def _run_git_query(
     cwd: Path,
     *args: str,
@@ -667,6 +740,7 @@ def _run_git_query(
         errors="replace",
         timeout=timeout,
         check=False,
+        env=_sanitized_env(),
     )
 
 
@@ -681,6 +755,7 @@ def _run_git_checked(cwd: Path, *args: str, timeout: int = 15) -> subprocess.Com
         errors="replace",
         timeout=timeout,
         check=False,
+        env=_sanitized_env(),
     )
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "unknown error").strip()
@@ -1253,6 +1328,16 @@ def _split_git_command(git_args: list[str]) -> tuple[list[str], str, list[str]]:
     return prefix, "", []
 
 
+def _reject_unsafe_git_global_options(prefix: list[str]) -> None:
+    for arg in prefix:
+        base = arg.split("=", 1)[0]
+        if base in _UNSAFE_GIT_GLOBAL_OPTIONS:
+            raise ValueError(
+                "Git is blocked because the global option "
+                f"'{base}' can run arbitrary programs or retarget git outside the validated workspace."
+            )
+
+
 def _command_positionals(args: list[str], options_with_value: set[str] | None = None) -> list[str]:
     options_with_value = options_with_value or set()
     positionals: list[str] = []
@@ -1330,7 +1415,7 @@ def _require_current_branch_matches(current_branch: str, target_branch: str) -> 
 
 
 def _is_git_config_read_only(args: list[str]) -> bool:
-    mutating_flags = {"--add", "--replace-all", "--unset", "--unset-all", "--remove-section", "--rename-section"}
+    mutating_flags = {"--add", "--replace-all", "--unset", "--unset-all", "--remove-section", "--rename-section", "-e", "--edit"}
     if any(flag in args for flag in mutating_flags):
         return False
     positionals = _command_positionals(args, {"-f", "--file", "--type", "--default", "--blob", "--fixed-value", "--url"})
@@ -1415,6 +1500,36 @@ def _branch_target(args: list[str]) -> str:
     return ""
 
 
+def _blocked_push_mode(args: list[str], refspecs: list[str]) -> str:
+    if any(arg in {"-f", "--force", "--force-with-lease"} or arg.startswith("--force-with-lease=") for arg in args):
+        return "force push is not allowed"
+    for refspec in refspecs:
+        if refspec.startswith("+"):
+            return "forced refspec updates are not allowed"
+        if refspec.startswith(":"):
+            return "delete refspecs are not allowed"
+    return ""
+
+
+def _transport_refspecs(args: list[str]) -> list[str]:
+    positionals = _command_positionals(args, {"--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--refmap", "--filter", "-o", "--server-option", "--upload-pack", "--recurse-submodules", "--jobs", "-j"})
+    return positionals[1:] if len(positionals) > 1 else []
+
+
+def _ensure_transport_refspec_allowed(refspec: str, current_branch: str, target_branch: str, *, context: str) -> None:
+    if refspec.startswith("+"):
+        raise ValueError(f"Git is blocked because {context} uses a forced-update refspec.")
+    if refspec.startswith(":"):
+        raise ValueError(f"Git is blocked because {context} uses a delete refspec.")
+    if ":" not in refspec:
+        return
+    ref_target = _refspec_target_branch(refspec, current_branch)
+    if ref_target != target_branch:
+        raise ValueError(
+            f"Git is blocked because {context} may only update {target_branch}, but the refspec targets {ref_target}."
+        )
+
+
 def _push_remote_and_refspecs(args: list[str]) -> tuple[str, list[str]]:
     positionals = _command_positionals(args, {"-u", "--set-upstream", "--repo", "--receive-pack", "--exec", "-o", "--push-option"})
     if not positionals:
@@ -1450,6 +1565,8 @@ def _refspec_target_branch(refspec: str, current_branch: str) -> str:
 
 def _ensure_git_context_for_command(cwd: Path, git_args: list[str] | None = None) -> None:
     git_args = list(git_args or [])
+    git_prefix, _prefix_subcommand = _split_git_global_args(git_args)
+    _reject_unsafe_git_global_options(git_prefix)
     state, config, detected, lines = _repo_context_state(cwd, git_args)
     if state != "repo_present_bound_ok":
         raise ValueError("Git is blocked for this workspace.\n\n" + "\n".join(lines))
@@ -1546,13 +1663,17 @@ def _ensure_git_context_for_command(cwd: Path, git_args: list[str] | None = None
                 _ensure_remote_reference_allowed(remote_name, config, detected, context="git fetch --all")
             return
         _ensure_remote_reference_allowed(remote_target, config, detected, context="git fetch")
+        for refspec in _transport_refspecs(tail):
+            _ensure_transport_refspec_allowed(refspec, current_branch, target_branch, context="git fetch")
         return
 
     if subcommand == "pull":
         _require_current_branch_matches(current_branch, target_branch)
         remote_target, branch_target = _pull_remote_and_branch(tail)
         _ensure_remote_reference_allowed(remote_target, config, detected, context="git pull")
-        if branch_target and branch_target != target_branch:
+        if branch_target and ":" in branch_target:
+            _ensure_transport_refspec_allowed(branch_target, current_branch, target_branch, context="git pull")
+        elif branch_target and branch_target != target_branch:
             raise ValueError(
                 f"Git is blocked because pull for this workspace must stay on {target_branch}, "
                 f"but the command targets {branch_target}."
@@ -1562,6 +1683,9 @@ def _ensure_git_context_for_command(cwd: Path, git_args: list[str] | None = None
     if subcommand == "push":
         _require_current_branch_matches(current_branch, target_branch)
         remote_target, refspecs = _push_remote_and_refspecs(tail)
+        blocked = _blocked_push_mode(tail, refspecs)
+        if blocked:
+            raise ValueError(f"Git is blocked because {blocked}.")
         _ensure_remote_reference_allowed(remote_target, config, detected, context="git push")
         for refspec in refspecs:
             ref_target = _refspec_target_branch(refspec, current_branch)
@@ -1779,7 +1903,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
         dir=str(path.parent), prefix=path.name + ".", suffix=".mcp-tmp"
     )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
@@ -2101,6 +2225,7 @@ async def list_dir(
 async def file_info(path: str) -> str:
     """Show file or directory metadata."""
     item = _path(path)
+    _ensure_writable(item)
     if not item.exists():
         return f"Not found: {path}"
     stat = item.stat()
@@ -2151,6 +2276,7 @@ async def write_file(path: str, content: str, overwrite: bool = True) -> str:
     if encoded_size > MAX_WRITE:
         raise ValueError(f"Content exceeds {MAX_WRITE:,} bytes")
     item = _path(path)
+    _ensure_writable(item)
     if item.exists() and not overwrite:
         raise ValueError(f"File already exists: {path}")
 
@@ -2169,13 +2295,14 @@ async def append_file(path: str, content: str) -> str:
     if encoded_size > MAX_WRITE:
         raise ValueError(f"Content exceeds {MAX_WRITE:,} bytes")
     item = _path(path)
+    _ensure_writable(item)
     current_size = item.stat().st_size if item.exists() else 0
     if current_size + encoded_size > MAX_TEXT_FILE:
         raise ValueError(f"Resulting file would exceed {MAX_TEXT_FILE:,} bytes")
 
     def _append() -> None:
         item.parent.mkdir(parents=True, exist_ok=True)
-        with item.open("a", encoding="utf-8") as handle:
+        with item.open("a", encoding="utf-8", newline="") as handle:
             handle.write(content)
 
     await asyncio.to_thread(_append)
@@ -2191,6 +2318,7 @@ async def edit_file(
 ) -> str:
     """Replace exact text in a UTF-8 file. Read the file first."""
     item = _path(path)
+    _ensure_writable(item)
     _text_file(item)
 
     def _edit() -> int:
@@ -2224,6 +2352,7 @@ async def edit_file(
 async def create_dir(path: str) -> str:
     """Create a directory and missing parents. Existing directories are accepted."""
     item = _path(path)
+    _ensure_writable(item)
     await asyncio.to_thread(item.mkdir, parents=True, exist_ok=True)
     return f"Directory ready: {item.relative_to(BASE_DIR)}"
 
@@ -2232,6 +2361,7 @@ async def create_dir(path: str) -> str:
 async def delete_file(path: str) -> str:
     """Delete one file or one empty directory. Recursive deletion is unavailable."""
     item = _path(path)
+    _ensure_writable(item)
     if not item.exists():
         return f"Not found: {path}"
     if item.is_dir():
@@ -2245,8 +2375,12 @@ async def delete_file(path: str) -> str:
 async def copy_file(src: str, dst: str, overwrite: bool = False) -> str:
     """Copy one file inside the workspace."""
     source, target = _path(src), _path(dst)
+    _ensure_writable(target)
     if not source.is_file():
         raise ValueError(f"Source is not a file: {src}")
+    source_size = source.stat().st_size
+    if source_size > MAX_COPY_MOVE_BYTES:
+        raise ValueError(f"Source size {source_size:,} bytes exceeds copy/move limit {MAX_COPY_MOVE_BYTES:,}")
     if target.exists() and not overwrite:
         raise ValueError(f"Destination exists: {dst}")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2258,8 +2392,13 @@ async def copy_file(src: str, dst: str, overwrite: bool = False) -> str:
 async def move_file(src: str, dst: str, overwrite: bool = False) -> str:
     """Move or rename one file inside the workspace."""
     source, target = _path(src), _path(dst)
+    _ensure_writable(source)
+    _ensure_writable(target)
     if not source.is_file():
         raise ValueError(f"Source is not a file: {src}")
+    source_size = source.stat().st_size
+    if source_size > MAX_COPY_MOVE_BYTES:
+        raise ValueError(f"Source size {source_size:,} bytes exceeds copy/move limit {MAX_COPY_MOVE_BYTES:,}")
     if target.exists() and not overwrite:
         raise ValueError(f"Destination exists: {dst}")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2672,6 +2811,7 @@ async def start_command(
         stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
         creationflags=flags,
+        env=_sanitized_env(),
     )
     job = CommandJob(
         job_id=job_id,
@@ -2776,6 +2916,7 @@ async def run_command(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=flags,
+            env=_sanitized_env(),
         )
         timed_out, truncated = await _capture_process_to_files(
             proc,

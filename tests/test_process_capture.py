@@ -1,0 +1,32 @@
+import os
+import sys
+import unittest
+from pathlib import Path
+
+PROJECT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT))
+os.environ["MCP_TOKEN"] = "unit-test-token"
+os.environ["MCP_BASE_DIR"] = str(PROJECT)
+os.environ["MCP_ALLOW_COMMANDS"] = "0"
+os.environ["MCP_SERVEO_HOSTNAME"] = ""
+os.environ["MCP_AUTH_MODE"] = "legacy"
+
+import server
+
+
+class ProcessCaptureCompatibilityTests(unittest.TestCase):
+    def test_legacy_capture_process_helper_is_available(self):
+        # Current project tests still exercise this bounded helper directly,
+        # while command execution uses the file-based capture path below.
+        self.assertTrue(hasattr(server, "_capture_process"))
+        self.assertIn("_capture_process", dir(server))
+
+    def test_capture_process_to_files_still_exists(self):
+        # Regression guard for the live capture path used by run_command and
+        # background command jobs.
+        self.assertTrue(hasattr(server, "_capture_process_to_files"))
+        self.assertIn("_capture_process_to_files", dir(server))
+
+
+if __name__ == "__main__":
+    unittest.main()
