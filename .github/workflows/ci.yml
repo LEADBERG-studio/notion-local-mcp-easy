@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile core modules
+        run: python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py
+
+      - name: Run test suite
+        env:
+          MCP_TOKEN: unit-test-token
+          MCP_ALLOW_COMMANDS: "0"
+          MCP_AUTH_MODE: legacy
+          MCP_SERVEO_HOSTNAME: ""
+        run: python -m unittest discover -s tests -v
