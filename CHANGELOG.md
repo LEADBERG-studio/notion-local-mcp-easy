@@ -1,3 +1,13 @@
+## 1.7.0 — 2026-07-26
+
+- Finalized the perimeter merge line by converging configuration, operator docs, and release packaging across embedded OAuth, Tunnellio, Serveo, reverse-proxy, and self-hosted `sish` paths.
+
+- Completed TASK-019: the workflow handoff and task docs now mark the TASK-015 ... TASK-019 sequence done and treat the current tree as the publication-ready baseline.
+
+- Revalidated the full regression surface across launcher, oauth, repo-context, server-smoke, server-profiles, core/process/plugin/workflow suites, covering every test file under `tests/`.
+
+- Rebuilt the aligned 1.7.0 release package and accompanying publication note.
+
 ## 1.6.1 — 2026-07-26
 
 - Added a first-class self-hosted `sish` tunnel backend to the launcher, including setup flow, stable public URL derivation, SSH command generation, runtime connection metadata, and reconnect-safe URL resolution.

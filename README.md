@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.6.1
+# Notion Local MCP Easy 1.7.0
 
 
 
@@ -99,7 +99,7 @@ One-click Windows MCP-сервер для личного использован�
 
 ## Self-hosted sish relay
 
-Начиная с 1.6.1 launcher поддерживает отдельный self-hosted backend **sish** для случаев, когда публичный SSH relay принадлежит вам, а lifecycle туннеля всё ещё должен управляться самим launcher-ом.
+Начиная с 1.7.0 launcher поддерживает отдельный self-hosted backend **sish** для случаев, когда публичный SSH relay принадлежит вам, а lifecycle туннеля всё ещё должен управляться самим launcher-ом.
 
 1. В `SETUP.bat` выберите **Self-hosted sish relay (SSH reverse tunnel)**.
 2. Укажите `tunnel_host`, `tunnel_ssh_port`, публичный wildcard-домен `tunnel_domain` и reserved subdomain label.

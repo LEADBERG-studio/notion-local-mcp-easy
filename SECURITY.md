@@ -14,7 +14,7 @@ The setup wizard can enable commands such as Python, Git and Node. This mode is 
 
 Serveo is a third-party SSH tunnel. The public URL and Bearer token must be treated as secrets. Anonymous Serveo URLs are temporary. A reserved hostname authenticated with a dedicated SSH key keeps the URL stable; the private SSH key must never be shared or included in an archive.
 
-If you use a self-hosted `sish` relay, treat it like production ingress under your control: keep TLS and relay access on infrastructure you trust, protect the private SSH key, and make sure the configured `public_url` exactly matches the client-facing hostname that the relay publishes.
+If you use a self-hosted `sish` relay, treat it like production ingress under your control: keep TLS and relay access on infrastructure you trust, protect the private SSH key, and make sure the derived public host (`serveo_hostname` + `tunnel_domain`) exactly matches the client-facing hostname that the relay publishes.
 
 ## Reverse proxy / own domain
 
