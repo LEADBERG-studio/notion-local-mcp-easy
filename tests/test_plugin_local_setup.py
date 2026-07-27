@@ -10,7 +10,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from plugin_runtime import PluginManager
-from plugin_setup import collect_ide_gateway_config, collect_ide_provider_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
+from plugin_setup import collect_enable_config, collect_ide_gateway_config, collect_ide_provider_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
 
 class DummyMCP:
     def __init__(self):
@@ -124,6 +124,18 @@ class PluginLocalSetupTests(unittest.TestCase):
             removed = remove_local_plugin_config(plugin_dir, "current", profiles)
             self.assertEqual(removed, path)
             self.assertFalse(path.exists())
+
+
+    def test_ide_gateway_enable_uses_safe_defaults_without_upstream(self):
+        config = collect_enable_config("ide_gateway", {})
+        self.assertRegex(config["default_api_key"], r"^ideg_[A-Za-z0-9_-]{16,}$")
+        self.assertTrue(config["autostart"])
+        self.assertEqual(config["default_port"], 8787)
+        self.assertFalse(config["responder_enabled"])
+        self.assertFalse(config["responder_autostart"])
+        self.assertEqual(config["responder_upstream_type"], "manual")
+        self.assertEqual(config["responder_upstream_base_url"], "")
+        self.assertEqual(config["responder_upstream_model"], "")
 
     def test_packaged_plugins_have_bat_wrappers(self):
         for manifest in sorted((PROJECT / "plugins").glob("*/plugin.json")):

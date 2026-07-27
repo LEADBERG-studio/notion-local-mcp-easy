@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.2
+# Notion Local MCP Easy 1.8.3
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -69,7 +69,7 @@ Use it only in trusted developer mode and only with IDEs/workspaces you trust. S
 
 ## IDE Gateway plugin with autonomous responder
 
-Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Version 1.8.2 adds an autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream, so the IDE receives answers without manual `wait_request/send_response` calls.
+Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Version 1.8.3 adds an autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream, so the IDE receives answers without manual `wait_request/send_response` calls.
 
 Quick flow:
 
@@ -108,3 +108,8 @@ python -m unittest discover -s tests -v
 - `SERVEO_SETUP.md` — Serveo setup.
 - `SISH_SETUP.md` — self-hosted sish relay setup.
 - `CHANGELOG.md` — release notes.
+
+
+### IDE Gateway defaults note
+
+`plugins\\ide_gateway\\ENABLE.bat` applies safe working defaults without questions: endpoint autostart is enabled and a local `ideg_...` key is generated, but the autonomous responder remains disabled/manual until `SETUP.bat` is used to configure a real upstream base URL, API key (if needed), and model. This prevents requests from being claimed by a responder that has nowhere to send them.

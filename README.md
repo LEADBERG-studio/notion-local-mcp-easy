@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.2
+# Notion Local MCP Easy 1.8.3
 
 
 
@@ -113,7 +113,7 @@ docs/ru/index.html
 
 ## IDE Gateway с автономным responder
 
-Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). С 1.8.2 шлюз имеет автономный responder-loop, который сам забирает запросы из очереди и отправляет их в настроенный upstream (OpenAI-compatible), поэтому IDE получает ответы без ручного вызова `wait_request/send_response`.
+Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). С 1.8.3 шлюз имеет автономный responder-loop, который сам забирает запросы из очереди и отправляет их в настроенный upstream (OpenAI-compatible), поэтому IDE получает ответы без ручного вызова `wait_request/send_response`.
 
 Короткий сценарий:
 
@@ -765,3 +765,8 @@ Regex-поиск отключён, чтобы исключить зависан�
 
 
 
+
+
+### Настройки IDE Gateway по умолчанию
+
+`plugins\\ide_gateway\\ENABLE.bat` применяет безопасные настройки без вопросов: endpoint autostart включён и локальный ключ `ideg_...` генерируется автоматически, но автономный responder остаётся выключенным/manual, пока через `SETUP.bat` не задан реальный upstream base URL, API key (если нужен) и model. Так запросы не будут забираться responder-ом, которому некуда их отправлять.

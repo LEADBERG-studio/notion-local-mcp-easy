@@ -15,6 +15,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from plugins.ide_gateway.queue import enqueue_request, request_path, _read_json
+import plugin_setup
 from plugins.ide_gateway.state import normalize_config
 
 
@@ -225,6 +226,23 @@ class IdeGatewayResponderTests(unittest.TestCase):
             time.sleep(0.1)
         return _read_json(path, None) or {}
 
+
+    def test_responder_start_fails_fast_without_upstream(self):
+        from plugins.ide_gateway.state import start_responder
+        context = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
+        config = normalize_config({
+            "default_api_key": "ideg_" + "a" * 24,
+            "responder_enabled": True,
+            "responder_autostart": True,
+            "responder_upstream_type": "openai_compatible",
+            "responder_upstream_base_url": "",
+            "responder_upstream_model": "mock-model",
+        }, context)
+        result = start_responder({}, context, config)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "not_configured")
+        self.assertIn("responder_upstream_base_url", result["message"])
+
     # 1. responder start creates running state
     def test_responder_start_creates_running_state(self):
         state = json.loads(self.state_path.read_text(encoding="utf-8"))
@@ -342,15 +360,53 @@ class IdeGatewayResponderTests(unittest.TestCase):
 
     # 11. setup can enable responder autostart
     def test_setup_can_enable_responder_autostart(self):
-        from plugin_setup import collect_ide_gateway_config
-        # Simulate all defaults: empty input selects defaults
-        with mock.patch("builtins.input", return_value=""):
-            config = collect_ide_gateway_config({})
+        existing = {
+            "responder_upstream_base_url": self.upstream.base_url,
+            "responder_upstream_model": "mock-model",
+        }
+        answers = iter([
+            "custom",  # setup preset
+            "yes",     # endpoint autostart
+            "8787",    # preferred port
+            "ide-gateway",
+            "yes",     # enable autonomous responder
+            "yes",     # autostart responder
+            "openai_compatible",
+            self.upstream.base_url,
+            "",        # upstream API key
+            "mock-model",
+            "8787",    # port range start
+            "8899",    # port range end
+            "300",     # gateway timeout
+            "300",     # responder timeout
+            "fallback",
+            "",        # disabled tools
+        ])
+        original_input = __builtins__["input"] if isinstance(__builtins__, dict) else __builtins__.input
+        def fake_input(prompt=""):
+            try:
+                return next(answers)
+            except StopIteration:
+                return ""
+        if isinstance(__builtins__, dict):
+            __builtins__["input"] = fake_input
+        else:
+            __builtins__.input = fake_input
+        try:
+            config = plugin_setup.collect_ide_gateway_config(existing)
+        finally:
+            if isinstance(__builtins__, dict):
+                __builtins__["input"] = original_input
+            else:
+                __builtins__.input = original_input
+
         self.assertTrue(config["responder_enabled"])
         self.assertTrue(config["responder_autostart"])
         self.assertEqual(config["responder_upstream_type"], "openai_compatible")
+        self.assertEqual(config["responder_upstream_base_url"], self.upstream.base_url)
+        self.assertEqual(config["responder_upstream_model"], "mock-model")
 
-    # 12. plugin-local config validates responder settings
+
     def test_plugin_local_config_validates_responder_settings(self):
         config = normalize_config({
             "responder_enabled": "yes",

@@ -1,3 +1,11 @@
+## 1.8.3 - 2026-07-28
+
+- Changed plugin-local `ENABLE.bat` semantics: `enable` now applies safe working defaults without interactive questions; `SETUP.bat` remains the interactive path for changing settings.
+- Fixed `ide_gateway` defaults so the autonomous responder is not autostarted in `openai_compatible` mode with an empty upstream URL/model.
+- `ide_gateway` ENABLE now creates a safe manual-bridge profile: endpoint autostart enabled, local `ideg_...` API key generated, responder disabled/manual until SETUP supplies a real upstream.
+- `ide_gateway` SETUP now requires upstream base URL and model when autonomous OpenAI-compatible responder mode is enabled.
+- `ide_gateway_responder_start` now fails fast with `not_configured` instead of claiming requests and failing them when upstream settings are missing.
+
 ## 1.8.2 - 2026-07-28
 
 - Added an autonomous responder loop to `ide_gateway` so IDE requests are served automatically without manual `ide_gateway_wait_request` / `ide_gateway_send_response` calls.
