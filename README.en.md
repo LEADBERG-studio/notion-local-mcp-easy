@@ -62,7 +62,7 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 
 ## IDE Provider plugin
 
-Version 1.7.4 adds the `ide_provider` active-bridge plugin. It starts a local OpenAI-compatible endpoint on `127.0.0.1` so an IDE can send chat-completion requests to the active MCP model. The model serves those requests through `ide_provider_wait_request` and `ide_provider_send_response` while still using Local MCP Easy tools.
+Version 1.7.5 adds the `ide_provider` active-bridge plugin. It starts a local OpenAI-compatible endpoint on `127.0.0.1` so an IDE can send chat-completion requests to the active MCP model. The model serves those requests through `ide_provider_wait_request` and `ide_provider_send_response` while still using Local MCP Easy tools.
 
 Use it only in trusted developer mode and only with IDEs/workspaces you trust. See the Russian beginner guide at `docs/ru/ide-provider.html`.
 

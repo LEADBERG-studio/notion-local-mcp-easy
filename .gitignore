@@ -18,3 +18,4 @@ build/
 htmlcov/
 oauth_state.json
 .kilo/
+plugins/*/plugin.local.*.json

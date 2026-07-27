@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import inspect
 import json
@@ -23,6 +24,7 @@ PLUGIN_DIRNAME = "plugins"
 ALLOWED_PLUGIN_SCOPES = {"current", "global"}
 ALLOWED_PLUGIN_REQUESTED_MODES = {"read_only", "full_access"}
 ALLOWED_TOOL_MODES = {"read_only", "full_access"}
+
 
 
 class PluginError(ValueError):
@@ -278,6 +280,111 @@ def _global_plugin_record(profile_context: dict[str, Any], plugin_id: str) -> di
     return record if isinstance(record, dict) else None
 
 
+def _safe_profile_component(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "-" for ch in value.strip()).strip(".-")
+    if cleaned:
+        return cleaned
+    return hashlib.sha1(value.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
+def _workspace_digest(value: str) -> str:
+    normalized = os.path.normcase(value)
+    return hashlib.sha1(normalized.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
+def _local_config_candidate_paths(manifest: dict[str, Any], profile_context: dict[str, Any], scope: str) -> list[Path]:
+    plugin_dir = Path(manifest["manifestPath"]).parent
+    active_profile = profile_context.get("activeProfile") or {}
+    profile_id = str(active_profile.get("profileId", "") or "").strip()
+    workspace_path = str(active_profile.get("workspacePath", "") or "").strip()
+    if scope == "global":
+        return [plugin_dir / "plugin.local.global.json"]
+    paths: list[Path] = []
+    if profile_id:
+        paths.append(plugin_dir / f"plugin.local.current.{_safe_profile_component(profile_id)}.json")
+    if workspace_path:
+        paths.append(plugin_dir / f"plugin.local.current.{_workspace_digest(workspace_path)}.json")
+    paths.append(plugin_dir / "plugin.local.current.json")
+    return paths
+
+
+def _local_config_matches_active_profile(payload: dict[str, Any], profile_context: dict[str, Any]) -> bool:
+    active_profile = profile_context.get("activeProfile") or {}
+    payload_profile_id = str(payload.get("profileId", "") or "").strip()
+    active_profile_id = str(active_profile.get("profileId", "") or "").strip()
+    if payload_profile_id and active_profile_id and payload_profile_id != active_profile_id:
+        return False
+    payload_workspace = str(payload.get("workspacePath", "") or "").strip()
+    active_workspace = str(active_profile.get("workspacePath", "") or "").strip()
+    if payload_workspace and active_workspace and os.path.normcase(payload_workspace) != os.path.normcase(active_workspace):
+        return False
+    if not payload_profile_id and not payload_workspace:
+        return False
+    return True
+
+
+def _read_local_plugin_record(path: Path, *, plugin_id: str, expected_scope: str, profile_context: dict[str, Any]) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    if str(raw.get("pluginId", "") or "").strip() != plugin_id:
+        return None
+    if str(raw.get("scope", "") or "").strip() != expected_scope:
+        return None
+    if expected_scope == "current" and not _local_config_matches_active_profile(raw, profile_context):
+        return None
+    requested_mode = str(raw.get("requestedMode", "read_only") or "read_only")
+    if requested_mode not in ALLOWED_PLUGIN_REQUESTED_MODES:
+        requested_mode = "read_only"
+    config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
+    return {
+        "scope": expected_scope,
+        "requestedMode": requested_mode,
+        "config": config,
+        "attachedAt": str(raw.get("updatedAt", "") or ""),
+        "source": f"plugin_local_{expected_scope}",
+        "configPath": str(path),
+    }
+
+
+def _first_local_plugin_record(manifest: dict[str, Any], profile_context: dict[str, Any], scope: str) -> dict[str, Any] | None:
+    for path in _local_config_candidate_paths(manifest, profile_context, scope):
+        record = _read_local_plugin_record(
+            path,
+            plugin_id=str(manifest["id"]),
+            expected_scope=scope,
+            profile_context=profile_context,
+        )
+        if record is not None:
+            return record
+    return None
+
+
+def _plugin_record_source(record: dict[str, Any] | None, fallback: str) -> str:
+    if isinstance(record, dict):
+        return str(record.get("source", fallback) or fallback)
+    return fallback
+
+
+def _effective_plugin_config_source(config_source: str, global_record: dict[str, Any] | None, current_record: dict[str, Any] | None) -> str:
+    global_source = _plugin_record_source(global_record, "global")
+    current_source = _plugin_record_source(current_record, "current")
+    if config_source == "merged":
+        if global_source == "global" and current_source == "current":
+            return "merged"
+        return f"{global_source}+{current_source}"
+    if config_source == "global":
+        return global_source
+    if config_source == "current":
+        return current_source
+    return config_source
+
+
 def build_plugin_states(
     manifests: dict[str, dict[str, Any]],
     profile_context: dict[str, Any],
@@ -301,10 +408,15 @@ def build_plugin_states(
                 "entrypointPath": "",
             }
             continue
-        global_record = _global_plugin_record(profile_context, plugin_id)
-        current_record = _current_profile_plugin_record(profile_context, plugin_id)
+        stored_global_record = _global_plugin_record(profile_context, plugin_id)
+        stored_current_record = _current_profile_plugin_record(profile_context, plugin_id)
+        local_global_record = _first_local_plugin_record(manifest, profile_context, "global")
+        local_current_record = _first_local_plugin_record(manifest, profile_context, "current")
+        global_record = local_global_record or stored_global_record
+        current_record = local_current_record or stored_current_record
         attach_scope = _attachment_state(global_record, current_record)
         effective_config, config_source = _effective_plugin_config(global_record, current_record)
+        config_source = _effective_plugin_config_source(config_source, global_record, current_record)
         requested_mode = "read_only"
         if current_record and isinstance(current_record.get("requestedMode"), str):
             requested_mode = str(current_record["requestedMode"])
@@ -328,6 +440,10 @@ def build_plugin_states(
             "manifestPath": str(manifest["manifestPath"]),
             "entrypointPath": str(manifest["entrypointPath"]),
             "error": "",
+            "localConfigPaths": {
+                "global": [str(path) for path in _local_config_candidate_paths(manifest, profile_context, "global")],
+                "current": [str(path) for path in _local_config_candidate_paths(manifest, profile_context, "current")],
+            },
         }
         states[plugin_id] = state
     return states
@@ -497,6 +613,10 @@ class PluginManager:
             self.profile_context,
             server_allow_commands=allow_commands,
         )
+        if any(state.get("attachScope") in {"current", "both"} for state in self.states.values()):
+            active_profile = self.profile_context.get("activeProfile")
+            if isinstance(active_profile, dict):
+                active_profile["environmentMode"] = "CUSTOM"
         self.loaded = register_plugin_tools(
             mcp=mcp,
             manifests=self.manifests,
@@ -536,6 +656,7 @@ class PluginManager:
                     f"[{plugin_id}] requested mode: {state.get('requestedMode', 'read_only')}",
                     f"[{plugin_id}] effective mode: {state.get('effectiveMode') or '(none)'}",
                     f"[{plugin_id}] config source: {state.get('configSource', 'none')}",
+                    f"[{plugin_id}] local config candidates: {json.dumps(state.get('localConfigPaths', {}), ensure_ascii=False, sort_keys=True)}",
                     f"[{plugin_id}] manifest path: {state.get('manifestPath', '')}",
                     f"[{plugin_id}] entrypoint path: {state.get('entrypointPath', '')}",
                     f"[{plugin_id}] health: {json.dumps(state.get('health', {}), ensure_ascii=False, sort_keys=True)}",

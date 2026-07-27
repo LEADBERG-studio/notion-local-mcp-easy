@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.4</small>
+        <small>документация для начинающих · v1.7.5</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -60,6 +60,7 @@
       </div>
     </aside>
     <main class="content">
+
       <h1>IDE Provider: подключить IDE как OpenAI-compatible клиента</h1>
       <p class="lead"><code>ide_provider</code> — это active-bridge плагин. Он поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1</code>, принимает запросы от IDE и передаёт их активной MCP-модели через очередь.</p>
 
@@ -76,6 +77,18 @@
     → ide_provider_send_response
     → IDE получает ответ</code></pre>
 
+      <h2>Как включить</h2>
+      <ol class="steps">
+        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>В file-only режиме tools <code>start</code>, <code>stop</code> и <code>rotate_token</code> недоступны.</li>
+        <li><strong>Откройте папку плагина.</strong><br>Перейдите в <code>plugins\ide_provider</code>.</li>
+        <li><strong>Запустите <code>SETUP.bat</code> или <code>ENABLE.bat</code>.</strong><br>Выберите <code>current</code> для текущей рабочей области или <code>global</code> для всех областей. Обычно для IDE выбирают <code>current</code>.</li>
+        <li><strong>Выберите <code>full_access</code>.</strong><br>Он нужен для запуска/остановки локального endpoint и ротации token.</li>
+        <li><strong>Оставьте default localhost settings.</strong><br>По умолчанию endpoint слушает только <code>127.0.0.1</code>, что безопаснее для локальной IDE.</li>
+        <li><strong>Перезапустите MCP.</strong><br>После enable/disable registry tools пересобирается при рестарте.</li>
+        <li><strong>Запустите endpoint через MCP tool.</strong><br>Например: <code>ide_provider_start</code> с <code>name="ide"</code> и <code>model_id="ide-provider"</code>.</li>
+        <li><strong>Скопируйте настройки в IDE.</strong><br>Используйте <code>base_url</code>, <code>api_key</code> и <code>model</code>, которые вернул <code>ide_provider_start</code> или <code>ide_provider_show_config</code>.</li>
+      </ol>
+
       <h2>Что входит в плагин</h2>
       <table>
         <thead><tr><th>Tool</th><th>Mode</th><th>Назначение</th></tr></thead>
@@ -91,15 +104,6 @@
           <tr><td><code>ide_provider_rotate_token</code></td><td><code>full_access</code></td><td>Сменить локальный API token.</td></tr>
         </tbody>
       </table>
-
-      <h2>Как включить</h2>
-      <ol class="steps">
-        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>В file-only режиме tools <code>start</code>, <code>stop</code> и <code>rotate_token</code> недоступны.</li>
-        <li><strong>Прикрепите плагин к current или global scope.</strong><br>Обычно для IDE удобнее <code>current</code>, чтобы endpoint относился к конкретной рабочей области.</li>
-        <li><strong>Перезапустите MCP.</strong><br>После attach/detach registry tools пересобирается при рестарте.</li>
-        <li><strong>Запустите endpoint через MCP tool.</strong><br>Например: <code>ide_provider_start</code> с <code>name="ide"</code> и <code>model_id="ide-provider"</code>.</li>
-        <li><strong>Скопируйте настройки в IDE.</strong><br>Используйте <code>base_url</code>, <code>api_key</code> и <code>model</code>, которые вернул <code>ide_provider_start</code> или <code>ide_provider_show_config</code>.</li>
-      </ol>
 
       <h2>Настройки в IDE</h2>
       <table>
@@ -128,18 +132,23 @@
         <li><code>/v1/*</code> требует локальный token; <code>/health</code> не раскрывает секреты.</li>
         <li>Логи редактируют <code>Authorization</code>, <code>X-API-Key</code>, <code>api_key</code>, <code>token</code>, <code>secret</code>, <code>password</code> и <code>idep_...</code>.</li>
         <li>Endpoint state и очереди живут в gitignored <code>temp/ide_provider_runtime/</code>.</li>
+        <li>Локальные setup-конфиги плагина живут рядом с плагином в <code>plugin.local.*.json</code> и не попадают в Git/release archive.</li>
       </ul>
 
+      <h2>Как выключить</h2>
+      <ol class="steps">
+        <li>Откройте <code>plugins\ide_provider</code>.</li>
+        <li>Запустите <code>DISABLE.bat</code>.</li>
+        <li>Выберите тот scope, который включали: <code>current</code> или <code>global</code>.</li>
+        <li>Перезапустите MCP.</li>
+      </ol>
+
       <h2>Проверка перед публикацией</h2>
-      <pre><code>python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py plugins/ide_provider/*.py tests/test_ide_provider_*.py
-python -m unittest -v tests.test_ide_provider_manifest tests.test_ide_provider_config tests.test_ide_provider_security tests.test_ide_provider_queue tests.test_ide_provider_worker
+      <pre><code>python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py plugin_setup.py plugins/ide_provider/*.py tests/test_ide_provider_*.py
+python -m unittest -v tests.test_plugin_local_setup tests.test_ide_provider_manifest tests.test_ide_provider_config tests.test_ide_provider_security tests.test_ide_provider_queue tests.test_ide_provider_worker
 python -m unittest discover -s tests -v
 git diff --check
 python temp/ide_provider_runtime/_smoke.py</code></pre>
-
-      <div class="callout info">
-        <strong>Smoke:</strong> <code>_smoke.py</code> сам чистит <code>smoke</code>/<code>smoke2</code> endpoint-ы до и после запуска, проверяет auth, active bridge, no-model timeout и stop.
-      </div>
 
       <footer class="page-footer">
         <p>Если IDE зависла в ожидании ответа, проверьте <code>ide_provider_status</code>, redacted logs и не забывайте остановить endpoint через <code>ide_provider_stop</code>.</p>

@@ -1,3 +1,11 @@
+## 1.7.5 - 2026-07-27
+
+- Added plugin-local setup UX: every bundled plugin now ships `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat`, and `STATUS.bat`.
+- Added `plugin_setup.py`, an interactive helper that asks for `current` vs `global` scope, collects plugin-specific configuration, and writes local `plugin.local.*.json` files.
+- Updated plugin runtime to load plugin-local configs on startup, so users no longer need to edit workflow profile storage manually.
+- Added tests for plugin-local current/global config loading, disable cleanup, and packaged BAT wrappers.
+- Updated beginner plugin/IDE Provider docs for the BAT-based workflow and excluded `plugin.local.*.json` from Git/release archives.
+
 ## 1.7.4 - 2026-07-27
 
 ### IDE Provider

@@ -15,7 +15,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.4</small>
+        <small>документация для начинающих · v1.7.5</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -60,204 +60,91 @@
       </div>
     </aside>
     <main class="content">
+
       <h1>Плагины</h1>
-      <p>Плагины расширяют MCP-сервер прикладными инструментами. В текущей версии уже есть foundation для DB-family и AI/subagent-family плагинов.</p>
+      <p>Плагины расширяют MCP-сервер прикладными инструментами. В комплекте есть DB-family плагины, AI/subagent provider и <code>ide_provider</code> для локальной IDE.</p>
 
       <div class="callout info">
-        <strong>Главное правило:</strong> сам факт наличия папки в <code>plugins/</code> только делает плагин обнаруживаемым. Плагин не подключается автоматически: его нужно явно прикрепить к <code>current</code> или <code>global</code> scope и перезапустить MCP, чтобы пересобрался registry tools.
+        <strong>Главное правило:</strong> папка в <code>plugins/</code> только делает плагин обнаруживаемым. Для обычного включения не редактируйте внутренние profile-файлы. Откройте папку нужного плагина и запустите <code>SETUP.bat</code> или <code>ENABLE.bat</code>.
       </div>
 
       <h2>Что уже есть в комплекте</h2>
-      <table><thead><tr><th>Плагин</th><th>Папка</th><th>Tools</th><th>Для чего</th></tr></thead><tbody>
-      <tr><td>SQLite</td><td><code>plugins/SQLite</code></td><td><code>SQLite_list_connections</code>, <code>SQLite_list_tables</code>, <code>SQLite_describe_table</code>, <code>SQLite_query</code>, <code>SQLite_execute</code></td><td>Локальная SQLite DB внутри workspace.</td></tr>
-      <tr><td>PostgreSQL</td><td><code>plugins/postgres</code></td><td><code>postgres_list_connections</code>, <code>postgres_list_tables</code>, <code>postgres_describe_table</code>, <code>postgres_query</code>, <code>postgres_execute</code></td><td>Подключение к PostgreSQL через установленный <code>psql</code>.</td></tr>
-      <tr><td>OpenAI-compatible provider</td><td><code>plugins/openai_compat</code></td><td><code>openai_compat_list_models</code>, <code>openai_compat_describe_provider</code>, <code>openai_compat_generate_text</code>, <code>openai_compat_run_subagent</code></td><td>AI provider или subagent через OpenAI-compatible chat completions API.</td></tr>
-      <tr><td>IDE Provider</td><td><code>plugins/ide_provider</code></td><td><code>ide_provider_start</code>, <code>ide_provider_wait_request</code>, <code>ide_provider_send_response</code>, <code>ide_provider_stop</code></td><td>Локальный OpenAI-compatible active bridge для IDE.</td></tr>
-      </tbody></table>
+      <table>
+        <thead><tr><th>Плагин</th><th>Папка</th><th>Для чего</th></tr></thead>
+        <tbody>
+          <tr><td>SQLite</td><td><code>plugins\sqlite</code></td><td>Локальная SQLite DB внутри workspace.</td></tr>
+          <tr><td>PostgreSQL</td><td><code>plugins\postgres</code></td><td>Подключение к PostgreSQL через установленный <code>psql</code>.</td></tr>
+          <tr><td>OpenAI-compatible provider</td><td><code>plugins\openai_compat</code></td><td>AI provider или subagent через OpenAI-compatible chat completions API.</td></tr>
+          <tr><td>IDE Provider</td><td><code>plugins\ide_provider</code></td><td>Локальный OpenAI-compatible active bridge для IDE.</td></tr>
+        </tbody>
+      </table>
 
+      <h2>Как включить плагин</h2>
+      <ol class="steps">
+        <li><strong>Запустите MCP хотя бы один раз через <code>START.bat</code>.</strong><br>Так launcher создаст активный workflow profile для выбранной рабочей области.</li>
+        <li><strong>Откройте папку нужного плагина.</strong><br>Например: <code>plugins\ide_provider</code>, <code>plugins\sqlite</code>, <code>plugins\postgres</code> или <code>plugins\openai_compat</code>.</li>
+        <li><strong>Запустите <code>SETUP.bat</code>.</strong><br>Setup спросит, включать плагин для <code>current</code> рабочей области или <code>global</code> для всех областей.</li>
+        <li><strong>Ответьте на вопросы настройки.</strong><br>Для DB/AI plugins setup собирает connection/provider config. Для <code>ide_provider</code> обычно достаточно дефолтов.</li>
+        <li><strong>Перезапустите MCP.</strong><br>Registry tools строится на старте, поэтому после enable/disable нужен restart.</li>
+        <li><strong>Проверьте диагностику.</strong><br>В агенте можно вызвать <code>list_plugins</code> или <code>plugin_status</code>, чтобы увидеть loaded/not_attached/effective mode.</li>
+      </ol>
 
-      <h2>IDE Provider: active bridge для IDE</h2>
-      <p><code>ide_provider</code> поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1</code>. IDE отправляет запрос в <code>/v1/chat/completions</code>, активная MCP-модель забирает его через <code>ide_provider_wait_request</code> и возвращает ответ через <code>ide_provider_send_response</code>.</p>
+      <h2>Файлы в папке каждого плагина</h2>
+      <table>
+        <thead><tr><th>Файл</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr><td><code>SETUP.bat</code></td><td>Интерактивно включает плагин: scope, mode, вопросы настройки, запись локального конфига.</td></tr>
+          <tr><td><code>ENABLE.bat</code></td><td>То же включение через общий helper; удобно для повторной настройки.</td></tr>
+          <tr><td><code>DISABLE.bat</code></td><td>Удаляет локальный конфиг для выбранного scope.</td></tr>
+          <tr><td><code>STATUS.bat</code></td><td>Показывает локальные конфиги плагина для global/current.</td></tr>
+          <tr><td><code>plugin.json</code></td><td>Manifest: id, tools, modes, entrypoint.</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Где хранятся настройки</h2>
+      <p>Setup создаёт локальный config рядом с плагином:</p>
       <ul>
-        <li>Нужен trusted developer mode для запуска и остановки endpoint.</li>
-        <li>Endpoint использует локальный token с префиксом <code>idep_</code>.</li>
-        <li>Runtime state, logs и queue лежат в ignored <code>temp/ide_provider_runtime/</code>.</li>
-        <li>Подробная инструкция: <a href="ide-provider.html">IDE Provider для новичков</a>.</li>
+        <li><code>plugin.local.global.json</code> — плагин включён глобально;</li>
+        <li><code>plugin.local.current.&lt;profile-id&gt;.json</code> — плагин включён только для текущей рабочей области.</li>
       </ul>
+      <p>Эти файлы локальные, игнорируются Git/release archive и читаются plugin runtime при старте MCP.</p>
 
-      <h2>Global или current scope</h2>
-      <table><thead><tr><th>Scope</th><th>Что значит</th><th>Когда использовать</th></tr></thead><tbody>
-      <tr><td><code>global</code></td><td>Плагин доступен во всех workflow profiles, если его не переопределили в current profile.</td><td>Общий AI provider или общая DB.</td></tr>
-      <tr><td><code>current</code></td><td>Плагин привязан к текущему workspace/profile.</td><td>Проектная DB, проектный AI profile, локальный SQLite.</td></tr>
-      </tbody></table>
+      <h2>SQLite plugin</h2>
+      <p>Запустите <code>plugins\sqlite\SETUP.bat</code>. Setup спросит alias подключения и путь к SQLite-файлу относительно workspace.</p>
+      <pre><code>Connection alias: main
+SQLite file path relative to workspace: data\app.db</code></pre>
+      <p>После restart появятся tools <code>sqlite_list_connections</code>, <code>sqlite_list_tables</code>, <code>sqlite_describe_table</code>, <code>sqlite_query</code> и, в full access, <code>sqlite_execute</code>.</p>
 
-      <h2>Effective mode</h2>
-      <ul>
-        <li><code>read_only</code> — регистрируются только read-only tools.</li>
-        <li><code>full_access</code> — регистрируются и mutating/subagent tools, но только если активный profile находится в trusted mode.</li>
-      </ul>
+      <h2>PostgreSQL plugin</h2>
+      <p>Запустите <code>plugins\postgres\SETUP.bat</code>. Setup спросит alias, database, host/port/user и имя environment variable для пароля. Сам пароль в plugin config не сохраняется.</p>
+      <pre><code>Connection alias: main
+Database name: app
+Host: localhost
+User: app_user
+Password env var: APP_POSTGRES_PASSWORD</code></pre>
+      <p>Перед запуском MCP задайте переменную окружения с паролем, если она нужна вашему подключению.</p>
+
+      <h2>OpenAI-compatible plugin</h2>
+      <p>Запустите <code>plugins\openai_compat\SETUP.bat</code>. Setup спросит provider alias, base URL, имя environment variable с API key и модели.</p>
+      <pre><code>Provider alias: local
+Base URL before /chat/completions: http://127.0.0.1:1234/v1
+API key env var: LOCAL_AI_API_KEY
+Default model: local-model</code></pre>
+
+      <h2>IDE Provider plugin</h2>
+      <p>Запустите <code>plugins\ide_provider\SETUP.bat</code>. Обычно выбирайте <code>current</code> и <code>full_access</code>, а затем оставляйте localhost defaults. Подробная инструкция: <a href="ide-provider.html">IDE Provider</a>.</p>
+
+      <h2>Как выключить</h2>
+      <ol class="steps">
+        <li>Откройте папку плагина.</li>
+        <li>Запустите <code>DISABLE.bat</code>.</li>
+        <li>Выберите <code>current</code> или <code>global</code>.</li>
+        <li>Перезапустите MCP.</li>
+      </ol>
 
       <div class="callout warn">
-        <strong>Важно:</strong> <code>full_access</code> невозможен вне trusted mode. Это сделано специально, чтобы плагин не мог обойти общий safety gate.
+        <strong>Важно:</strong> после любого enable/disable нужен restart MCP. Hot reload registry tools пока не реализован.
       </div>
-
-      <h2>Где хранится plugin state</h2>
-      <pre><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code></pre>
-      <p>Внутри файла есть два места:</p>
-      <ul>
-        <li><code>globalPlugins</code> — глобальные подключения;</li>
-        <li><code>profiles[activeProfileId].plugins</code> — подключения текущей рабочей области.</li>
-      </ul>
-
-      <h2>Как подключить плагин: общий порядок</h2>
-      <ol class="steps">
-        <li><strong>Выберите текущий workspace</strong><br>Запустите <code>START.bat</code> и выберите нужный slot/path, если меню включено.</li>
-        <li><strong>Решите scope</strong><br><code>global</code> — для всех workspace, <code>current</code> — только для текущего.</li>
-        <li><strong>Подготовьте секреты</strong><br>Пароли и API keys храните в environment variables. В config пишите только имя переменной, например <code>APP_POSTGRES_PASSWORD</code> или <code>OPENAI_COMPAT_API_KEY</code>.</li>
-        <li><strong>Добавьте attachment в profile storage</strong><br>Если UI/команда attach ещё недоступны в вашем flow, делайте это аккуратно через <code>workflow-profiles.json</code>.</li>
-        <li><strong>Перезапустите MCP</strong><br>Hot reload tools не реализован: после attach/detach нужен restart.</li>
-        <li><strong>Проверьте диагностику</strong><br>Смотрите <code>server.log</code>, healthcheck/diagnostic output и список tools в MCP-клиенте.</li>
-      </ol>
-
-      <h2>SQLite plugin: пример current attach</h2>
-      <p>SQLite connection path должен оставаться внутри workspace.</p>
-      <pre><code>{
-        "profiles": {
-          "ВАШ_ACTIVE_PROFILE_ID": {
-            "plugins": {
-              "SQLite": {
-                "scope": "current",
-                "requestedMode": "read_only",
-                "config": {
-                  "connections": [
-                    {
-                      "name": "main",
-                      "path": "data/app.SQLite"
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }</code></pre>
-
-      <h3>SQLite full access</h3>
-      <p>Для <code>SQLite_execute</code> нужен <code>requestedMode: "full_access"</code> и trusted profile. Используйте только если агенту реально можно менять базу.</p>
-
-      <h2>PostgreSQL plugin: пример current attach</h2>
-      <p>Плагин использует <code>psql</code>, поэтому <code>psql</code> должен быть доступен в PATH. Пароль передаётся через environment variable, указанную в <code>password_env</code>.</p>
-      <pre><code>{
-        "profiles": {
-          "ВАШ_ACTIVE_PROFILE_ID": {
-            "plugins": {
-              "postgres": {
-                "scope": "current",
-                "requestedMode": "read_only",
-                "config": {
-                  "connections": [
-                    {
-                      "name": "main",
-                      "host": "127.0.0.1",
-                      "port": "5432",
-                      "database": "app",
-                      "user": "app_user",
-                      "password_env": "APP_POSTGRES_PASSWORD",
-                      "sslmode": "prefer"
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }</code></pre>
-
-      <div class="callout danger">
-        Не пишите реальный пароль PostgreSQL в <code>workflow-profiles.json</code>. Создайте переменную окружения <code>APP_POSTGRES_PASSWORD</code> и храните пароль там.
-      </div>
-
-      <h2>OpenAI-compatible plugin: пример global attach</h2>
-      <p>Подходит для OpenAI API, локального OpenAI-compatible endpoint или любого совместимого chat-completions provider.</p>
-      <pre><code>{
-        "globalPlugins": {
-          "openai_compat": {
-            "scope": "global",
-            "requestedMode": "read_only",
-            "config": {
-              "providers": [
-                {
-                  "name": "main",
-                  "base_url": "https://api.tunnellio.ru/v1",
-                  "api_key_env": "OPENAI_COMPAT_API_KEY",
-                  "default_model": "gpt-4.1-mini",
-                  "subagent_model": "gpt-4.1"
-                }
-              ],
-              "default_provider": "main",
-              "default_model": "gpt-4.1-mini",
-              "subagent_defaults": {
-                "temperature": 0.2,
-                "max_output_tokens": 800
-              }
-            }
-          }
-        }
-      }</code></pre>
-
-      <h3>Subagent mode</h3>
-      <p><code>openai_compat_run_subagent</code> требует <code>full_access</code> under trusted profile. Для обычной генерации текста достаточно <code>openai_compat_generate_text</code> в <code>read_only</code>.</p>
-
-      <h2>Как узнать activeProfileId</h2>
-      <ol>
-        <li>Откройте <code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code>.</li>
-        <li>Найдите поле <code>activeProfileId</code>.</li>
-        <li>В секции <code>profiles</code> найдите объект с таким ключом.</li>
-        <li>Добавляйте current plugins именно в этот объект.</li>
-      </ol>
-
-      <h2>Manifest плагина</h2>
-      <p>Каждый plugin folder должен содержать <code>plugin.json</code>. Минимальные поля:</p>
-      <pre><code>{
-        "id": "my_plugin",
-        "display_name": "My Plugin",
-        "version": "1.0.0",
-        "entrypoint": "plugin.py",
-        "supported_modes": ["read_only", "full_access"],
-        "capabilities": ["database"],
-        "config_schema_version": 1,
-        "required_env": [],
-        "dependencies": [],
-        "required": false,
-        "install_scope_support": "both",
-        "tools": []
-      }</code></pre>
-
-      <h2>Как написать свой плагин</h2>
-      <ol class="steps">
-        <li>Создайте папку <code>plugins/my_plugin</code>.</li>
-        <li>Добавьте <code>plugin.json</code> с manifest и tool descriptors. Tool names должны начинаться с <code>my_plugin_</code>.</li>
-        <li>Добавьте <code>plugin.py</code>.</li>
-        <li>В <code>plugin.py</code> реализуйте <code>validate_config(config, context)</code>, <code>healthcheck(context)</code> и <code>invoke(tool_name, arguments, context)</code>.</li>
-        <li>Не регистрируйте tools напрямую в обход общего registry.</li>
-        <li>Добавьте тесты и прогоните стандартный gate.</li>
-      </ol>
-
-      <h2>Где читать внутренние спецификации</h2>
-      <ul>
-        <li><code>docs/workflow-plugin-system/PLUGIN_MANIFEST_AND_REGISTRY_MODEL.md</code></li>
-        <li><code>docs/workflow-plugin-system/PLUGIN_REGISTRATION_CONTRACT.md</code></li>
-        <li><code>docs/workflow-plugin-system/PLUGIN_AUTHORING_PACKAGE_EXAMPLES.md</code></li>
-      </ul>
-      <p><strong>SQLite:</strong> read-only операции безопаснее по умолчанию; команда <code>sqlite_execute</code> требует <code>full_access</code>.</p>
-
-<section class="card" id="sqlite-plugin-correction">
-  <h2>SQLite plugin</h2>
-  <p>SQLite-плагин предоставляет инструменты чтения локальных SQLite-баз, включая <code>sqlite_query</code>. Команда <code>sqlite_execute</code> относится к изменяющим операциям и требует режима <code>full_access</code>.</p>
-</section>
-<footer class="page-footer">
-        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
-      </footer>
     </main>
   </div>
 </body>

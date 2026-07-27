@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.7.4
+# Notion Local MCP Easy 1.7.5
 
 
 
@@ -86,7 +86,7 @@ docs/ru/index.html
 
 
 
-Поверх этого работает универсальная plugin-system: плагины подключаются в `global` или `current` scope, получают effective mode (`read_only` или `full_access`) и пересобираются при смене активной рабочей области. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, а также AI/subagent family `openai_compat` с secret-ref моделью через env.
+Поверх этого работает универсальная plugin-system: каждый плагин содержит собственные `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat` и `STATUS.bat`. Оператор запускает setup из папки плагина, выбирает `current` или `global` scope, отвечает на вопросы настройки, а helper создаёт локальный `plugin.local.*.json`; при следующем старте MCP plugin runtime читает эти локальные конфиги и регистрирует tools. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, AI/subagent family `openai_compat`, а также `ide_provider`.
 
 
 
@@ -102,10 +102,11 @@ docs/ru/index.html
 Короткий сценарий:
 
 1. Запустите рабочую область в trusted developer mode.
-2. Подключите плагин `ide_provider` к нужному workflow profile.
-3. Вызовите `ide_provider_start`.
-4. Скопируйте в IDE `base_url`, `api_key` и `model`.
-5. Когда IDE отправляет запрос, активная MCP-модель забирает его через `ide_provider_wait_request` и отвечает через `ide_provider_send_response`.
+2. Откройте `plugins\ide_provider` и запустите `SETUP.bat` или `ENABLE.bat`.
+3. В setup выберите `current` для текущей рабочей области или `global` для всех областей, затем перезапустите MCP.
+4. Вызовите `ide_provider_start`.
+5. Скопируйте в IDE `base_url`, `api_key` и `model`.
+6. Когда IDE отправляет запрос, активная MCP-модель забирает его через `ide_provider_wait_request` и отвечает через `ide_provider_send_response`.
 
 Подробная инструкция для новичков: `docs/ru/ide-provider.html`.
 
@@ -425,7 +426,7 @@ Serveo остаётся режимом совместимости: launcher ис
 
 
 
-- `attach_plugin`, `detach_plugin` — явное подключение discoverable plugins в `current` или `global` scope с последующей пересборкой registry после рестарта MCP.
+- `list_plugins`, `plugin_status`, `attach_plugin`, `detach_plugin` — низкоуровневая диагностика/админка plugin registry. Для обычного пользователя используйте `SETUP.bat` / `ENABLE.bat` / `DISABLE.bat` из папки конкретного плагина.
 
 
 

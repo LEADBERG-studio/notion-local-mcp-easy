@@ -17,6 +17,8 @@ def included_files():
         relative = path.relative_to(ROOT)
         if any(part in EXCLUDED_DIRS for part in relative.parts):
             continue
+        if path.name.startswith("plugin.local.") and path.suffix.lower() == ".json":
+            continue
         if path.name in EXCLUDED_FILES or path.suffix.lower() in EXCLUDED_SUFFIXES:
             continue
         yield path, Path(f"notion-mcp-easy-{VERSION}") / relative
