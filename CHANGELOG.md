@@ -1,3 +1,12 @@
+## 1.8.4 - 2026-07-28
+
+- Corrected `ide_gateway` setup semantics: the standard gateway is a transport bridge to the active PromptQL/Notion agent, not a proxy to a local Ollama/OpenAI upstream.
+- Removed external upstream URL/API key/model questions from normal `ide_gateway` SETUP; the displayed model is only the IDE-facing alias (`ide-gateway`), while the real model is selected in PromptQL chat/project settings.
+- `ENABLE.bat` and default SETUP now configure `responder_upstream_type=promptql_bridge`, with responder autostart disabled so local code does not claim requests without the PromptQL agent.
+- `ide_gateway_responder_start` refuses to claim requests in `promptql_bridge`/manual mode and explains that queued requests must be handled by the active PromptQL bridge until callback automation is implemented.
+- Left external OpenAI-compatible responder internals as non-default experimental plumbing only; they are not part of the normal user setup path.
+- 1.8.4 supersedes the 1.8.3 external-upstream wording: normal `ide_gateway` configuration must not point users to Ollama/OpenAI or ask for an upstream model.
+
 ## 1.8.3 - 2026-07-28
 
 - Changed plugin-local `ENABLE.bat` semantics: `enable` now applies safe working defaults without interactive questions; `SETUP.bat` remains the interactive path for changing settings.

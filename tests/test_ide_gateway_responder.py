@@ -227,21 +227,21 @@ class IdeGatewayResponderTests(unittest.TestCase):
         return _read_json(path, None) or {}
 
 
-    def test_responder_start_fails_fast_without_upstream(self):
+    def test_responder_start_does_not_claim_in_promptql_bridge_mode(self):
         from plugins.ide_gateway.state import start_responder
         context = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
         config = normalize_config({
             "default_api_key": "ideg_" + "a" * 24,
-            "responder_enabled": True,
-            "responder_autostart": True,
-            "responder_upstream_type": "openai_compatible",
+            "responder_enabled": False,
+            "responder_autostart": False,
+            "responder_upstream_type": "promptql_bridge",
             "responder_upstream_base_url": "",
-            "responder_upstream_model": "mock-model",
+            "responder_upstream_model": "",
         }, context)
         result = start_responder({}, context, config)
         self.assertFalse(result["ok"])
-        self.assertEqual(result["status"], "not_configured")
-        self.assertIn("responder_upstream_base_url", result["message"])
+        self.assertEqual(result["status"], "promptql_bridge")
+        self.assertIn("PromptQL/Notion agent", result["message"])
 
     # 1. responder start creates running state
     def test_responder_start_creates_running_state(self):
@@ -257,6 +257,7 @@ class IdeGatewayResponderTests(unittest.TestCase):
         from plugins.ide_gateway.state import start_responder, _load_responder_state
         context = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
         config = normalize_config({}, context)
+        config["responder_upstream_type"] = "openai_compatible"
         config["responder_upstream_base_url"] = self.upstream.base_url
         config["responder_upstream_model"] = "mock-model"
         result = start_responder({"name": "default"}, context, config)
@@ -359,28 +360,17 @@ class IdeGatewayResponderTests(unittest.TestCase):
             self.assertNotIn("ideg_", text)
 
     # 11. setup can enable responder autostart
-    def test_setup_can_enable_responder_autostart(self):
-        existing = {
-            "responder_upstream_base_url": self.upstream.base_url,
-            "responder_upstream_model": "mock-model",
-        }
+    def test_setup_keeps_promptql_bridge_mode_without_external_upstream(self):
         answers = iter([
-            "custom",  # setup preset
-            "yes",     # endpoint autostart
-            "8787",    # preferred port
-            "ide-gateway",
-            "yes",     # enable autonomous responder
-            "yes",     # autostart responder
-            "openai_compatible",
-            self.upstream.base_url,
-            "",        # upstream API key
-            "mock-model",
-            "8787",    # port range start
-            "8899",    # port range end
-            "300",     # gateway timeout
-            "300",     # responder timeout
-            "fallback",
-            "",        # disabled tools
+            "custom",       # setup preset
+            "yes",          # endpoint autostart
+            "8787",         # preferred port
+            "ide-gateway",  # gateway model alias
+            "8787",         # port range start
+            "8899",         # port range end
+            "300",          # gateway timeout
+            "fallback",     # embeddings
+            "",             # disabled tools
         ])
         original_input = __builtins__["input"] if isinstance(__builtins__, dict) else __builtins__.input
         def fake_input(prompt=""):
@@ -393,18 +383,18 @@ class IdeGatewayResponderTests(unittest.TestCase):
         else:
             __builtins__.input = fake_input
         try:
-            config = plugin_setup.collect_ide_gateway_config(existing)
+            config = plugin_setup.collect_ide_gateway_config({})
         finally:
             if isinstance(__builtins__, dict):
                 __builtins__["input"] = original_input
             else:
                 __builtins__.input = original_input
 
-        self.assertTrue(config["responder_enabled"])
-        self.assertTrue(config["responder_autostart"])
-        self.assertEqual(config["responder_upstream_type"], "openai_compatible")
-        self.assertEqual(config["responder_upstream_base_url"], self.upstream.base_url)
-        self.assertEqual(config["responder_upstream_model"], "mock-model")
+        self.assertFalse(config["responder_enabled"])
+        self.assertFalse(config["responder_autostart"])
+        self.assertEqual(config["responder_upstream_type"], "promptql_bridge")
+        self.assertEqual(config["responder_upstream_base_url"], "")
+        self.assertEqual(config["responder_upstream_model"], "")
 
 
     def test_plugin_local_config_validates_responder_settings(self):

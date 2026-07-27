@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.3
+# Notion Local MCP Easy 1.8.4
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -69,12 +69,11 @@ Use it only in trusted developer mode and only with IDEs/workspaces you trust. S
 
 ## IDE Gateway plugin with autonomous responder
 
-Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Version 1.8.3 adds an autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream, so the IDE receives answers without manual `wait_request/send_response` calls.
+Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Version 1.8.4 adds an autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream, so the IDE receives answers without manual `wait_request/send_response` calls.
 
 Quick flow:
 
 1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode.
-2. Answer `yes` to endpoint autostart and `yes` to autonomous responder, pick the backend (`openai_compatible`), and provide the upstream base URL, API key, and model (or choose `manual` for the hand-bridge).
 3. Restart MCP — the endpoint starts on `127.0.0.1:8787` and the responder starts automatically.
 4. Call `ide_gateway_show_config` (`include_secret=true`) and copy `base_url`, `api_key`, `model` into your IDE.
 5. The IDE sends requests; the responder claims them and returns upstream answers automatically.
@@ -112,4 +111,5 @@ python -m unittest discover -s tests -v
 
 ### IDE Gateway defaults note
 
-`plugins\\ide_gateway\\ENABLE.bat` applies safe working defaults without questions: endpoint autostart is enabled and a local `ideg_...` key is generated, but the autonomous responder remains disabled/manual until `SETUP.bat` is used to configure a real upstream base URL, API key (if needed), and model. This prevents requests from being claimed by a responder that has nowhere to send them.
+\n\n### IDE Gateway is a PromptQL bridge\n\n`plugins\\ide_gateway\\ENABLE.bat` configures a local IDE-facing `/v1` endpoint and generated `ideg_...` key. It does **not** ask for a local OpenAI/Ollama upstream: IDE requests are queued for the active PromptQL/Notion agent, and the real model is selected in PromptQL chat/project settings. Until reverse callback automation exists, queued requests are completed through the bridge tools (`ide_gateway_wait_request` / `ide_gateway_send_response`).\n
+Current IDE Gateway note: the local config model is only an IDE-facing alias (`ide-gateway`). The real model is selected by the active PromptQL/Notion chat or project settings; normal setup does not ask for an upstream base URL or upstream model.

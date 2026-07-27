@@ -44,7 +44,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Responder (autonomous serve loop) section.
     "responder_enabled": False,
     "responder_autostart": False,
-    "responder_upstream_type": "openai_compatible",  # openai_compatible | manual
+    "responder_upstream_type": "promptql_bridge",  # promptql_bridge | openai_compatible | manual
     "responder_upstream_base_url": "",
     "responder_upstream_api_key": "",
     "responder_upstream_model": "",
@@ -218,8 +218,8 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     normalized["responder_autostart"] = responder_autostart
 
     upstream_type = str(normalized.get("responder_upstream_type", "openai_compatible")).strip().lower()
-    if upstream_type not in {"openai_compatible", "manual"}:
-        upstream_type = "openai_compatible"
+    if upstream_type not in {"promptql_bridge", "openai_compatible", "manual"}:
+        upstream_type = "promptql_bridge"
     normalized["responder_upstream_type"] = upstream_type
 
     normalized["responder_upstream_base_url"] = str(normalized.get("responder_upstream_base_url", "") or "").strip()
@@ -596,12 +596,19 @@ def start_responder(arguments: dict[str, Any], context: dict[str, Any], config: 
         raise ValueError("ide_gateway_responder_start requires full_access under a trusted profile")
 
     name = normalize_name(arguments.get("name"))
+    if config.get("responder_upstream_type") in {"promptql_bridge", "manual"}:
+        return {
+            "ok": False,
+            "name": name,
+            "status": "promptql_bridge",
+            "message": "ide_gateway is a transport bridge to the active PromptQL/Notion agent. Local code must not call an external model or claim requests in this mode; queued requests are handled through the PromptQL bridge tools until callback automation is implemented.",
+        }
     if config.get("responder_upstream_type") == "openai_compatible" and not str(config.get("responder_upstream_base_url", "")).strip():
         return {
             "ok": False,
             "name": name,
             "status": "not_configured",
-            "message": "Cannot start autonomous responder: responder_upstream_base_url is empty. Run SETUP.bat and configure a real upstream, or use manual mode.",
+            "message": "Experimental external-upstream responder requires responder_upstream_base_url. Standard IDE Gateway setup does not use this mode.",
         }
     root = runtime_root(context)
     (root / "responder").mkdir(parents=True, exist_ok=True)

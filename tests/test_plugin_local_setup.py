@@ -133,7 +133,7 @@ class PluginLocalSetupTests(unittest.TestCase):
         self.assertEqual(config["default_port"], 8787)
         self.assertFalse(config["responder_enabled"])
         self.assertFalse(config["responder_autostart"])
-        self.assertEqual(config["responder_upstream_type"], "manual")
+        self.assertEqual(config["responder_upstream_type"], "promptql_bridge")
         self.assertEqual(config["responder_upstream_base_url"], "")
         self.assertEqual(config["responder_upstream_model"], "")
 

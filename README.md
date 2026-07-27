@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.3
+# Notion Local MCP Easy 1.8.4
 
 
 
@@ -113,13 +113,12 @@ docs/ru/index.html
 
 ## IDE Gateway с автономным responder
 
-Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). С 1.8.3 шлюз имеет автономный responder-loop, который сам забирает запросы из очереди и отправляет их в настроенный upstream (OpenAI-compatible), поэтому IDE получает ответы без ручного вызова `wait_request/send_response`.
+Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). С 1.8.4 шлюз имеет автономный responder-loop, который сам забирает запросы из очереди и отправляет их в настроенный upstream (OpenAI-compatible), поэтому IDE получает ответы без ручного вызова `wait_request/send_response`.
 
 Короткий сценарий:
 
 1. Запустите рабочую область в trusted developer mode.
 2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat`.
-3. Ответьте `yes` на endpoint autostart и `yes` на autonomous responder, выберите backend (`openai_compatible`), укажите upstream base URL, API key и model (или `manual` для ручного моста).
 4. Перезапустите MCP — endpoint поднимется на `127.0.0.1:8787`, responder стартует автоматически.
 5. Вызовите `ide_gateway_show_config` (`include_secret=true`) и скопируйте `base_url`, `api_key`, `model` в IDE.
 6. IDE отправляет запросы — responder сам забирает их и возвращает ответы.
@@ -769,4 +768,5 @@ Regex-поиск отключён, чтобы исключить зависан�
 
 ### Настройки IDE Gateway по умолчанию
 
-`plugins\\ide_gateway\\ENABLE.bat` применяет безопасные настройки без вопросов: endpoint autostart включён и локальный ключ `ideg_...` генерируется автоматически, но автономный responder остаётся выключенным/manual, пока через `SETUP.bat` не задан реальный upstream base URL, API key (если нужен) и model. Так запросы не будут забираться responder-ом, которому некуда их отправлять.
+\n\n### IDE Gateway — это мост к PromptQL\n\n`plugins\\ide_gateway\\ENABLE.bat` настраивает локальный `/v1` endpoint для IDE и генерирует ключ `ideg_...`. Он **не** спрашивает локальный OpenAI/Ollama upstream: IDE-запросы кладутся в очередь для активного PromptQL/Notion-агента, а реальная модель выбирается в чате/настройках PromptQL. Пока нет reverse-callback automation, запросы завершаются bridge tools (`ide_gateway_wait_request` / `ide_gateway_send_response`).\n
+Текущая заметка IDE Gateway: модель в локальном config — только alias для IDE (`ide-gateway`). Реальная модель выбирается активным PromptQL/Notion-чатом или настройками проекта; обычный setup не спрашивает upstream base URL или upstream model.
