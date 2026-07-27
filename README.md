@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.7.8
+# Notion Local MCP Easy 1.8.2
 
 
 
@@ -109,6 +109,21 @@ docs/ru/index.html
 6. Когда IDE отправляет запрос, активная MCP-модель забирает его через `ide_provider_wait_request` и отвечает через `ide_provider_send_response`.
 
 Подробная инструкция для новичков: `docs/ru/ide-provider.html`.
+
+
+## IDE Gateway с автономным responder
+
+Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). С 1.8.2 шлюз имеет автономный responder-loop, который сам забирает запросы из очереди и отправляет их в настроенный upstream (OpenAI-compatible), поэтому IDE получает ответы без ручного вызова `wait_request/send_response`.
+
+Короткий сценарий:
+
+1. Запустите рабочую область в trusted developer mode.
+2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat`.
+3. Ответьте `yes` на endpoint autostart и `yes` на autonomous responder, выберите backend (`openai_compatible`), укажите upstream base URL, API key и model (или `manual` для ручного моста).
+4. Перезапустите MCP — endpoint поднимется на `127.0.0.1:8787`, responder стартует автоматически.
+5. Вызовите `ide_gateway_show_config` (`include_secret=true`) и скопируйте `base_url`, `api_key`, `model` в IDE.
+6. IDE отправляет запросы — responder сам забирает их и возвращает ответы.
+7. Диагностика: `ide_gateway_status`, `ide_gateway_responder_status`, `ide_gateway_responder_logs`.
 
 
 ## OAuth через Tunnellio

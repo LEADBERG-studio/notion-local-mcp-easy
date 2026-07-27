@@ -178,6 +178,75 @@
       "handler_ref": "ide_gateway.rotate_token",
       "safety_tags": ["ide", "gateway", "secret", "full_access"],
       "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_responder_start",
+      "title": "Start IDE Gateway responder",
+      "description": "Start the autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream so the IDE receives answers without manual wait_request/send_response calls.",
+      "capability": "ide_gateway.responder_start",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.responder_start",
+      "safety_tags": ["ide", "gateway", "responder", "network", "full_access"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_responder_stop",
+      "title": "Stop IDE Gateway responder",
+      "description": "Stop a running autonomous responder loop.",
+      "capability": "ide_gateway.responder_stop",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.responder_stop",
+      "safety_tags": ["ide", "gateway", "responder", "full_access"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_responder_status",
+      "title": "IDE Gateway responder status",
+      "description": "Show running status, pid, upstream type/model and queue counters for the autonomous responder.",
+      "capability": "ide_gateway.responder_status",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.responder_status",
+      "safety_tags": ["ide", "gateway", "responder", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_responder_logs",
+      "title": "Read IDE Gateway responder logs",
+      "description": "Read recent redacted logs for the autonomous responder loop.",
+      "capability": "ide_gateway.responder_logs",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "limit": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.responder_logs",
+      "safety_tags": ["ide", "gateway", "responder", "logs", "read_only"],
+      "diagnostic_visibility": "full"
     }
   ]
 }

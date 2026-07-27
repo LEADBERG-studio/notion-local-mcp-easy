@@ -1,3 +1,15 @@
+## 1.8.2 - 2026-07-28
+
+- Added an autonomous responder loop to `ide_gateway` so IDE requests are served automatically without manual `ide_gateway_wait_request` / `ide_gateway_send_response` calls.
+- Added four new `ide_gateway` tools: `ide_gateway_responder_start`, `ide_gateway_responder_stop`, `ide_gateway_responder_status`, `ide_gateway_responder_logs`.
+- The responder runs as a separate subprocess, polls the request queue, forwards requests to a configured OpenAI-compatible upstream (or stays in `manual` mode for the hand-bridge), and completes them with content, `stream_chunks`, or a structured `payload` for tool calls.
+- Streaming requests keep the 1.8.1 lifecycle: when the upstream streams, the responder captures token deltas as `stream_chunks` so the worker can emit the full `chat.completion.chunk` / `response.output_text.delta` events followed by `data: [DONE]`.
+- Extended `ide_gateway` plugin-local config with a `responder` section (autostart, upstream type/base URL/API key/model, poll interval, max concurrent requests, request timeout).
+- Extended `collect_ide_gateway_config` setup wizard with simple choices for responder autostart, backend type, upstream base URL, API key, and model.
+- The `ide_gateway` `startup()` hook now autostarts both the endpoint (preferred port 8787) and the responder when the profile is in `full_access`.
+- Added 12 regression tests covering responder start/stop/idempotency, `/v1/responses` and `/v1/chat/completions` (stream and non-stream) completion, upstream failure handling, no API key leakage in logs, setup autostart, and responder config validation.
+- Updated VERSION to 1.8.2 (CRLF byte-exact) and launcher version constant.
+
 ## 1.7.9 - 2026-07-27
 
 ## 1.8.1 - 2026-07-27

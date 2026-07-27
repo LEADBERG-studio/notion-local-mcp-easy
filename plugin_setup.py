@@ -212,7 +212,7 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     else:
         print("Keeping existing local IDE Gateway API key from the plugin-local config.")
 
-    autostart = prompt_bool("Autostart endpoint when MCP starts (preferred port 8787)?", True)
+    autostart = prompt_bool("Enable endpoint autostart (preferred port 8787)?", True)
     config["autostart"] = autostart
     if autostart:
         port = prompt_text("Preferred port (default 8787)", str(config.get("default_port", 8787)))
@@ -220,6 +220,24 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
             config["default_port"] = int(port)
         except ValueError:
             config["default_port"] = 8787
+
+    # Responder section
+    responder_enabled = prompt_bool("Enable autonomous responder (auto-serve IDE requests)?", True)
+    config["responder_enabled"] = responder_enabled
+    if responder_enabled:
+        config["responder_autostart"] = prompt_bool("Autostart responder when MCP starts?", True)
+        backend = prompt_choice("Responder backend", ["openai_compatible", "manual"], "openai_compatible")
+        config["responder_upstream_type"] = backend
+        if backend == "openai_compatible":
+            base = prompt_text("Upstream base URL (e.g. http://127.0.0.1:11434/v1 or https://api.openai.com/v1)",
+                               str(config.get("responder_upstream_base_url", "")))
+            config["responder_upstream_base_url"] = base.rstrip("/")
+            key = prompt_text("Upstream API key (empty for local unauthenticated)",
+                              str(config.get("responder_upstream_api_key", "")))
+            config["responder_upstream_api_key"] = key
+            model = prompt_text("Upstream model id",
+                                str(config.get("responder_upstream_model", "")))
+            config["responder_upstream_model"] = model
 
     setup_mode = prompt_choice("Endpoint defaults", ["default", "custom"], "default")
     if setup_mode == "default":

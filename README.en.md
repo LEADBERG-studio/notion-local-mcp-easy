@@ -1,4 +1,4 @@
-# Notion Local MCP Easy
+# Notion Local MCP Easy 1.8.2
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -65,6 +65,20 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 Version 1.7.8 adds the `ide_provider` active-bridge plugin. It starts a local OpenAI-compatible endpoint on `127.0.0.1` so an IDE can send chat-completion requests to the active MCP model. The model serves those requests through `ide_provider_wait_request` and `ide_provider_send_response` while still using Local MCP Easy tools.
 
 Use it only in trusted developer mode and only with IDEs/workspaces you trust. See the Russian beginner guide at `docs/ru/ide-provider.html`.
+
+
+## IDE Gateway plugin with autonomous responder
+
+Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Version 1.8.2 adds an autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream, so the IDE receives answers without manual `wait_request/send_response` calls.
+
+Quick flow:
+
+1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode.
+2. Answer `yes` to endpoint autostart and `yes` to autonomous responder, pick the backend (`openai_compatible`), and provide the upstream base URL, API key, and model (or choose `manual` for the hand-bridge).
+3. Restart MCP — the endpoint starts on `127.0.0.1:8787` and the responder starts automatically.
+4. Call `ide_gateway_show_config` (`include_secret=true`) and copy `base_url`, `api_key`, `model` into your IDE.
+5. The IDE sends requests; the responder claims them and returns upstream answers automatically.
+6. Diagnostics: `ide_gateway_status`, `ide_gateway_responder_status`, `ide_gateway_responder_logs`.
 
 
 ## Safety model
