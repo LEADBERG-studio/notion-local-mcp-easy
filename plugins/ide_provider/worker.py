@@ -9,6 +9,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from plugins.ide_provider.openai_compat import (
     chat_completion_response,
+    chat_completion_chunk,
+    chat_completion_done_chunk,
     models_response,
     openai_error,
     validate_chat_request,
@@ -88,6 +90,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _send_sse(self, status: int, events: list[dict[str, Any] | str]) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for event in events:
+            if isinstance(event, str):
+                line = f"data: {event}\n\n".encode("utf-8")
+            else:
+                line = f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+            self.wfile.write(line)
+            with contextlib.suppress(Exception):
+                self.wfile.flush()
 
     def _authorized(self) -> bool:
         token = current_token()
@@ -179,16 +196,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, openai_error(str(exc), "bad_request"))
             return
 
-        if validated["stream"]:
-            self._send_json(
-                400,
-                openai_error(
-                    "Streaming is not supported by ide_provider MVP.",
-                    "streaming_not_supported",
-                ),
-            )
-            return
-
         runtime = Path(STATE_PATH).parent.parent
         endpoint = STATE.get("name", "default")
         request_timeout = int(STATE.get("request_timeout_seconds", 300))
@@ -224,15 +231,27 @@ class Handler(BaseHTTPRequestHandler):
             req = result["request"]
             content = req["response"]["content"]
             finish = req["response"].get("finish_reason", "stop")
-            self._send_json(
-                200,
-                chat_completion_response(
-                    request_id,
-                    STATE.get("model_id", "ide-provider"),
-                    content,
-                    finish,
-                ),
-            )
+            model_id = STATE.get("model_id", "ide-provider")
+            if validated["stream"]:
+                self._send_sse(
+                    200,
+                    [
+                        chat_completion_chunk(request_id, model_id, "", None, role="assistant"),
+                        chat_completion_chunk(request_id, model_id, content, None),
+                        chat_completion_chunk(request_id, model_id, "", finish),
+                        chat_completion_done_chunk(),
+                    ],
+                )
+            else:
+                self._send_json(
+                    200,
+                    chat_completion_response(
+                        request_id,
+                        model_id,
+                        content,
+                        finish,
+                    ),
+                )
             return
         if result["status"] == "failed":
             req = result["request"]

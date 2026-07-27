@@ -1,3 +1,10 @@
+## 1.7.8 - 2026-07-27
+
+- IDE Provider now accepts `stream: true` OpenAI-compatible chat-completion requests.
+- Streaming clients receive `text/event-stream` SSE output with OpenAI-style completion chunks and `[DONE]`; token-by-token streaming is still not implemented, but IDE clients that require streaming mode no longer fail.
+- Added worker regression coverage for the streaming transport path.
+- Hardened IDE Provider queue writes on Windows with unique temp files and bounded retries around `os.replace()`.
+
 ## 1.7.7 - 2026-07-27
 
 - Fixed `ide_provider_start` with no explicit port: MCP tool schema supplies `port: 0` by default, and the plugin now treats `0` as auto-pick from `port_range`.

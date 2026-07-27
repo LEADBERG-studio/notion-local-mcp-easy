@@ -214,11 +214,30 @@ class IdeProviderWorkerTests(unittest.TestCase):
 
         self.assertIsNotNone(responder_result["req"])
 
-    def test_streaming_rejected(self):
+    def test_streaming_returns_sse_after_model_response(self):
         port = self._free_port()
         token = "test-token"
-        state = self._make_state(port, token)
+        state = self._make_state(port, token, request_timeout_seconds=10)
         self._start_worker(port, token, state)
+
+        responder_result = {}
+
+        def responder():
+            req = claim_next_request(self.runtime_root, "ep1", wait_timeout=10, request_timeout=10)
+            responder_result["req"] = req
+            if req:
+                self.assertTrue(req["stream"])
+                complete_request(
+                    self.runtime_root,
+                    req["request_id"],
+                    "Hello streamed",
+                    "stop",
+                    max_response_bytes=1024,
+                )
+
+        thread = threading.Thread(target=responder)
+        thread.start()
+
         payload = json.dumps({
             "model": "ide-provider",
             "messages": [{"role": "user", "content": "hi"}],
@@ -230,11 +249,20 @@ class IdeProviderWorkerTests(unittest.TestCase):
             data=payload,
             method="POST",
         )
-        with self.assertRaises(urllib.error.HTTPError) as caught:
-            urllib.request.urlopen(req, timeout=5)
-        self.assertEqual(caught.exception.code, 400)
-        body = json.loads(caught.exception.read())
-        self.assertEqual(body["error"]["code"], "streaming_not_supported")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn("text/event-stream", response.headers.get("Content-Type", ""))
+                text = response.read().decode("utf-8")
+                self.assertIn("data: ", text)
+                self.assertIn('"role": "assistant"', text)
+                self.assertIn("Hello streamed", text)
+                self.assertIn("chat.completion.chunk", text)
+                self.assertIn("data: [DONE]", text)
+        finally:
+            thread.join(timeout=5)
+
+        self.assertIsNotNone(responder_result["req"])
 
     def test_oversized_body_rejected(self):
         port = self._free_port()

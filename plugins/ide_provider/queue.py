@@ -67,9 +67,28 @@ def _new_request_id() -> str:
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     path = Path(path)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Windows can transiently deny os.replace() when another worker thread or
+    # process has just read the target request file. Use a unique temp file so
+    # concurrent writers never share *.tmp, then retry the replace briefly.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(str(tmp), str(path))
+
+    last_error: OSError | None = None
+    for _ in range(80):
+        try:
+            os.replace(str(tmp), str(path))
+            return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.05)
+
+    with contextlib.suppress(OSError):
+        tmp.unlink()
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"failed to replace {path}")
 
 
 def _read_json(path: Path, default: Any = None) -> Any:

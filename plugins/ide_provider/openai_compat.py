@@ -34,6 +34,40 @@ def chat_completion_response(
     }
 
 
+
+def chat_completion_chunk(
+    request_id: str,
+    model: str,
+    content: str,
+    finish_reason: str | None = None,
+    *,
+    role: str | None = None,
+) -> dict[str, Any]:
+    now = int(time.time())
+    delta: dict[str, Any] = {}
+    if role:
+        delta["role"] = role
+    if content:
+        delta["content"] = content
+    return {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": now,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": delta,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+
+
+def chat_completion_done_chunk() -> str:
+    return "[DONE]"
+
+
 def openai_error(message: str, code: str, type_: str = "ide_provider_error") -> dict[str, Any]:
     """Build an OpenAI-compatible error payload."""
     return {"error": {"message": message, "type": type_, "code": code}}
