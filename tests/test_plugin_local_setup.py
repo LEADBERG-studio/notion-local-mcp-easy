@@ -10,7 +10,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from plugin_runtime import PluginManager
-from plugin_setup import local_config_path, remove_local_plugin_config, write_local_plugin_config
+from plugin_setup import collect_ide_provider_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
 
 class DummyMCP:
     def __init__(self):
@@ -129,7 +129,22 @@ class PluginLocalSetupTests(unittest.TestCase):
         for manifest in sorted((PROJECT / "plugins").glob("*/plugin.json")):
             plugin_dir = manifest.parent
             for name in ["SETUP.bat", "ENABLE.bat", "DISABLE.bat", "STATUS.bat"]:
-                self.assertTrue((plugin_dir / name).is_file(), f"{plugin_dir.name} missing {name}")
+                wrapper = plugin_dir / name
+                self.assertTrue(wrapper.is_file(), f"{plugin_dir.name} missing {name}")
+                text = wrapper.read_text(encoding="utf-8")
+                self.assertIn('set "PLUGIN_DIR=%~dp0."', text)
+                self.assertIn('--plugin-dir "%PLUGIN_DIR%"', text)
+
+    def test_ide_provider_setup_generates_api_key_with_default_preset(self):
+        with mock.patch("builtins.input", return_value=""):
+            config = collect_ide_provider_config({})
+        self.assertRegex(config["default_api_key"], r"^idep_[A-Za-z0-9_-]{16,}$")
+        self.assertNotIn("default_model_id", config)
+
+    def test_ide_provider_setup_keeps_existing_api_key(self):
+        with mock.patch("builtins.input", return_value=""):
+            config = collect_ide_provider_config({"default_api_key": "idep_existing-token-123456"})
+        self.assertEqual(config["default_api_key"], "idep_existing-token-123456")
 
 if __name__ == "__main__":
     unittest.main()

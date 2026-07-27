@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.7.5
+# Notion Local MCP Easy 1.7.6
 
 
 

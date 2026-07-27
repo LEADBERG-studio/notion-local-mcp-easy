@@ -28,10 +28,14 @@ DEFAULT_CONFIG = {
     "wait_timeout_seconds": 3600,
     "max_pending_requests": 8,
     "log_retention_lines": 1000,
+    "default_api_key": "",
 }
 
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 _MODEL_ID_RE = re.compile(r"^[a-zA-Z0-9._/-]{1,80}$")
+
+
+_API_KEY_RE = re.compile(r"^idep_[A-Za-z0-9_-]{16,}$")
 
 
 def runtime_root(context: dict[str, Any]) -> Path:
@@ -122,6 +126,11 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     if not _MODEL_ID_RE.match(model_id):
         raise ValueError("default_model_id must match ^[a-zA-Z0-9._/-]{1,80}$")
     normalized["default_model_id"] = model_id
+
+    default_api_key = str(normalized.get("default_api_key", "") or "").strip()
+    if default_api_key and not _API_KEY_RE.match(default_api_key):
+        raise ValueError("default_api_key must be a generated idep_ token")
+    normalized["default_api_key"] = default_api_key
 
     for key in ("max_request_bytes", "max_response_bytes"):
         try:
@@ -273,7 +282,7 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
         low, high = config["port_range"]
         port = find_free_port(host, low, high)
 
-    token = generate_token()
+    token = str(config.get("default_api_key") or "").strip() or generate_token()
     now = datetime.datetime.now().isoformat()
     root = runtime_root(context)
     root.mkdir(parents=True, exist_ok=True)

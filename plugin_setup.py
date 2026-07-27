@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import secrets
 import importlib.util
 import json
 import os
@@ -100,6 +101,10 @@ def prompt_text(label: str, default: str = "", required: bool = False) -> str:
 def prompt_bool(label: str, default: bool = True) -> bool:
     return prompt_choice(label, ["yes", "no"], "yes" if default else "no") == "yes"
 
+def generate_ide_provider_api_key() -> str:
+    return "idep_" + secrets.token_urlsafe(32)
+
+
 def collect_sqlite_config(existing: dict[str, Any]) -> dict[str, Any]:
     print("SQLite setup: add workspace-relative database file connections.")
     connections = []
@@ -166,18 +171,28 @@ def collect_openai_compat_config(existing: dict[str, Any]) -> dict[str, Any]:
     }
 
 def collect_ide_provider_config(existing: dict[str, Any]) -> dict[str, Any]:
-    print("IDE Provider setup: defaults are safe for local 127.0.0.1 IDE usage.")
+    print("IDE Provider setup: choose a preset unless you need custom endpoint defaults.")
     config = dict(existing)
-    if prompt_bool("Use default localhost settings?", True):
+    api_key = str(config.get("default_api_key", "")).strip()
+    if not api_key:
+        api_key = generate_ide_provider_api_key()
+        config["default_api_key"] = api_key
+        print("Generated local IDE Provider API key and saved it to the plugin-local config.")
+    else:
+        print("Keeping existing local IDE Provider API key from the plugin-local config.")
+
+    setup_mode = prompt_choice("Endpoint defaults", ["default", "custom"], "default")
+    if setup_mode == "default":
         return config
+
     model = prompt_text("Default model id", str(config.get("default_model_id", "ide-provider")) or "ide-provider")
     if model:
         config["default_model_id"] = model
-    first = prompt_text("Port range start", str((config.get("port_range") or [8787, 8877])[0]))
-    last = prompt_text("Port range end", str((config.get("port_range") or [8787, 8877])[1]))
+    first = prompt_text("Port range start", str((config.get("port_range") or [8787, 8899])[0]))
+    last = prompt_text("Port range end", str((config.get("port_range") or [8787, 8899])[1]))
     if first and last:
         config["port_range"] = [int(first), int(last)]
-    timeout = prompt_text("Request timeout seconds", str(config.get("request_timeout_seconds", 600)))
+    timeout = prompt_text("Request timeout seconds", str(config.get("request_timeout_seconds", 300)))
     if timeout:
         config["request_timeout_seconds"] = int(timeout)
     return config

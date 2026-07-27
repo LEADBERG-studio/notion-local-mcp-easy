@@ -69,6 +69,13 @@ class IdeProviderConfigTests(unittest.TestCase):
         self.assertEqual(result["port_range"], [9000, 9100])
         self.assertEqual(result["default_model_id"], "custom-model")
 
+    def test_default_api_key_must_be_generated_idep_token(self):
+        with self.assertRaisesRegex(ValueError, "default_api_key"):
+            normalize_config({"default_api_key": "not-a-token"})
+        token = "idep_" + "a" * 32
+        result = normalize_config({"default_api_key": token})
+        self.assertEqual(result["default_api_key"], token)
+
 
 if __name__ == "__main__":
     unittest.main()

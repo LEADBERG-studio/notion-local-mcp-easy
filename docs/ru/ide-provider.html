@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.5</small>
+        <small>документация для начинающих · v1.7.6</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -83,7 +83,7 @@
         <li><strong>Откройте папку плагина.</strong><br>Перейдите в <code>plugins\ide_provider</code>.</li>
         <li><strong>Запустите <code>SETUP.bat</code> или <code>ENABLE.bat</code>.</strong><br>Выберите <code>current</code> для текущей рабочей области или <code>global</code> для всех областей. Обычно для IDE выбирают <code>current</code>.</li>
         <li><strong>Выберите <code>full_access</code>.</strong><br>Он нужен для запуска/остановки локального endpoint и ротации token.</li>
-        <li><strong>Оставьте default localhost settings.</strong><br>По умолчанию endpoint слушает только <code>127.0.0.1</code>, что безопаснее для локальной IDE.</li>
+        <li><strong>Оставьте default endpoint settings.</strong><br>Setup автоматически сгенерирует локальный API key, а endpoint по умолчанию слушает только <code>127.0.0.1</code>.</li>
         <li><strong>Перезапустите MCP.</strong><br>После enable/disable registry tools пересобирается при рестарте.</li>
         <li><strong>Запустите endpoint через MCP tool.</strong><br>Например: <code>ide_provider_start</code> с <code>name="ide"</code> и <code>model_id="ide-provider"</code>.</li>
         <li><strong>Скопируйте настройки в IDE.</strong><br>Используйте <code>base_url</code>, <code>api_key</code> и <code>model</code>, которые вернул <code>ide_provider_start</code> или <code>ide_provider_show_config</code>.</li>

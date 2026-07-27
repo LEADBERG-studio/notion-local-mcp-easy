@@ -1,3 +1,10 @@
+## 1.7.6 - 2026-07-27
+
+- Fixed plugin BAT wrappers so `--plugin-dir` is passed as a safe normalized folder path instead of a raw trailing-backslash `%~dp0` value.
+- Improved IDE Provider setup with a simple `default` / `custom` endpoint-defaults choice.
+- IDE Provider setup now generates and saves a local `idep_...` API key in the plugin-local config during installation, and endpoint start reuses that key by default.
+- Added regression coverage for safe BAT wrapper arguments, IDE Provider setup API key generation, and default API key validation.
+
 ## 1.7.5 - 2026-07-27
 
 - Added plugin-local setup UX: every bundled plugin now ships `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat`, and `STATUS.bat`.
