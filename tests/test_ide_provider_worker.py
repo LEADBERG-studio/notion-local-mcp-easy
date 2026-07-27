@@ -221,12 +221,15 @@ class IdeProviderWorkerTests(unittest.TestCase):
         self._start_worker(port, token, state)
 
         responder_result = {}
+        responder_ready = threading.Event()
 
         def responder():
             req = claim_next_request(self.runtime_root, "ep1", wait_timeout=10, request_timeout=10)
             responder_result["req"] = req
             if req:
                 self.assertTrue(req["stream"])
+                responder_ready.set()
+                time.sleep(0.5)
                 complete_request(
                     self.runtime_root,
                     req["request_id"],
@@ -253,16 +256,40 @@ class IdeProviderWorkerTests(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=10) as response:
                 self.assertEqual(response.status, 200)
                 self.assertIn("text/event-stream", response.headers.get("Content-Type", ""))
+                self.assertTrue(responder_ready.wait(timeout=2))
                 text = response.read().decode("utf-8")
-                self.assertIn("data: ", text)
-                self.assertIn('"role": "assistant"', text)
-                self.assertIn("Hello streamed", text)
                 self.assertIn("chat.completion.chunk", text)
+                self.assertIn("chatcmpl-req_", text)
+                self.assertIn("Hello streamed", text)
                 self.assertIn("data: [DONE]", text)
         finally:
             thread.join(timeout=5)
 
         self.assertIsNotNone(responder_result["req"])
+
+    def test_streaming_timeout_returns_sse_done(self):
+        port = self._free_port()
+        token = "test-token"
+        state = self._make_state(port, token, request_timeout_seconds=2)
+        self._start_worker(port, token, state)
+
+        payload = json.dumps({
+            "model": "ide-provider",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        }).encode("utf-8")
+        req = self._request(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            token=token,
+            data=payload,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("text/event-stream", response.headers.get("Content-Type", ""))
+            text = response.read().decode("utf-8")
+            self.assertIn("Timed out waiting for MCP model", text)
+            self.assertIn("data: [DONE]", text)
 
     def test_oversized_body_rejected(self):
         port = self._free_port()

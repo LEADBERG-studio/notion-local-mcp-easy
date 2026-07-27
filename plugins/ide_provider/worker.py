@@ -18,6 +18,7 @@ from plugins.ide_provider.openai_compat import (
 from plugins.ide_provider.queue import (
     enqueue_request,
     request_counts,
+    request_path,
     wait_for_completion,
 )
 from plugins.ide_provider.security import check_auth, redact_line
@@ -91,21 +92,87 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _send_sse(self, status: int, events: list[dict[str, Any] | str]) -> None:
+    def _write_sse_event(self, event: dict[str, Any] | str) -> None:
+        if isinstance(event, str):
+            line = f"data: {event}\n\n".encode("utf-8")
+        else:
+            line = f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+        self.wfile.write(line)
+        with contextlib.suppress(Exception):
+            self.wfile.flush()
+
+    def _write_sse_comment(self, comment: str = "keepalive") -> None:
+        self.wfile.write(f": {comment}\n\n".encode("utf-8"))
+        with contextlib.suppress(Exception):
+            self.wfile.flush()
+
+    def _begin_sse(self, status: int = 200) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
-        for event in events:
-            if isinstance(event, str):
-                line = f"data: {event}\n\n".encode("utf-8")
-            else:
-                line = f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
-            self.wfile.write(line)
-            with contextlib.suppress(Exception):
-                self.wfile.flush()
 
+    def _send_sse(self, status: int, events: list[dict[str, Any] | str]) -> None:
+        self._begin_sse(status)
+        for event in events:
+            self._write_sse_event(event)
+
+    def _read_request_file(self, runtime: Path, endpoint: str, request_id: str) -> dict[str, Any] | None:
+        try:
+            path = request_path(runtime, endpoint, request_id)
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _stream_until_completion(
+        self,
+        runtime: Path,
+        endpoint: str,
+        request_id: str,
+        request_timeout: int,
+        model_id: str,
+    ) -> None:
+        self._begin_sse(200)
+        self._write_sse_event(chat_completion_chunk(request_id, model_id, "", None, role="assistant"))
+        self._write_sse_comment("queued")
+
+        deadline = time.time() + request_timeout
+        next_keepalive = time.time() + 5.0
+        while time.time() < deadline:
+            req = self._read_request_file(runtime, endpoint, request_id)
+            if req and req.get("status") == "completed":
+                response = req.get("response") or {}
+                content = str(response.get("content") or "")
+                finish = response.get("finish_reason") or "stop"
+                if content:
+                    self._write_sse_event(chat_completion_chunk(request_id, model_id, content, None))
+                self._write_sse_event(chat_completion_chunk(request_id, model_id, "", finish))
+                self._write_sse_event(chat_completion_done_chunk())
+                return
+            if req and req.get("status") == "failed":
+                error = req.get("error") or {}
+                message = str(error.get("message") or "Request failed")
+                self._write_sse_event(chat_completion_chunk(request_id, model_id, message, None))
+                self._write_sse_event(chat_completion_chunk(request_id, model_id, "", "stop"))
+                self._write_sse_event(chat_completion_done_chunk())
+                return
+            if req and req.get("status") == "expired":
+                self._write_sse_event(chat_completion_chunk(request_id, model_id, "Timed out waiting for MCP model", None))
+                self._write_sse_event(chat_completion_chunk(request_id, model_id, "", "stop"))
+                self._write_sse_event(chat_completion_done_chunk())
+                return
+
+            now = time.time()
+            if now >= next_keepalive:
+                self._write_sse_comment("waiting")
+                next_keepalive = now + 5.0
+            time.sleep(0.25)
+
+        self._write_sse_event(chat_completion_chunk(request_id, model_id, "Timed out waiting for MCP model", None))
+        self._write_sse_event(chat_completion_chunk(request_id, model_id, "", "stop"))
+        self._write_sse_event(chat_completion_done_chunk())
     def _authorized(self) -> bool:
         token = current_token()
         auth = self.headers.get("Authorization", "")
@@ -226,32 +293,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(500, openai_error(str(exc), "internal_error"))
             return
 
+        model_id = STATE.get("model_id", "ide-provider")
+        if validated["stream"]:
+            self._stream_until_completion(runtime, endpoint, request_id, request_timeout, model_id)
+            return
+
         result = wait_for_completion(runtime, endpoint, request_id, request_timeout)
         if result["status"] == "completed":
             req = result["request"]
             content = req["response"]["content"]
             finish = req["response"].get("finish_reason", "stop")
-            model_id = STATE.get("model_id", "ide-provider")
-            if validated["stream"]:
-                self._send_sse(
-                    200,
-                    [
-                        chat_completion_chunk(request_id, model_id, "", None, role="assistant"),
-                        chat_completion_chunk(request_id, model_id, content, None),
-                        chat_completion_chunk(request_id, model_id, "", finish),
-                        chat_completion_done_chunk(),
-                    ],
-                )
-            else:
-                self._send_json(
-                    200,
-                    chat_completion_response(
-                        request_id,
-                        model_id,
-                        content,
-                        finish,
-                    ),
-                )
+            self._send_json(
+                200,
+                chat_completion_response(
+                    request_id,
+                    model_id,
+                    content,
+                    finish,
+                ),
+            )
             return
         if result["status"] == "failed":
             req = result["request"]

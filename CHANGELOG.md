@@ -1,3 +1,9 @@
+## 1.7.9 - 2026-07-27
+
+- Fixed IDE Provider streaming transport visibility: `stream: true` now opens SSE headers immediately, sends an initial assistant chunk/keepalives while waiting for the active bridge responder, then sends content and `data: [DONE]`.
+- Fixed OpenAI-compatible streaming chunk IDs to use the `chatcmpl-...` prefix.
+- Added regression coverage for streaming responses before responder completion and streaming timeout SSE behavior.
+
 ## 1.7.8 - 2026-07-27
 
 - IDE Provider now accepts `stream: true` OpenAI-compatible chat-completion requests.

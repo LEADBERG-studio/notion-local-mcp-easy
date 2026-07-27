@@ -50,7 +50,7 @@ def chat_completion_chunk(
     if content:
         delta["content"] = content
     return {
-        "id": request_id,
+        "id": f"chatcmpl-{request_id}",
         "object": "chat.completion.chunk",
         "created": now,
         "model": model,

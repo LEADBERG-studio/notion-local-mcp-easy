@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.8</small>
+        <small>документация для начинающих · v1.7.9</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -66,6 +66,10 @@
 
       <div class="callout warn">
         <strong>Для новичка:</strong> включайте этот плагин только в trusted developer mode и только для IDE/клиентов, которым доверяете. Endpoint локальный, но он даёт IDE канал общения с активной MCP-моделью.
+      </div>
+
+      <div class="callout warn">
+        <strong>Responder-loop обязателен:</strong> <code>ide_provider_start</code> поднимает только HTTP endpoint. Чтобы IDE получила осмысленный ответ, активная MCP-модель должна постоянно выполнять цикл <code>ide_provider_wait_request - ide_provider_send_response</code>. Без этого запросы будут висеть в очереди или истекать по timeout.
       </div>
 
       <h2>Зачем это нужно</h2>
