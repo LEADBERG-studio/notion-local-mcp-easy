@@ -1,3 +1,8 @@
+## 1.7.7 - 2026-07-27
+
+- Fixed `ide_provider_start` with no explicit port: MCP tool schema supplies `port: 0` by default, and the plugin now treats `0` as auto-pick from `port_range`.
+- Added a regression test covering `port=0` auto-pick so the beginner/default start path keeps working.
+
 ## 1.7.6 - 2026-07-27
 
 - Fixed plugin BAT wrappers so `--plugin-dir` is passed as a safe normalized folder path instead of a raw trailing-backslash `%~dp0` value.

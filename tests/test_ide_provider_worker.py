@@ -419,6 +419,27 @@ class IdeProviderWorkerTests(unittest.TestCase):
             finally:
                 stop_endpoint({"name": "ep1"}, ctx, config)
 
+    def test_start_endpoint_port_zero_auto_picks_free_port(self):
+        context = {
+            "effectiveMode": "full_access",
+            "workspacePath": str(self.runtime_root),
+        }
+        config = normalize_config({
+            "port_range": [self._free_port(), self._free_port()],
+            "request_timeout_seconds": 5,
+        })
+        low = min(config["port_range"])
+        high = max(config["port_range"])
+        config["port_range"] = [low, high]
+        result = start_endpoint({"name": "zeroport", "port": 0}, context, config)
+        try:
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["status"], "running")
+            self.assertGreaterEqual(int(result["base_url"].split(":")[-1].split("/")[0]), low)
+            self.assertLessEqual(int(result["base_url"].split(":")[-1].split("/")[0]), high)
+        finally:
+            stop_endpoint({"name": "zeroport"}, context, config)
+
     def test_already_running_returns_already_status(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

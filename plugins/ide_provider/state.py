@@ -276,11 +276,16 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
     port_arg = arguments.get("port")
     if port_arg is not None and str(port_arg).strip() != "":
         port = int(port_arg)
-        if not is_port_free(host, port):
-            raise ValueError(f"port {port} is not free")
     else:
+        port = 0
+    if port <= 0:
         low, high = config["port_range"]
         port = find_free_port(host, low, high)
+    else:
+        if port < 1024 or port > 65535:
+            raise ValueError("port must be within 1024..65535, or 0/empty for auto-pick")
+        if not is_port_free(host, port):
+            raise ValueError(f"port {port} is not free")
 
     token = str(config.get("default_api_key") or "").strip() or generate_token()
     now = datetime.datetime.now().isoformat()
