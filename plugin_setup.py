@@ -105,6 +105,10 @@ def generate_ide_provider_api_key() -> str:
     return "idep_" + secrets.token_urlsafe(32)
 
 
+def generate_ide_gateway_api_key() -> str:
+    return "ideg_" + secrets.token_urlsafe(32)
+
+
 def collect_sqlite_config(existing: dict[str, Any]) -> dict[str, Any]:
     print("SQLite setup: add workspace-relative database file connections.")
     connections = []
@@ -197,6 +201,47 @@ def collect_ide_provider_config(existing: dict[str, Any]) -> dict[str, Any]:
         config["request_timeout_seconds"] = int(timeout)
     return config
 
+def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
+    print("IDE Gateway setup: full OpenAI-compatible API gateway for the active MCP model.")
+    config = dict(existing)
+    api_key = str(config.get("default_api_key", "")).strip()
+    if not api_key:
+        api_key = generate_ide_gateway_api_key()
+        config["default_api_key"] = api_key
+        print("Generated local IDE Gateway API key and saved it to the plugin-local config.")
+    else:
+        print("Keeping existing local IDE Gateway API key from the plugin-local config.")
+
+    autostart = prompt_bool("Autostart endpoint when MCP starts (preferred port 8787)?", True)
+    config["autostart"] = autostart
+    if autostart:
+        port = prompt_text("Preferred port (default 8787)", str(config.get("default_port", 8787)))
+        try:
+            config["default_port"] = int(port)
+        except ValueError:
+            config["default_port"] = 8787
+
+    setup_mode = prompt_choice("Endpoint defaults", ["default", "custom"], "default")
+    if setup_mode == "default":
+        return config
+
+    model = prompt_text("Default model id", str(config.get("default_model_id", "ide-gateway")) or "ide-gateway")
+    if model:
+        config["default_model_id"] = model
+    first = prompt_text("Port range start", str((config.get("port_range") or [8787, 8899])[0]))
+    last = prompt_text("Port range end", str((config.get("port_range") or [8787, 8899])[1]))
+    if first and last:
+        config["port_range"] = [int(first), int(last)]
+    timeout = prompt_text("Request timeout seconds", str(config.get("request_timeout_seconds", 300)))
+    if timeout:
+        config["request_timeout_seconds"] = int(timeout)
+    embeddings = prompt_choice("Embeddings mode", ["fallback", "off"], "fallback")
+    config["embeddings_mode"] = embeddings
+    disabled = prompt_text("Disabled tools (comma-separated, empty for none)", str(config.get("disabled_tools", "")))
+    config["disabled_tools"] = disabled
+    return config
+
+
 def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
     base = existing.get("config") if isinstance(existing.get("config"), dict) else {}
     if plugin_id == "sqlite":
@@ -207,6 +252,8 @@ def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
         return collect_openai_compat_config(base)
     if plugin_id == "ide_provider":
         return collect_ide_provider_config(base)
+    if plugin_id == "ide_gateway":
+        return collect_ide_gateway_config(base)
     raw = prompt_text("Config JSON", json.dumps(base, ensure_ascii=False))
     parsed = json.loads(raw or "{}")
     if not isinstance(parsed, dict):

@@ -1,5 +1,5 @@
 ## 1.7.9 - 2026-07-27
-
+\n## 1.8.0 - 2026-07-27\n\n- Added `ide_gateway`, a full IDE API Gateway plugin exposing OpenAI-compatible `/v1/chat/completions`, `/v1/responses`, `/v1/models`, files, images, audio, embeddings, and moderation surfaces over the active MCP bridge.\n- Added plugin-local setup support for `ide_gateway`, including BAT wrappers, autostart defaults, and generated local `ideg_...` API keys.\n- Added a plugin startup hook so full-access plugins can run startup initialization after their tools are registered.\n- Fixed completed streaming responses to explicitly terminate with `data: [DONE]`.\n- Added regression coverage for IDE Gateway streaming completion and plugin-local setup.\n\n
 - Fixed IDE Provider streaming transport visibility: `stream: true` now opens SSE headers immediately, sends an initial assistant chunk/keepalives while waiting for the active bridge responder, then sends content and `data: [DONE]`.
 - Fixed OpenAI-compatible streaming chunk IDs to use the `chatcmpl-...` prefix.
 - Added regression coverage for streaming responses before responder completion and streaming timeout SSE behavior.

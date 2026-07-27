@@ -1,0 +1,183 @@
+{
+  "id": "ide_gateway",
+  "display_name": "IDE Gateway",
+  "version": "0.1.0",
+  "entrypoint": "plugin.py",
+  "supported_modes": ["read_only", "full_access"],
+  "capabilities": ["ide", "gateway", "openai_compatible", "active_bridge", "files", "media", "tools"],
+  "config_schema_version": 1,
+  "required_env": [],
+  "dependencies": [],
+  "required": false,
+  "install_scope_support": "both",
+  "tools": [
+    {
+      "name": "ide_gateway_start",
+      "title": "Start IDE Gateway endpoint",
+      "description": "Start a local full OpenAI-compatible API gateway endpoint for the active MCP model to serve IDE requests. Exposes /v1/chat/completions (stream + non-stream), /v1/responses, /v1/models, /v1/files, /v1/images/generations, /v1/images/edits, /v1/audio/speech, /v1/audio/transcriptions, /v1/audio/translations, /v1/embeddings, /v1/moderations, /v1/tools.",
+      "capability": "ide_gateway.start",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "host": {"type": "string"},
+          "port": {"type": "integer"},
+          "model_id": {"type": "string"},
+          "request_timeout_seconds": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.start",
+      "safety_tags": ["ide", "gateway", "network", "full_access"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_stop",
+      "title": "Stop IDE Gateway endpoint",
+      "description": "Stop a running local IDE Gateway endpoint.",
+      "capability": "ide_gateway.stop",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "force": {"type": "boolean"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.stop",
+      "safety_tags": ["ide", "gateway", "network", "full_access"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_status",
+      "title": "IDE Gateway status",
+      "description": "Show running status and queue status for IDE Gateway endpoints.",
+      "capability": "ide_gateway.status",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.status",
+      "safety_tags": ["ide", "gateway", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_show_config",
+      "title": "Show IDE Gateway connection config",
+      "description": "Return copy-paste-ready OpenAI-compatible provider settings for an IDE.",
+      "capability": "ide_gateway.show_config",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "include_secret": {"type": "boolean"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.show_config",
+      "safety_tags": ["ide", "gateway", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_wait_request",
+      "title": "Wait for IDE request",
+      "description": "Block until the local IDE Gateway receives an OpenAI-compatible request (chat/completions, responses, images/generations, audio/speech, etc.), then return the normalized request to the active MCP model. The model must process it using MCP tools and call ide_gateway_send_response or ide_gateway_fail_request.",
+      "capability": "ide_gateway.wait_request",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "timeout_seconds": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.wait_request",
+      "safety_tags": ["ide", "gateway", "bridge", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_send_response",
+      "title": "Send IDE response",
+      "description": "Complete a pending IDE request with an assistant response. Accepts a plain content string for chat/responses/audio-transcription requests, or a structured OpenAI-shaped payload (object) for images/embeddings/moderations where the gateway must serialize specific fields. Pass finish_reason to control the chat/responses finish marker.",
+      "capability": "ide_gateway.send_response",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {"type": "string"},
+          "content": {"type": "string"},
+          "payload": {"type": "object"},
+          "finish_reason": {"type": "string"}
+        },
+        "required": ["request_id"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.send_response",
+      "safety_tags": ["ide", "gateway", "bridge", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_fail_request",
+      "title": "Fail IDE request",
+      "description": "Complete a pending IDE request with an error.",
+      "capability": "ide_gateway.fail_request",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {"type": "string"},
+          "error_code": {"type": "string"},
+          "message": {"type": "string"}
+        },
+        "required": ["request_id", "message"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.fail_request",
+      "safety_tags": ["ide", "gateway", "bridge", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_get_logs",
+      "title": "Read IDE Gateway logs",
+      "description": "Read recent redacted logs for a local IDE Gateway endpoint.",
+      "capability": "ide_gateway.logs",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "limit": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.get_logs",
+      "safety_tags": ["ide", "gateway", "logs", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_gateway_rotate_token",
+      "title": "Rotate IDE Gateway token",
+      "description": "Generate a new local API token for an IDE Gateway endpoint.",
+      "capability": "ide_gateway.rotate_token",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_gateway.rotate_token",
+      "safety_tags": ["ide", "gateway", "secret", "full_access"],
+      "diagnostic_visibility": "full"
+    }
+  ]
+}

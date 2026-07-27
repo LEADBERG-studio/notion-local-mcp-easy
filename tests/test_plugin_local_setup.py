@@ -10,7 +10,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from plugin_runtime import PluginManager
-from plugin_setup import collect_ide_provider_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
+from plugin_setup import collect_ide_gateway_config, collect_ide_provider_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
 
 class DummyMCP:
     def __init__(self):
@@ -134,6 +134,13 @@ class PluginLocalSetupTests(unittest.TestCase):
                 text = wrapper.read_text(encoding="utf-8")
                 self.assertIn('set "PLUGIN_DIR=%~dp0."', text)
                 self.assertIn('--plugin-dir "%PLUGIN_DIR%"', text)
+
+    def test_ide_gateway_setup_generates_api_key_with_default_preset(self):
+        with mock.patch("builtins.input", return_value=""):
+            config = collect_ide_gateway_config({})
+        self.assertRegex(config["default_api_key"], r"^ideg_[A-Za-z0-9_-]{16,}$")
+        self.assertTrue(config["autostart"])
+        self.assertEqual(config["default_port"], 8787)
 
     def test_ide_provider_setup_generates_api_key_with_default_preset(self):
         with mock.patch("builtins.input", return_value=""):

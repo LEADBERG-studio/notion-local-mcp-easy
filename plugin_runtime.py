@@ -501,6 +501,21 @@ def register_plugin_tools(
                     title=descriptor["title"],
                     description=descriptor["description"],
                 )(handler)
+            # Optional startup hook: if the plugin defines `startup`, call it
+            # after tools are registered. Used by ide_gateway to autostart its
+            # HTTP worker on the preferred port. Backward-compatible: plugins
+            # without a startup method are skipped.
+            startup_fn = getattr(module, "startup", None)
+            if callable(startup_fn):
+                try:
+                    startup_result = _call_plugin_method(
+                        module, "startup",
+                        build_plugin_runtime_context(profile_context, state),
+                    )
+                    if isinstance(startup_result, dict):
+                        state["startup"] = startup_result
+                except Exception as exc:  # pragma: no cover - plugin startup errors are non-fatal
+                    state["startup"] = {"error": str(exc)}
         except Exception as exc:  # pragma: no cover - safety path covered indirectly
             state["status"] = "failed"
             state["error"] = str(exc)
