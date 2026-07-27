@@ -15,7 +15,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.7.3</small>
+        <small>документация для начинающих · v1.7.4</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -72,7 +72,18 @@
       <tr><td>SQLite</td><td><code>plugins/SQLite</code></td><td><code>SQLite_list_connections</code>, <code>SQLite_list_tables</code>, <code>SQLite_describe_table</code>, <code>SQLite_query</code>, <code>SQLite_execute</code></td><td>Локальная SQLite DB внутри workspace.</td></tr>
       <tr><td>PostgreSQL</td><td><code>plugins/postgres</code></td><td><code>postgres_list_connections</code>, <code>postgres_list_tables</code>, <code>postgres_describe_table</code>, <code>postgres_query</code>, <code>postgres_execute</code></td><td>Подключение к PostgreSQL через установленный <code>psql</code>.</td></tr>
       <tr><td>OpenAI-compatible provider</td><td><code>plugins/openai_compat</code></td><td><code>openai_compat_list_models</code>, <code>openai_compat_describe_provider</code>, <code>openai_compat_generate_text</code>, <code>openai_compat_run_subagent</code></td><td>AI provider или subagent через OpenAI-compatible chat completions API.</td></tr>
+      <tr><td>IDE Provider</td><td><code>plugins/ide_provider</code></td><td><code>ide_provider_start</code>, <code>ide_provider_wait_request</code>, <code>ide_provider_send_response</code>, <code>ide_provider_stop</code></td><td>Локальный OpenAI-compatible active bridge для IDE.</td></tr>
       </tbody></table>
+
+
+      <h2>IDE Provider: active bridge для IDE</h2>
+      <p><code>ide_provider</code> поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1</code>. IDE отправляет запрос в <code>/v1/chat/completions</code>, активная MCP-модель забирает его через <code>ide_provider_wait_request</code> и возвращает ответ через <code>ide_provider_send_response</code>.</p>
+      <ul>
+        <li>Нужен trusted developer mode для запуска и остановки endpoint.</li>
+        <li>Endpoint использует локальный token с префиксом <code>idep_</code>.</li>
+        <li>Runtime state, logs и queue лежат в ignored <code>temp/ide_provider_runtime/</code>.</li>
+        <li>Подробная инструкция: <a href="ide-provider.html">IDE Provider для новичков</a>.</li>
+      </ul>
 
       <h2>Global или current scope</h2>
       <table><thead><tr><th>Scope</th><th>Что значит</th><th>Когда использовать</th></tr></thead><tbody>

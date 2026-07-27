@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.7.3
+# Notion Local MCP Easy 1.7.4
 
 
 
@@ -92,6 +92,22 @@ docs/ru/index.html
 
 
 
+
+
+
+## IDE Provider для локальной IDE
+
+Начиная с 1.7.4 в комплект входит плагин `ide_provider`. Он позволяет поднять локальный OpenAI-compatible endpoint на `127.0.0.1`, подключить его в IDE как обычного AI provider и обслуживать IDE-запросы активной MCP-моделью.
+
+Короткий сценарий:
+
+1. Запустите рабочую область в trusted developer mode.
+2. Подключите плагин `ide_provider` к нужному workflow profile.
+3. Вызовите `ide_provider_start`.
+4. Скопируйте в IDE `base_url`, `api_key` и `model`.
+5. Когда IDE отправляет запрос, активная MCP-модель забирает его через `ide_provider_wait_request` и отвечает через `ide_provider_send_response`.
+
+Подробная инструкция для новичков: `docs/ru/ide-provider.html`.
 
 
 ## OAuth через Tunnellio

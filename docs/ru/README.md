@@ -20,3 +20,5 @@ docs/ru/index.html
 - `troubleshooting.html` — диагностика частых ошибок.
 
 - `tunnellio.html` — пользовательская настройка Tunnellio: кабинет, публичный URL, API docs, CLI, OAuth и типовые сценарии.
+
+- `ide-provider.html` — подключение IDE как OpenAI-compatible клиента через `ide_provider`.

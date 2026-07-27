@@ -17,3 +17,4 @@ build/
 .coverage
 htmlcov/
 oauth_state.json
+.kilo/

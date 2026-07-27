@@ -1,3 +1,13 @@
+## 1.7.4 - 2026-07-27
+
+### IDE Provider
+
+- Added the `ide_provider` active-bridge plugin: a local OpenAI-compatible endpoint that lets IDEs send chat-completion requests to the active MCP model.
+- Implemented the request lifecycle through `ide_provider_wait_request`, `ide_provider_send_response`, and `ide_provider_fail_request`, backed by a file-based queue under ignored runtime storage.
+- Added local `idep_` token auth, redacted logs, loopback-only binding, duplicate-bind prevention, idempotent already-running start behavior, worker cleanup, and POSIX reap handling.
+- Added manifest/config/security/queue/worker regression coverage plus a hardened active-bridge smoke script.
+- Updated project README files, Russian beginner docs, and release notes for the IDE Provider workflow.
+
 ## 1.7.3 - 2026-07-26
 
 ### Documentation

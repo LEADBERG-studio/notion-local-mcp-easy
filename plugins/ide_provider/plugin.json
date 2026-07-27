@@ -1,0 +1,182 @@
+{
+  "id": "ide_provider",
+  "display_name": "IDE Provider",
+  "version": "0.1.0",
+  "entrypoint": "plugin.py",
+  "supported_modes": ["read_only", "full_access"],
+  "capabilities": ["ide", "provider", "openai_compatible", "active_bridge"],
+  "config_schema_version": 1,
+  "required_env": [],
+  "dependencies": [],
+  "required": false,
+  "install_scope_support": "both",
+  "tools": [
+    {
+      "name": "ide_provider_start",
+      "title": "Start IDE provider endpoint",
+      "description": "Start a local OpenAI-compatible endpoint for the active MCP model to serve IDE requests.",
+      "capability": "ide_provider.start",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "host": {"type": "string"},
+          "port": {"type": "integer"},
+          "model_id": {"type": "string"},
+          "request_timeout_seconds": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.start",
+      "safety_tags": ["ide", "provider", "network", "full_access"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_stop",
+      "title": "Stop IDE provider endpoint",
+      "description": "Stop a running local IDE provider endpoint.",
+      "capability": "ide_provider.stop",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "force": {"type": "boolean"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.stop",
+      "safety_tags": ["ide", "provider", "network", "full_access"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_status",
+      "title": "IDE provider status",
+      "description": "Show running status and queue status for IDE provider endpoints.",
+      "capability": "ide_provider.status",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.status",
+      "safety_tags": ["ide", "provider", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_show_config",
+      "title": "Show IDE provider connection config",
+      "description": "Return copy-paste-ready OpenAI-compatible provider settings for an IDE.",
+      "capability": "ide_provider.show_config",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "include_secret": {"type": "boolean"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.show_config",
+      "safety_tags": ["ide", "provider", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_wait_request",
+      "title": "Wait for IDE request",
+      "description": "Block until the local IDE provider receives a chat-completions request, then return it to the active MCP model.",
+      "capability": "ide_provider.wait_request",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "timeout_seconds": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.wait_request",
+      "safety_tags": ["ide", "provider", "bridge", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_send_response",
+      "title": "Send IDE response",
+      "description": "Complete a pending IDE chat-completions request with assistant content.",
+      "capability": "ide_provider.send_response",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {"type": "string"},
+          "content": {"type": "string"},
+          "finish_reason": {"type": "string"}
+        },
+        "required": ["request_id", "content"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.send_response",
+      "safety_tags": ["ide", "provider", "bridge", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_fail_request",
+      "title": "Fail IDE request",
+      "description": "Complete a pending IDE request with an error.",
+      "capability": "ide_provider.fail_request",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {"type": "string"},
+          "error_code": {"type": "string"},
+          "message": {"type": "string"}
+        },
+        "required": ["request_id", "message"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.fail_request",
+      "safety_tags": ["ide", "provider", "bridge", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_get_logs",
+      "title": "Read IDE provider logs",
+      "description": "Read recent redacted logs for a local IDE provider endpoint.",
+      "capability": "ide_provider.logs",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "limit": {"type": "integer"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.get_logs",
+      "safety_tags": ["ide", "provider", "logs", "read_only"],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "ide_provider_rotate_token",
+      "title": "Rotate IDE provider token",
+      "description": "Generate a new local API token for an IDE provider endpoint.",
+      "capability": "ide_provider.rotate_token",
+      "mode_required": "full_access",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "ide_provider.rotate_token",
+      "safety_tags": ["ide", "provider", "secret", "full_access"],
+      "diagnostic_visibility": "full"
+    }
+  ]
+}

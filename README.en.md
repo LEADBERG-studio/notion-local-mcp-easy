@@ -59,6 +59,14 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 - `oauth`: OAuth 2.1 flow.
 - `dual`: both legacy token and OAuth on the same `/mcp` endpoint.
 
+
+## IDE Provider plugin
+
+Version 1.7.4 adds the `ide_provider` active-bridge plugin. It starts a local OpenAI-compatible endpoint on `127.0.0.1` so an IDE can send chat-completion requests to the active MCP model. The model serves those requests through `ide_provider_wait_request` and `ide_provider_send_response` while still using Local MCP Easy tools.
+
+Use it only in trusted developer mode and only with IDEs/workspaces you trust. See the Russian beginner guide at `docs/ru/ide-provider.html`.
+
+
 ## Safety model
 
 The server is local-first but powerful. Keep these rules in mind:

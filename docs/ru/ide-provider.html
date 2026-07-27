@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IDE Provider · Notion Local MCP Easy</title>
+  <meta name="description" content="IDE Provider plugin для Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.7.4</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav class="nav-main">
+<a class="nav-link" href="index.html">Старт</a>
+<a class="nav-link" href="concepts.html">Что это такое</a>
+<a class="nav-link" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link" href="auth.html">Авторизация</a>
+<a class="nav-link" href="oauth.html">OAuth пошагово</a>
+<a class="nav-link" href="connections.html">Способы подключения</a>
+<a class="nav-link" href="tunnels.html">Туннели и URL</a>
+<details class="nav-group">
+  <summary class="nav-link nav-summary">Tunnellio</summary>
+  <div class="nav-submenu">
+    <a class="nav-sublink" href="tunnellio.html">Обзор страницы</a>
+    <a class="nav-sublink" href="tunnellio.html#overview">Что это</a>
+    <a class="nav-sublink" href="tunnellio.html#addresses">Адреса сервиса</a>
+    <a class="nav-sublink" href="tunnellio.html#auth-layers">Токены и OAuth</a>
+    <a class="nav-sublink" href="tunnellio.html#cabinet">Кабинет</a>
+    <a class="nav-sublink" href="tunnellio.html#connection">Постоянное подключение</a>
+    <a class="nav-sublink" href="tunnellio.html#oauth">OAuth Tunnellio</a>
+    <a class="nav-sublink" href="tunnellio.html#api">API</a>
+    <a class="nav-sublink" href="tunnellio.html#client">CLI-клиент</a>
+    <a class="nav-sublink" href="tunnellio.html#recipes">Рецепты</a>
+    <a class="nav-sublink" href="tunnellio.html#troubleshooting">Ошибки</a>
+  </div>
+</details>
+<a class="nav-link" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link" href="notion.html">Подключение клиента</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
+<a class="nav-link active" href="ide-provider.html">IDE Provider</a>
+<a class="nav-link" href="profiles.html">Профили</a>
+<a class="nav-link" href="operations.html">Эксплуатация</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link" href="reference.html">Шпаргалки</a>
+</nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>IDE Provider: подключить IDE как OpenAI-compatible клиента</h1>
+      <p class="lead"><code>ide_provider</code> — это active-bridge плагин. Он поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1</code>, принимает запросы от IDE и передаёт их активной MCP-модели через очередь.</p>
+
+      <div class="callout warn">
+        <strong>Для новичка:</strong> включайте этот плагин только в trusted developer mode и только для IDE/клиентов, которым доверяете. Endpoint локальный, но он даёт IDE канал общения с активной MCP-моделью.
+      </div>
+
+      <h2>Зачем это нужно</h2>
+      <p>Некоторые IDE умеют работать с OpenAI-compatible chat completions API, но не умеют напрямую позвать активную MCP-модель в вашем чате. <code>ide_provider</code> делает мост:</p>
+      <pre><code>IDE → http://127.0.0.1:&lt;port&gt;/v1/chat/completions
+    → очередь ide_provider
+    → ide_provider_wait_request
+    → MCP-модель думает и использует tools
+    → ide_provider_send_response
+    → IDE получает ответ</code></pre>
+
+      <h2>Что входит в плагин</h2>
+      <table>
+        <thead><tr><th>Tool</th><th>Mode</th><th>Назначение</th></tr></thead>
+        <tbody>
+          <tr><td><code>ide_provider_start</code></td><td><code>full_access</code></td><td>Запустить локальный OpenAI-compatible endpoint.</td></tr>
+          <tr><td><code>ide_provider_stop</code></td><td><code>full_access</code></td><td>Остановить endpoint и очистить очередь.</td></tr>
+          <tr><td><code>ide_provider_status</code></td><td><code>read_only</code></td><td>Посмотреть статус endpoint и очереди.</td></tr>
+          <tr><td><code>ide_provider_show_config</code></td><td><code>read_only</code></td><td>Показать настройки для IDE.</td></tr>
+          <tr><td><code>ide_provider_wait_request</code></td><td><code>read_only</code></td><td>Дождаться запроса от IDE.</td></tr>
+          <tr><td><code>ide_provider_send_response</code></td><td><code>read_only</code></td><td>Отправить ответ IDE.</td></tr>
+          <tr><td><code>ide_provider_fail_request</code></td><td><code>read_only</code></td><td>Завершить запрос ошибкой.</td></tr>
+          <tr><td><code>ide_provider_get_logs</code></td><td><code>read_only</code></td><td>Прочитать redacted logs.</td></tr>
+          <tr><td><code>ide_provider_rotate_token</code></td><td><code>full_access</code></td><td>Сменить локальный API token.</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Как включить</h2>
+      <ol class="steps">
+        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>В file-only режиме tools <code>start</code>, <code>stop</code> и <code>rotate_token</code> недоступны.</li>
+        <li><strong>Прикрепите плагин к current или global scope.</strong><br>Обычно для IDE удобнее <code>current</code>, чтобы endpoint относился к конкретной рабочей области.</li>
+        <li><strong>Перезапустите MCP.</strong><br>После attach/detach registry tools пересобирается при рестарте.</li>
+        <li><strong>Запустите endpoint через MCP tool.</strong><br>Например: <code>ide_provider_start</code> с <code>name="ide"</code> и <code>model_id="ide-provider"</code>.</li>
+        <li><strong>Скопируйте настройки в IDE.</strong><br>Используйте <code>base_url</code>, <code>api_key</code> и <code>model</code>, которые вернул <code>ide_provider_start</code> или <code>ide_provider_show_config</code>.</li>
+      </ol>
+
+      <h2>Настройки в IDE</h2>
+      <table>
+        <thead><tr><th>Поле IDE</th><th>Что вставить</th></tr></thead>
+        <tbody>
+          <tr><td>Provider type</td><td>OpenAI-compatible</td></tr>
+          <tr><td>Base URL</td><td><code>http://127.0.0.1:&lt;port&gt;/v1</code></td></tr>
+          <tr><td>API key</td><td>Токен с префиксом <code>idep_</code></td></tr>
+          <tr><td>Model</td><td>Значение <code>model</code>, обычно <code>ide-provider</code></td></tr>
+        </tbody>
+      </table>
+
+      <h2>Как работает запрос</h2>
+      <ol class="steps">
+        <li>IDE отправляет chat completion request.</li>
+        <li>Worker кладёт request в file-backed очередь.</li>
+        <li>Активная MCP-модель вызывает <code>ide_provider_wait_request</code>.</li>
+        <li>Модель читает задачу, при необходимости использует file/git/command tools.</li>
+        <li>Модель вызывает <code>ide_provider_send_response</code>.</li>
+        <li>IDE получает OpenAI-compatible ответ.</li>
+      </ol>
+
+      <h2>Безопасность</h2>
+      <ul>
+        <li>Endpoint bind-ится только на <code>127.0.0.1</code>; <code>0.0.0.0</code> и внешние hosts запрещены.</li>
+        <li><code>/v1/*</code> требует локальный token; <code>/health</code> не раскрывает секреты.</li>
+        <li>Логи редактируют <code>Authorization</code>, <code>X-API-Key</code>, <code>api_key</code>, <code>token</code>, <code>secret</code>, <code>password</code> и <code>idep_...</code>.</li>
+        <li>Endpoint state и очереди живут в gitignored <code>temp/ide_provider_runtime/</code>.</li>
+      </ul>
+
+      <h2>Проверка перед публикацией</h2>
+      <pre><code>python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py plugins/ide_provider/*.py tests/test_ide_provider_*.py
+python -m unittest -v tests.test_ide_provider_manifest tests.test_ide_provider_config tests.test_ide_provider_security tests.test_ide_provider_queue tests.test_ide_provider_worker
+python -m unittest discover -s tests -v
+git diff --check
+python temp/ide_provider_runtime/_smoke.py</code></pre>
+
+      <div class="callout info">
+        <strong>Smoke:</strong> <code>_smoke.py</code> сам чистит <code>smoke</code>/<code>smoke2</code> endpoint-ы до и после запуска, проверяет auth, active bridge, no-model timeout и stop.
+      </div>
+
+      <footer class="page-footer">
+        <p>Если IDE зависла в ожидании ответа, проверьте <code>ide_provider_status</code>, redacted logs и не забывайте остановить endpoint через <code>ide_provider_stop</code>.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
