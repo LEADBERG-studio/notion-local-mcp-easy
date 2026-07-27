@@ -86,8 +86,11 @@ def render_responses_stream_events(
     model: str,
     req: dict[str, Any],
 ) -> list[str]:
-    """Render the OpenAI Responses API streaming events for a completed
-    request."""
+    """Render OpenAI Responses API streaming events for a completed request.
+
+    Strict IDE clients need the full output item/content part lifecycle, not
+    only response.output_text.delta + response.completed.
+    """
     created = int(time.time())
     base = {"id": rid, "object": "response", "model": model, "created_at": created}
     events: list[str] = []
@@ -102,38 +105,102 @@ def render_responses_stream_events(
             r["output_text"] = output_text
         return r
 
-    events.append(_sse("response.created", {"type": "response.created", "response": env("in_progress")}))
-
     response = req.get("response") or {}
     content = str(response.get("content") or "")
     chunks = response.get("stream_chunks")
+    finish_reason = str(response.get("finish_reason") or "stop")
+    msg_id = "msg_" + uuid.uuid4().hex[:20]
+
+    message_item = {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
+        "status": "in_progress",
+        "content": [],
+    }
+    text_part = {"type": "output_text", "text": "", "annotations": []}
+
+    events.append(_sse("response.created", {
+        "type": "response.created",
+        "response": env("in_progress"),
+    }))
+    events.append(_sse("response.in_progress", {
+        "type": "response.in_progress",
+        "response": env("in_progress"),
+    }))
+    events.append(_sse("response.output_item.added", {
+        "type": "response.output_item.added",
+        "response_id": rid,
+        "output_index": 0,
+        "item": message_item,
+    }))
+    events.append(_sse("response.content_part.added", {
+        "type": "response.content_part.added",
+        "response_id": rid,
+        "item_id": msg_id,
+        "output_index": 0,
+        "content_index": 0,
+        "part": text_part,
+    }))
+
+    def emit_delta(piece: str) -> None:
+        nonlocal seq
+        if not piece:
+            return
+        seq += 1
+        events.append(_sse("response.output_text.delta", {
+            "type": "response.output_text.delta",
+            "response_id": rid,
+            "item_id": msg_id,
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": seq,
+            "delta": piece,
+        }))
 
     if isinstance(chunks, list) and chunks:
         for piece in chunks:
-            if not isinstance(piece, str):
-                piece = str(piece)
-            if piece:
-                seq += 1
-                events.append(_sse("response.output_text.delta", {
-                    "type": "response.output_text.delta", "response_id": rid,
-                    "output_index": 0, "content_index": 0, "sequence_number": seq,
-                    "delta": piece,
-                }))
-    elif content:
-        seq += 1
-        events.append(_sse("response.output_text.delta", {
-            "type": "response.output_text.delta", "response_id": rid,
-            "output_index": 0, "content_index": 0, "sequence_number": seq,
-            "delta": content,
-        }))
+            emit_delta(piece if isinstance(piece, str) else str(piece))
+    else:
+        emit_delta(content)
 
-    output = [{
-        "type": "message", "id": "msg_" + uuid.uuid4().hex[:20], "role": "assistant",
+    done_part = {"type": "output_text", "text": content, "annotations": []}
+    completed_item = {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
         "status": "completed",
-        "content": [{"type": "output_text", "text": content, "annotations": []}],
-    }]
+        "content": [done_part],
+    }
+
+    events.append(_sse("response.output_text.done", {
+        "type": "response.output_text.done",
+        "response_id": rid,
+        "item_id": msg_id,
+        "output_index": 0,
+        "content_index": 0,
+        "text": content,
+    }))
+    events.append(_sse("response.content_part.done", {
+        "type": "response.content_part.done",
+        "response_id": rid,
+        "item_id": msg_id,
+        "output_index": 0,
+        "content_index": 0,
+        "part": done_part,
+    }))
+    events.append(_sse("response.output_item.done", {
+        "type": "response.output_item.done",
+        "response_id": rid,
+        "output_index": 0,
+        "item": completed_item,
+    }))
+
+    completed = env("completed", output_text=content, output=[completed_item])
+    completed["finish_reason"] = finish_reason
     events.append(_sse("response.completed", {
-        "type": "response.completed", "response": env("completed", content, output),
+        "type": "response.completed",
+        "response": completed,
     }))
     events.append("data: [DONE]\n\n")
     return events

@@ -1,4 +1,10 @@
 ## 1.7.9 - 2026-07-27
+
+## 1.8.1 - 2026-07-27
+
+- Expanded `ide_gateway` `/v1/responses` streaming to emit the full Responses API text lifecycle (`response.in_progress`, output item/content part added/done, output text delta/done, `response.completed`, and final `data: [DONE]`).
+- Improves compatibility with IDE clients that create visible chat messages only after seeing output item/content part lifecycle events.
+
 \n## 1.8.0 - 2026-07-27\n\n- Added `ide_gateway`, a full IDE API Gateway plugin exposing OpenAI-compatible `/v1/chat/completions`, `/v1/responses`, `/v1/models`, files, images, audio, embeddings, and moderation surfaces over the active MCP bridge.\n- Added plugin-local setup support for `ide_gateway`, including BAT wrappers, autostart defaults, and generated local `ideg_...` API keys.\n- Added a plugin startup hook so full-access plugins can run startup initialization after their tools are registered.\n- Fixed completed streaming responses to explicitly terminate with `data: [DONE]`.\n- Added regression coverage for IDE Gateway streaming completion and plugin-local setup.\n\n
 - Fixed IDE Provider streaming transport visibility: `stream: true` now opens SSE headers immediately, sends an initial assistant chunk/keepalives while waiting for the active bridge responder, then sends content and `data: [DONE]`.
 - Fixed OpenAI-compatible streaming chunk IDs to use the `chatcmpl-...` prefix.
