@@ -64,7 +64,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "1.8.6"
+VERSION = "1.8.7"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 

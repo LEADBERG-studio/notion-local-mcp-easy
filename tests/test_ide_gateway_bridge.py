@@ -172,7 +172,7 @@ class IdeGatewayBridgeTests(unittest.TestCase):
         self.assertEqual(config["default_port"], 8787)
         self.assertNotIn("responder_enabled", config)
 
-    # 4. bridge_prompt tool returns loop instruction
+    # 4. bridge_prompt tool returns loop instruction with prompt_type routing
     def test_bridge_prompt_returns_loop_instruction(self):
         from plugins.ide_gateway.plugin import invoke
         ctx = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
@@ -182,10 +182,36 @@ class IdeGatewayBridgeTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("bridge_step.py", result["system_prompt"])
         self.assertIn("run_program", result["system_prompt"])
-        self.assertIn("poll --timeout 30", result["system_prompt"])
+        self.assertIn("poll --timeout 3", result["system_prompt"])
+        self.assertIn("prompt_type", result["system_prompt"])
+        self.assertIn("memory_extraction", result["system_prompt"])
         self.assertIn("complete --request-id", result["system_prompt"])
-        self.assertIn("Do not emit a", result["system_prompt"])
+        self.assertIn("Do not write chat", result["system_prompt"])
         self.assertIn("bridge_script", result)
+
+    # 5. classify_prompt: chat vs memory_extraction vs other
+    def test_classify_prompt_chat(self):
+        from plugins.ide_gateway.bridge_step import classify_prompt
+        r = classify_prompt("System: be nice\n\nUser: What is 2+2?", None)
+        self.assertEqual(r["prompt_type"], "chat")
+        self.assertEqual(r["user_message"], "What is 2+2?")
+
+    def test_classify_prompt_memory_extraction(self):
+        from plugins.ide_gateway.bridge_step import classify_prompt
+        r = classify_prompt("", [{"role": "user", "content": "SubmitMemoryPlan: sync"}])
+        self.assertEqual(r["prompt_type"], "memory_extraction")
+
+    def test_classify_prompt_from_messages(self):
+        from plugins.ide_gateway.bridge_step import classify_prompt
+        r = classify_prompt("", [{"role": "system", "content": "x"},
+                                   {"role": "user", "content": "hello world"}])
+        self.assertEqual(r["prompt_type"], "chat")
+        self.assertEqual(r["user_message"], "hello world")
+
+    def test_classify_prompt_tail(self):
+        from plugins.ide_gateway.bridge_step import classify_prompt
+        r = classify_prompt("x" * 5000, None)
+        self.assertEqual(len(r["prompt_tail"]), 3000)
 
     # 5. no api keys leak in endpoint logs
     def test_no_api_keys_leak_in_logs(self):

@@ -6,16 +6,16 @@ with the ide_gateway queue files directly (no HTTP, no recursion).
 
 Usage:
 
-  # Phase 1: poll for the next IDE request (blocks up to --timeout seconds)
-  python bridge_step.py poll --timeout 30
+  # Step 1: poll for the next IDE request (blocks up to --timeout seconds)
+  python bridge_step.py poll --timeout 3
 
-  # Phase 2a: complete the request with a text answer
+  # Step 2a: complete the request with a text answer
   python bridge_step.py complete --request-id req_XXX --content "answer text"
 
-  # Phase 2b: complete with structured payload (images/tool_calls/...)
+  # Step 2b: complete with structured payload (images/tool_calls/...)
   python bridge_step.py complete --request-id req_XXX --payload '{"url":"..."}'
 
-  # Phase 2c: fail the request with an error
+  # Step 2c: fail the request with an error
   python bridge_step.py fail --request-id req_XXX --message "reason"
 
   # Status check
@@ -24,12 +24,18 @@ Usage:
 The script reads the endpoint state file to find the runtime root and endpoint
 name, then operates on the queue files under
 <workspace>/temp/ide_gateway_runtime/queues/<endpoint>/.
+
+poll output includes classified fields to help the model decide what to do:
+  - prompt_type: "chat" (user question) | "memory_extraction" (PromptQL sync) | "other"
+  - user_message: the extracted last user message (without preamble/system text)
+  - prompt_tail: last 3000 chars of the full prompt for context
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -90,15 +96,84 @@ def _parse_payload_arg(args) -> dict | None:
         return None
 
 
+# --------------------------------------------------------------------------- #
+# Prompt classification
+# --------------------------------------------------------------------------- #
+_USER_MESSAGE_RE = re.compile(
+    r"(?:\[user\]|User:|\"role\":\s*\"user\")\s*[:\s]*\s*(.+?)(?=\n\s*(?:\[(?:user|assistant|system|tool)\]|User:|Assistant:|System:|Tool:|\"role\":)|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def classify_prompt(prompt: str, messages: list | None) -> dict:
+    """Extract the last real user message from a flattened prompt and classify
+    the request type.
+
+    Returns {prompt_type, user_message, prompt_tail}.
+
+    prompt_type:
+      - "memory_extraction": the IDE/PromptQL is syncing memory (SubmitMemoryPlan,
+        SubmitContextQuery, etc.) — answer with a noop.
+      - "chat": a real user question from the IDE.
+      - "other": system/developer preamble without a clear user message.
+    """
+    full_prompt = prompt or ""
+    # Try to extract the last user message from messages first (more reliable).
+    user_message = ""
+    if messages:
+        for m in reversed(messages):
+            if isinstance(m, dict) and m.get("role") == "user":
+                content = m.get("content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        str(p.get("text", "")) for p in content
+                        if isinstance(p, dict) and p.get("type") in (None, "text", "input_text", "output_text")
+                    )
+                if content:
+                    user_message = str(content).strip()
+                    break
+
+    # Fallback: extract from flattened prompt using regex.
+    if not user_message and full_prompt:
+        matches = _USER_MESSAGE_RE.findall(full_prompt)
+        if matches:
+            user_message = matches[-1].strip()
+
+    # Classify
+    low = (user_message or full_prompt).lower()
+    if any(kw in low for kw in ("submitmemoryplan", "submitcontextquery",
+                                 "memory_extraction", "memoryextraction",
+                                 "submitmemory", "memoryplan")):
+        prompt_type = "memory_extraction"
+    elif user_message:
+        prompt_type = "chat"
+    else:
+        prompt_type = "other"
+
+    return {
+        "prompt_type": prompt_type,
+        "user_message": user_message,
+        "prompt_tail": full_prompt[-3000:] if full_prompt else "",
+    }
+
+
 def cmd_poll(args) -> int:
     runtime, endpoint = _find_runtime_and_endpoint()
+    # Default timeout is 3s to avoid 502 proxy timeout on Notion Agent's
+    # run_program layer. The model calls poll repeatedly in short iterations.
     timeout = max(1, min(args.timeout, 120))
     req = claim_next_request(runtime, endpoint, timeout, request_timeout=300)
     if req is None:
         print(json.dumps({"ok": False, "status": "timeout",
                           "message": f"No IDE request received in {timeout}s. Run poll again."}))
         return 0
-    print(json.dumps({
+
+    prompt = req.get("prompt") or ""
+    messages = req.get("messages")
+    classified = classify_prompt(prompt, messages)
+
+    # Full prompt without truncation (model requested no clipping).
+    output = {
         "ok": True,
         "status": "claimed",
         "request_id": req["request_id"],
@@ -106,8 +181,8 @@ def cmd_poll(args) -> int:
         "path": req.get("path"),
         "model": req.get("model"),
         "stream": req.get("stream", False),
-        "messages": req.get("messages"),
-        "prompt": req.get("prompt"),
+        "messages": messages,
+        "prompt": prompt,
         "instructions": req.get("instructions"),
         "temperature": req.get("temperature"),
         "top_p": req.get("top_p"),
@@ -118,7 +193,12 @@ def cmd_poll(args) -> int:
         "prompt_text": req.get("prompt_text"),
         "voice": req.get("voice"),
         "raw_request": req.get("raw_request", {}),
-    }, ensure_ascii=False))
+        # Classification fields (model uses these to decide what to do).
+        "prompt_type": classified["prompt_type"],
+        "user_message": classified["user_message"],
+        "prompt_tail": classified["prompt_tail"],
+    }
+    print(json.dumps(output, ensure_ascii=False))
     return 0
 
 
@@ -155,7 +235,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_poll = sub.add_parser("poll", help="Wait for the next IDE request")
-    p_poll.add_argument("--timeout", type=int, default=30, help="Seconds to wait (1-120)")
+    # Default 3s: avoids 502 proxy timeout on Notion Agent's run_program layer.
+    p_poll.add_argument("--timeout", type=int, default=3, help="Seconds to wait (1-120, default 3)")
 
     p_complete = sub.add_parser("complete", help="Complete a claimed request")
     p_complete.add_argument("--request-id", required=True)

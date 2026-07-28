@@ -1,3 +1,11 @@
+## 1.8.7 - 2026-07-28
+
+- Updated `bridge_step.py` with prompt classification: `poll` now returns `prompt_type` ("chat" | "memory_extraction" | "other"), `user_message` (extracted last user message), and `prompt_tail` (last 3000 chars for context).
+- Changed `poll` default timeout from 30s to 3s to avoid 502 proxy timeout on Notion Agent's `run_program` layer.
+- Added `classify_prompt()` function that extracts the last real user message from flattened prompts or messages arrays and detects PromptQL memory-extraction requests.
+- Updated `ide_gateway_bridge_prompt` to return a routing instruction with `prompt_type` branches: chat → answer the question; memory_extraction → noop; other → empty complete.
+- 275 tests pass (4 new classify_prompt tests added).
+
 ## 1.8.6 - 2026-07-28
 
 - Added `plugins/ide_gateway/bridge_step.py` — a CLI helper that lets the active model serve IDE requests via `run_program` (poll/complete/fail/status), working with the queue files directly instead of long-lived MCP tool-calls that timeout.
