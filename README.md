@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.5
+# Notion Local MCP Easy 1.8.6
 
 
 
@@ -92,7 +92,7 @@ docs/ru/index.html
 
 Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Шлюз поднимает локальный endpoint на `127.0.0.1:8787`, который IDE видит как обычного OpenAI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу.
 
-Мост работает через long-poll: модель в чате один раз запускает цикл `ide_gateway_wait_request` и держит его открытым. Когда IDE шлёт запрос — он мгновенно доходит до модели, та обрабатывает его своими MCP-инструментами и отвечает через `ide_gateway_send_response`. Никаких ручных «пинков», сообщения в чате не плодятся.
+Мост работает через `run_program`: модель в чате запускает `bridge_step.py poll` (ждёт запрос от IDE 30 сек), обрабатывает его своими MCP-инструментами, отвечает через `bridge_step.py complete`, и снова `poll`. Никаких ручных «пинков», сообщения в чате не плодятся, не требует долгоживущих MCP-tool-call'ов (которые таймаутят).
 
 Короткий сценарий:
 
@@ -100,7 +100,7 @@ docs/ru/index.html
 2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat` (или `ENABLE.bat`). Выберите `current` scope, `full_access` mode, defaults.
 3. Перезапустите MCP — endpoint поднимется на `127.0.0.1:8787`.
 4. Вызовите `ide_gateway_bridge_prompt` и вставьте промт-шаблон в системный промт Notion Agent (один раз).
-5. Модель запустит цикл `wait_request` → мост стоит постоянно.
+5. Модель запустит цикл `bridge_step.py poll` → мост стоит постоянно.
 6. В IDE добавьте OpenAI-compatible provider: `base_url = http://127.0.0.1:8787/v1`, `api_key` и `model` из `ide_gateway_show_config`.
 7. IDE отправляет запросы — модель обслуживает их напрямую через мост.
 

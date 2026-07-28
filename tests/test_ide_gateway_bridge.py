@@ -180,10 +180,12 @@ class IdeGatewayBridgeTests(unittest.TestCase):
         result = invoke("ide_gateway_bridge_prompt", {"name": "default", "include_secret": True},
                         {**ctx, "pluginConfig": cfg})
         self.assertTrue(result["ok"])
-        self.assertIn("ide_gateway_wait_request", result["system_prompt"])
-        self.assertIn("ide_gateway_send_response", result["system_prompt"])
-        self.assertIn("Do not emit a chat message", result["system_prompt"])
-        self.assertIn("3600", result["system_prompt"])
+        self.assertIn("bridge_step.py", result["system_prompt"])
+        self.assertIn("run_program", result["system_prompt"])
+        self.assertIn("poll --timeout 30", result["system_prompt"])
+        self.assertIn("complete --request-id", result["system_prompt"])
+        self.assertIn("Do not emit a", result["system_prompt"])
+        self.assertIn("bridge_script", result)
 
     # 5. no api keys leak in endpoint logs
     def test_no_api_keys_leak_in_logs(self):

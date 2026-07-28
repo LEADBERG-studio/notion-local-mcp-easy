@@ -1,3 +1,11 @@
+## 1.8.6 - 2026-07-28
+
+- Added `plugins/ide_gateway/bridge_step.py` — a CLI helper that lets the active model serve IDE requests via `run_program` (poll/complete/fail/status), working with the queue files directly instead of long-lived MCP tool-calls that timeout.
+- Updated `ide_gateway_bridge_prompt` to return a `run_program`-based loop instruction using `bridge_step.py` instead of `ide_gateway_wait_request` as a blocking MCP tool-call.
+- This fixes the core issue: Notion Agent cannot hold a single MCP tool-call open for long-poll, but it can run `bridge_step.py poll` repeatedly in short iterations.
+- Updated README.md, README.en.md, and docs/ru/ide-gateway.html with the `run_program` + `bridge_step.py` bridge architecture.
+- 271 tests pass; `bridge_step.py` verified end-to-end (poll finds request, complete delivers answer to IDE).
+
 ## 1.8.5 - 2026-07-28
 
 - Removed the `ide_provider` plugin entirely; `ide_gateway` is now the sole IDE bridge.

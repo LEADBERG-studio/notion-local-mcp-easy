@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.5
+# Notion Local MCP Easy 1.8.6
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 

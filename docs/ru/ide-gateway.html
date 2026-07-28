@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.8.5</small>
+        <small>документация для начинающих · v1.8.6</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -62,7 +62,7 @@
     <main class="content">
       <h1>IDE Gateway — мост между IDE и моделью</h1>
 
-      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1:8787</code>. IDE видит его как обычного AI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу. Мост работает через long-poll: модель держит <code>ide_gateway_wait_request</code> открытым, и когда IDE шлёт запрос — он мгновенно доходит до модели.</p>
+      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1:8787</code>. IDE видит его как обычного AI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу. Мост работает через <code>run_program</code>: модель запускает <code>bridge_step.py poll</code>, обрабатывает запрос и отвечает через <code>bridge_step.py complete</code>.</p>
 
       <div class="callout info">
         <strong>Зачем это нужно:</strong> инструменты MCP менее надёжны, чем у IDE. Этот плагин позволяет работать в привычном IDE, но с моделью, которая видит ваши файлы и может вызывать MCP-инструменты. Общение IDE ↔ модель идёт напрямую, без сообщений в чате.
@@ -73,11 +73,12 @@
   → POST http://127.0.0.1:8787/v1/chat/completions
   → ide_gateway endpoint (worker)
   → очередь (file-based queue)
-  → ide_gateway_wait_request (модель держит long-poll)
+  → модель вызывает run_program: bridge_step.py poll
+  → bridge_step.py забирает запрос из очереди
   → модель обрабатывает MCP-инструментами
-  → ide_gateway_send_response
+  → модель вызывает run_program: bridge_step.py complete
   → IDE получает ответ
-  → модель снова wait_request (цикл, без чат-сообщений)</code></pre>
+  → модель снова poll (цикл, без чат-сообщений)</code></pre>
 
       <h2>Быстрый старт</h2>
       <ol class="steps">
@@ -128,15 +129,15 @@
       <h2>Цикл моста</h2>
       <ol class="steps">
         <li>Модель один раз запускает цикл (через промт-шаблон или вручную).</li>
-        <li>Модель вызывает <code>ide_gateway_wait_request(timeout_seconds=3600)</code> — это блокируется до прихода IDE-запроса.</li>
-        <li>IDE отправляет <code>POST /v1/chat/completions</code> → worker кладёт запрос в очередь → <code>wait_request</code> мгновенно возвращает его модели.</li>
+        <li>Модель вызывает <code>run_program: python bridge_step.py poll --timeout 30</code> — это блокируется до прихода IDE-запроса (или 30 сек таймаут).</li>
+        <li>IDE отправляет <code>POST /v1/chat/completions</code> → worker кладёт запрос в очередь → <code>poll</code> мгновенно возвращает его модели.</li>
         <li>Модель обрабатывает запрос своими MCP-инструментами (<code>read_file</code>, <code>run_command</code>, <code>web_search</code> и т.д.).</li>
-        <li>Модель вызывает <code>ide_gateway_send_response(request_id=..., content=...)</code>.</li>
-        <li>IDE получает ответ. Модель снова вызывает <code>wait_request</code>. Цикл повторяется без сообщений в чате.</li>
+        <li>Модель вызывает <code>run_program: python bridge_step.py complete --request-id req_XXX --content "ответ"</code>.</li>
+        <li>IDE получает ответ. Модель снова вызывает <code>poll</code>. Цикл повторяется без сообщений в чате.</li>
       </ol>
 
       <div class="callout warning">
-        <strong>Важно:</strong> мост держится только пока активная модель в чате. Если чат закрыт или модель не запустила цикл <code>wait_request</code> — запросы из IDE будут висеть в очереди до таймаута.
+        <strong>Важно:</strong> мост держится только пока активная модель в чате запускает <code>bridge_step.py poll</code> в цикле. Если чат закрыт или модель не запустила цикл — запросы из IDE будут висеть в очереди до таймаута. Не вызывайте <code>wait_request</code> как MCP-tool-call — он таймаутит; используйте <code>run_program</code> + <code>bridge_step.py</code>.
       </div>
 
       <h2>Диагностика</h2>

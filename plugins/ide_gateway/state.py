@@ -522,38 +522,52 @@ def read_logs(arguments: dict[str, Any], context: dict[str, Any], config: dict[s
 
 def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     """Return a copy-paste system-prompt snippet that turns the active MCP
-    model into a persistent long-poll bridge serving IDE requests."""
+    model into a persistent bridge serving IDE requests via run_program."""
     name = normalize_name(arguments.get("name"))
     state = _load_endpoint_state(context, name)
     base_url = state["base_url"] if state else "http://127.0.0.1:8787/v1"
     model = state["model_id"] if state else config.get("default_model_id", "ide-gateway")
     token = state["token"] if state and arguments.get("include_secret") else "***"
-    wait_timeout = int(config.get("wait_timeout_seconds", 3600))
+    workspace = str(context.get("workspacePath", ""))
+    bridge_script = str(Path(__file__).resolve().parent / "bridge_step.py")
 
     prompt = (
-        f"# IDE Gateway bridge mode\n"
-        f"You are connected to an IDE through the ide_gateway plugin. "
-        f"Keep the bridge alive so IDE requests are served instantly without "
-        f"manual pings.\n\n"
-        f"## Loop (run continuously, do not write chat summaries between iterations)\n"
-        f"1. Call `ide_gateway_wait_request(timeout_seconds={wait_timeout})`. "
-        f"This blocks until an IDE request arrives.\n"
-        f"2. When it returns a request, process it using your MCP tools "
-        f"(read_file, run_command, web_search, etc.) as needed.\n"
-        f"3. Call `ide_gateway_send_response(request_id=<from step 2>, "
-        f"content=<your answer>)` to deliver the response to the IDE.\n"
-        f"4. If you cannot answer, call "
-        f"`ide_gateway_fail_request(request_id=<from step 2>, message=<reason>)`.\n"
-        f"5. Immediately go back to step 1. Do not emit a chat message "
-        f"between iterations — the bridge must stay quiet in the chat while "
-        f"serving IDE traffic.\n\n"
-        f"## Connection (for reference)\n"
+        "# IDE Gateway bridge mode (run_program loop)\n"
+        "You are connected to an IDE through the ide_gateway plugin. "
+        "Keep the bridge alive so IDE requests are served automatically.\n\n"
+        "## How it works\n"
+        f"The IDE sends OpenAI-compatible requests to {base_url}. The gateway "
+        "worker queues them. You serve them by running bridge_step.py via "
+        "run_program, which works with the queue files directly (no HTTP "
+        "recursion, no MCP tool-call timeout issues).\n\n"
+        "## Bridge script\n"
+        f"Script: `{bridge_script}`\n"
+        f"Workspace: `{workspace}`\n\n"
+        "## Loop (repeat forever, do not write chat summaries between iterations)\n"
+        "1. **Poll** for the next IDE request (blocks up to 30s):\n"
+        "   run_program: python " + repr(bridge_script) + " poll --timeout 30\n"
+        "   - If output says \"status\": \"timeout\", immediately poll again.\n"
+        "   - If output says \"status\": \"claimed\", you got a request — "
+        "read request_id, kind, prompt/messages from the JSON output.\n\n"
+        "2. **Process** the request. Use your MCP tools (read_file, "
+        "run_command, web_search, etc.) to produce the answer.\n\n"
+        "3. **Complete** the request with your answer:\n"
+        "   run_program: python " + repr(bridge_script) + " complete --request-id req_XXX --content \"your answer here\"\n"
+        "   For multi-line content, use --content - and pipe via stdin.\n\n"
+        "4. **Or fail** the request if you cannot answer:\n"
+        "   run_program: python " + repr(bridge_script) + " fail --request-id req_XXX --message \"reason\"\n\n"
+        "5. **Immediately** go back to step 1 (poll again). Do not emit a "
+        "chat message between iterations — the bridge must stay quiet.\n\n"
+        "## Connection (for reference)\n"
         f"- base_url: {base_url}\n"
         f"- api_key: {token}\n"
         f"- model: {model}\n\n"
-        f"## First-time setup\n"
-        f"Make sure `ide_gateway_status` shows the endpoint as running. "
-        f"If not, call `ide_gateway_start` first. Then start the loop above."
+        "## Check status\n"
+        "   run_program: python " + repr(bridge_script) + " status\n"
+        "Shows queue counters (pending/claimed/completed/failed/expired).\n\n"
+        "## First-time setup\n"
+        "Make sure ide_gateway_status shows the endpoint as running. "
+        "If not, call ide_gateway_start first."
     )
     return {
         "ok": True,
@@ -561,7 +575,7 @@ def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: di
         "base_url": base_url,
         "api_key": token,
         "model": model,
-        "wait_timeout_seconds": wait_timeout,
+        "bridge_script": bridge_script,
         "system_prompt": prompt,
-        "message": "Paste this snippet into the model's system prompt (or run it once as an instruction) to enable the persistent bridge.",
+        "message": "Paste this snippet into the model's system prompt. The loop uses run_program + bridge_step.py to avoid MCP tool-call timeouts.",
     }
