@@ -1,3 +1,16 @@
+## 1.8.5 - 2026-07-28
+
+- Removed the `ide_provider` plugin entirely; `ide_gateway` is now the sole IDE bridge.
+- Removed the subprocess responder (`responder.py`) and its four tools (`ide_gateway_responder_start/stop/status/logs`); the canonical IDE<->model bridge is a long-poll served by the model itself through `ide_gateway_wait_request`, not an external upstream.
+- Added `ide_gateway_bridge_prompt` tool that returns a copy-paste system-prompt snippet turning the active MCP model into a persistent long-poll bridge serving IDE requests without chat noise.
+- Cleaned `ide_gateway` config: removed the entire responder config section (`responder_enabled`, `responder_autostart`, `responder_upstream_*`, `responder_request_timeout_seconds`, `responder_poll_interval_seconds`, `responder_max_concurrent_requests`).
+- Cleaned `plugin_setup.py`: removed `collect_ide_provider_config`, `generate_ide_provider_api_key`, `ide_gateway_default_config`, and `collect_enable_config`; `ENABLE.bat` now goes through `collect_config`.
+- Updated README.md, README.en.md, and all docs/ru pages to document the long-poll bridge architecture and remove `ide_provider` references.
+- Added `docs/ru/ide-gateway.html` beginner guide.
+- Updated VERSION to 1.8.5 (CRLF byte-exact) and launcher version constant.
+- Added `tests/test_ide_gateway_bridge.py` with 5 end-to-end long-poll bridge tests (chat non-stream, chat stream, setup defaults, bridge_prompt, no key leak).
+- Removed 6 `ide_provider` test files and `test_ide_gateway_responder.py`; 271 tests pass.
+
 ## 1.8.4 - 2026-07-28
 
 - Corrected `ide_gateway` setup semantics: the standard gateway is a transport bridge to the active PromptQL/Notion agent, not a proxy to a local Ollama/OpenAI upstream.

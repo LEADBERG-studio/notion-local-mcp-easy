@@ -101,10 +101,6 @@ def prompt_text(label: str, default: str = "", required: bool = False) -> str:
 def prompt_bool(label: str, default: bool = True) -> bool:
     return prompt_choice(label, ["yes", "no"], "yes" if default else "no") == "yes"
 
-def generate_ide_provider_api_key() -> str:
-    return "idep_" + secrets.token_urlsafe(32)
-
-
 def generate_ide_gateway_api_key() -> str:
     return "ideg_" + secrets.token_urlsafe(32)
 
@@ -174,22 +170,35 @@ def collect_openai_compat_config(existing: dict[str, Any]) -> dict[str, Any]:
         "subagent_defaults": existing.get("subagent_defaults") if isinstance(existing.get("subagent_defaults"), dict) else {"temperature": 0.2, "max_output_tokens": 800},
     }
 
-def collect_ide_provider_config(existing: dict[str, Any]) -> dict[str, Any]:
-    print("IDE Provider setup: choose a preset unless you need custom endpoint defaults.")
+def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
+    print("IDE Gateway setup: OpenAI-compatible bridge from IDE to the active MCP model.")
     config = dict(existing)
     api_key = str(config.get("default_api_key", "")).strip()
     if not api_key:
-        api_key = generate_ide_provider_api_key()
+        api_key = generate_ide_gateway_api_key()
         config["default_api_key"] = api_key
-        print("Generated local IDE Provider API key and saved it to the plugin-local config.")
+        print("Generated local IDE Gateway API key and saved it to the plugin-local config.")
     else:
-        print("Keeping existing local IDE Provider API key from the plugin-local config.")
+        print("Keeping existing local IDE Gateway API key from the plugin-local config.")
+
+    autostart = prompt_bool("Enable endpoint autostart (preferred port 8787)?", True)
+    config["autostart"] = autostart
+    if autostart:
+        port = prompt_text("Preferred port (default 8787)", str(config.get("default_port", 8787)))
+        try:
+            config["default_port"] = int(port)
+        except ValueError:
+            config["default_port"] = 8787
+
+    # The bridge is served by the model itself through a long-lived
+    # ide_gateway_wait_request call (the canonical MCP bridge pattern). No
+    # external upstream or subprocess responder is needed.
 
     setup_mode = prompt_choice("Endpoint defaults", ["default", "custom"], "default")
     if setup_mode == "default":
         return config
 
-    model = prompt_text("Default model id", str(config.get("default_model_id", "ide-provider")) or "ide-provider")
+    model = prompt_text("Default model id", str(config.get("default_model_id", "ide-gateway")) or "ide-gateway")
     if model:
         config["default_model_id"] = model
     first = prompt_text("Port range start", str((config.get("port_range") or [8787, 8899])[0]))
@@ -199,100 +208,10 @@ def collect_ide_provider_config(existing: dict[str, Any]) -> dict[str, Any]:
     timeout = prompt_text("Request timeout seconds", str(config.get("request_timeout_seconds", 300)))
     if timeout:
         config["request_timeout_seconds"] = int(timeout)
-    return config
-
-def ide_gateway_default_config(existing: dict[str, Any]) -> dict[str, Any]:
-    # Safe IDE Gateway defaults.
-    #
-    # ide_gateway is a transport bridge from IDE clients to the active
-    # PromptQL/Notion agent through the MCP queue. It must not ask users for,
-    # or default to, an external OpenAI/Ollama upstream model.
-    config = dict(existing)
-    if not str(config.get("default_api_key", "")).strip():
-        config["default_api_key"] = generate_ide_gateway_api_key()
-    config.update({
-        "autostart": True,
-        "default_port": int(config.get("default_port") or 8787),
-        "default_model_id": str(config.get("default_model_id") or "ide-gateway"),
-        "responder_enabled": False,
-        "responder_autostart": False,
-        "responder_upstream_type": "promptql_bridge",
-        "responder_upstream_base_url": "",
-        "responder_upstream_api_key": "",
-        "responder_upstream_model": "",
-    })
-    return config
-
-
-def ide_provider_default_config(existing: dict[str, Any]) -> dict[str, Any]:
-    config = dict(existing)
-    if not str(config.get("default_api_key", "")).strip():
-        config["default_api_key"] = generate_ide_provider_api_key()
-    config.setdefault("default_model_id", "ide-provider")
-    config.setdefault("port_range", [8787, 8899])
-    config.setdefault("request_timeout_seconds", 300)
-    return config
-
-
-def collect_enable_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
-    base = existing.get("config") if isinstance(existing.get("config"), dict) else {}
-    if plugin_id == "ide_provider":
-        print("ENABLE: applying IDE Provider working defaults without questions.")
-        return ide_provider_default_config(base)
-    if plugin_id == "ide_gateway":
-        print("ENABLE: applying IDE Gateway PromptQL bridge defaults without questions.")
-        print("Endpoint autostart is enabled. Requests are left for the active PromptQL/Notion bridge responder; no external upstream is configured.")
-        return ide_gateway_default_config(base)
-    if base:
-        print(f"ENABLE: reusing existing local config for {plugin_id}. Run SETUP.bat to change it.")
-        return base
-    raise SystemExit(f"Plugin {plugin_id!r} has no safe non-interactive defaults. Run SETUP.bat instead.")
-
-
-def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
-    print("IDE Gateway setup: transport bridge from IDE clients to the active PromptQL/Notion agent.")
-    print("No local upstream/model is configured here. The real model is selected in PromptQL chat/project settings.")
-    config = ide_gateway_default_config(existing)
-
-    setup_mode = prompt_choice("Setup preset", ["default", "custom"], "default")
-    if setup_mode == "default":
-        print("Using defaults: endpoint autostart ON, PromptQL bridge queue mode.")
-        return config
-
-    config["autostart"] = prompt_bool("Enable endpoint autostart (preferred port 8787)?", bool(config.get("autostart", True)))
-    if config["autostart"]:
-        port = prompt_text("Preferred port", str(config.get("default_port", 8787)))
-        try:
-            config["default_port"] = int(port)
-        except ValueError:
-            config["default_port"] = 8787
-
-    model = prompt_text(
-        "Gateway model id shown to IDE (alias only; PromptQL chooses the real model)",
-        str(config.get("default_model_id", "ide-gateway")) or "ide-gateway",
-    )
-    if model:
-        config["default_model_id"] = model
-
-    first = prompt_text("Port range start", str((config.get("port_range") or [8787, 8899])[0]))
-    last = prompt_text("Port range end", str((config.get("port_range") or [8787, 8899])[1]))
-    if first and last:
-        config["port_range"] = [int(first), int(last)]
-    timeout = prompt_text("Gateway request timeout seconds", str(config.get("request_timeout_seconds", 300)))
-    if timeout:
-        config["request_timeout_seconds"] = int(timeout)
-    embeddings = prompt_choice("Embeddings mode", ["fallback", "off"], str(config.get("embeddings_mode", "fallback")) or "fallback")
+    embeddings = prompt_choice("Embeddings mode", ["fallback", "off"], "fallback")
     config["embeddings_mode"] = embeddings
     disabled = prompt_text("Disabled tools (comma-separated, empty for none)", str(config.get("disabled_tools", "")))
     config["disabled_tools"] = disabled
-
-    # Standard setup always remains in PromptQL bridge mode.
-    config["responder_enabled"] = False
-    config["responder_autostart"] = False
-    config["responder_upstream_type"] = "promptql_bridge"
-    config["responder_upstream_base_url"] = ""
-    config["responder_upstream_api_key"] = ""
-    config["responder_upstream_model"] = ""
     return config
 
 def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
@@ -303,8 +222,6 @@ def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
         return collect_postgres_config(base)
     if plugin_id == "openai_compat":
         return collect_openai_compat_config(base)
-    if plugin_id == "ide_provider":
-        return collect_ide_provider_config(base)
     if plugin_id == "ide_gateway":
         return collect_ide_gateway_config(base)
     raw = prompt_text("Config JSON", json.dumps(base, ensure_ascii=False))
@@ -460,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             profile_id = str(active_profile(load_profile_storage(profile_storage or default_profile_storage_path())).get("profileId", "") or "")
         existing = existing_config(plugin_dir, scope, profile_id or None)
         if args.action == "enable":
-            config = collect_enable_config(plugin_id, existing)
+            config = collect_config(plugin_id, existing)
         else:
             config = collect_config(plugin_id, existing)
     path = write_local_plugin_config(plugin_dir, scope, requested_mode, config, profile_storage)

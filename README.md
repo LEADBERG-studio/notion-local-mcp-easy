@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.4
+# Notion Local MCP Easy 1.8.5
 
 
 
@@ -85,44 +85,28 @@ docs/ru/index.html
 Дополнительно launcher теперь ведёт локальное profile-aware хранилище `%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json`: `PATH[N]` остаётся базовым anchor saved-областей, но каждая область разворачивается в workflow profile с `accessMode`, `environmentMode`, metadata и area-specific plugin state. Активный профиль по-прежнему зеркалится обратно в legacy `config.json`, чтобы старый launcher/config/runtime flow не ломался.
 
 
-
-Поверх этого работает универсальная plugin-system: каждый плагин содержит собственные `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat` и `STATUS.bat`. Оператор запускает setup из папки плагина, выбирает `current` или `global` scope, отвечает на вопросы настройки, а helper создаёт локальный `plugin.local.*.json`; при следующем старте MCP plugin runtime читает эти локальные конфиги и регистрирует tools. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, AI/subagent family `openai_compat`, а также `ide_provider`.
-
+Поверх этого работает универсальная plugin-system: каждый плагин содержит собственные `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat` и `STATUS.bat`. Оператор запускает setup из папки плагина, выбирает `current` или `global` scope, отвечает на вопросы настройки, а helper создаёт локальный `plugin.local.*.json`; при следующем старте MCP plugin runtime читает эти локальные конфиги и регистрирует tools. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, AI/subagent family `openai_compat`, а также `ide_gateway`.
 
 
+## IDE Gateway — мост между IDE и моделью
 
+Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Шлюз поднимает локальный endpoint на `127.0.0.1:8787`, который IDE видит как обычного OpenAI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу.
 
-
-
-
-## IDE Provider для локальной IDE
-
-Начиная с 1.7.4 в комплект входит плагин `ide_provider`. Он позволяет поднять локальный OpenAI-compatible endpoint на `127.0.0.1`, подключить его в IDE как обычного AI provider и обслуживать IDE-запросы активной MCP-моделью.
+Мост работает через long-poll: модель в чате один раз запускает цикл `ide_gateway_wait_request` и держит его открытым. Когда IDE шлёт запрос — он мгновенно доходит до модели, та обрабатывает его своими MCP-инструментами и отвечает через `ide_gateway_send_response`. Никаких ручных «пинков», сообщения в чате не плодятся.
 
 Короткий сценарий:
 
 1. Запустите рабочую область в trusted developer mode.
-2. Откройте `plugins\ide_provider` и запустите `SETUP.bat` или `ENABLE.bat`.
-3. В setup выберите `current` для текущей рабочей области или `global` для всех областей, затем перезапустите MCP.
-4. Вызовите `ide_provider_start`.
-5. Скопируйте в IDE `base_url`, `api_key` и `model`.
-6. Когда IDE отправляет запрос, активная MCP-модель забирает его через `ide_provider_wait_request` и отвечает через `ide_provider_send_response`.
+2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat` (или `ENABLE.bat`). Выберите `current` scope, `full_access` mode, defaults.
+3. Перезапустите MCP — endpoint поднимется на `127.0.0.1:8787`.
+4. Вызовите `ide_gateway_bridge_prompt` и вставьте промт-шаблон в системный промт Notion Agent (один раз).
+5. Модель запустит цикл `wait_request` → мост стоит постоянно.
+6. В IDE добавьте OpenAI-compatible provider: `base_url = http://127.0.0.1:8787/v1`, `api_key` и `model` из `ide_gateway_show_config`.
+7. IDE отправляет запросы — модель обслуживает их напрямую через мост.
 
-Подробная инструкция для новичков: `docs/ru/ide-provider.html`.
+Диагностика: `ide_gateway_status` (endpoint + счётчики очереди), `ide_gateway_get_logs`, `ide_gateway_show_config`.
 
 
-## IDE Gateway с автономным responder
-
-Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). С 1.8.4 шлюз имеет автономный responder-loop, который сам забирает запросы из очереди и отправляет их в настроенный upstream (OpenAI-compatible), поэтому IDE получает ответы без ручного вызова `wait_request/send_response`.
-
-Короткий сценарий:
-
-1. Запустите рабочую область в trusted developer mode.
-2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat`.
-4. Перезапустите MCP — endpoint поднимется на `127.0.0.1:8787`, responder стартует автоматически.
-5. Вызовите `ide_gateway_show_config` (`include_secret=true`) и скопируйте `base_url`, `api_key`, `model` в IDE.
-6. IDE отправляет запросы — responder сам забирает их и возвращает ответы.
-7. Диагностика: `ide_gateway_status`, `ide_gateway_responder_status`, `ide_gateway_responder_logs`.
 
 
 ## OAuth через Tunnellio

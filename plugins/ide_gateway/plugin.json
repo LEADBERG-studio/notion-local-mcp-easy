@@ -180,72 +180,21 @@
       "diagnostic_visibility": "full"
     },
     {
-      "name": "ide_gateway_responder_start",
-      "title": "Start IDE Gateway responder",
-      "description": "Start the autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream so the IDE receives answers without manual wait_request/send_response calls.",
-      "capability": "ide_gateway.responder_start",
-      "mode_required": "full_access",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "name": {"type": "string"}
-        }
-      },
-      "output_schema": {"type": "object"},
-      "handler_ref": "ide_gateway.responder_start",
-      "safety_tags": ["ide", "gateway", "responder", "network", "full_access"],
-      "diagnostic_visibility": "full"
-    },
-    {
-      "name": "ide_gateway_responder_stop",
-      "title": "Stop IDE Gateway responder",
-      "description": "Stop a running autonomous responder loop.",
-      "capability": "ide_gateway.responder_stop",
-      "mode_required": "full_access",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "name": {"type": "string"}
-        }
-      },
-      "output_schema": {"type": "object"},
-      "handler_ref": "ide_gateway.responder_stop",
-      "safety_tags": ["ide", "gateway", "responder", "full_access"],
-      "diagnostic_visibility": "full"
-    },
-    {
-      "name": "ide_gateway_responder_status",
-      "title": "IDE Gateway responder status",
-      "description": "Show running status, pid, upstream type/model and queue counters for the autonomous responder.",
-      "capability": "ide_gateway.responder_status",
-      "mode_required": "read_only",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "name": {"type": "string"}
-        }
-      },
-      "output_schema": {"type": "object"},
-      "handler_ref": "ide_gateway.responder_status",
-      "safety_tags": ["ide", "gateway", "responder", "read_only"],
-      "diagnostic_visibility": "full"
-    },
-    {
-      "name": "ide_gateway_responder_logs",
-      "title": "Read IDE Gateway responder logs",
-      "description": "Read recent redacted logs for the autonomous responder loop.",
-      "capability": "ide_gateway.responder_logs",
+      "name": "ide_gateway_bridge_prompt",
+      "title": "Show IDE Gateway bridge system-prompt",
+      "description": "Return a copy-paste system-prompt snippet that turns the active MCP model into a persistent long-poll bridge serving IDE requests without manual pings or chat summaries. This is the canonical way to keep the IDE<->model bridge alive.",
+      "capability": "ide_gateway.bridge_prompt",
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
         "properties": {
           "name": {"type": "string"},
-          "limit": {"type": "integer"}
+          "include_secret": {"type": "boolean"}
         }
       },
       "output_schema": {"type": "object"},
-      "handler_ref": "ide_gateway.responder_logs",
-      "safety_tags": ["ide", "gateway", "responder", "logs", "read_only"],
+      "handler_ref": "ide_gateway.bridge_prompt",
+      "safety_tags": ["ide", "gateway", "bridge", "read_only"],
       "diagnostic_visibility": "full"
     }
   ]

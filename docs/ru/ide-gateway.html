@@ -1,0 +1,156 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IDE Gateway · Notion Local MCP Easy</title>
+  <meta name="description" content="Русская документация Notion Local MCP Easy">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">MCP</span>
+      <span>
+        <strong>Notion Local MCP Easy</strong>
+        <small>документация для начинающих · v1.8.5</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav class="nav-main">
+<a class="nav-link" href="index.html">Старт</a>
+<a class="nav-link" href="concepts.html">Что это такое</a>
+<a class="nav-link" href="quickstart.html">Быстрый старт</a>
+<a class="nav-link" href="auth.html">Авторизация</a>
+<a class="nav-link" href="oauth.html">OAuth пошагово</a>
+<a class="nav-link" href="connections.html">Способы подключения</a>
+<a class="nav-link" href="tunnels.html">Туннели и URL</a>
+<details class="nav-group">
+  <summary class="nav-link nav-summary">Tunnellio</summary>
+  <div class="nav-submenu">
+    <a class="nav-sublink" href="tunnellio.html">Обзор страницы</a>
+    <a class="nav-sublink" href="tunnellio.html#overview">Что это</a>
+    <a class="nav-sublink" href="tunnellio.html#addresses">Адреса сервиса</a>
+    <a class="nav-sublink" href="tunnellio.html#auth-layers">Токены и OAuth</a>
+    <a class="nav-sublink" href="tunnellio.html#cabinet">Кабинет</a>
+    <a class="nav-sublink" href="tunnellio.html#connection">Постоянное подключение</a>
+    <a class="nav-sublink" href="tunnellio.html#oauth">OAuth Tunnellio</a>
+    <a class="nav-sublink" href="tunnellio.html#api">API</a>
+    <a class="nav-sublink" href="tunnellio.html#client">CLI-клиент</a>
+    <a class="nav-sublink" href="tunnellio.html#recipes">Рецепты</a>
+    <a class="nav-sublink" href="tunnellio.html#troubleshooting">Ошибки</a>
+  </div>
+</details>
+<a class="nav-link" href="reverse-proxy.html">Reverse proxy</a>
+<a class="nav-link" href="notion.html">Подключение клиента</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
+<a class="nav-link active" href="ide-gateway.html">IDE Gateway</a>
+<a class="nav-link" href="profiles.html">Профили</a>
+<a class="nav-link" href="operations.html">Эксплуатация</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+<a class="nav-link" href="reference.html">Шпаргалки</a>
+</nav>
+      <div class="sidebar-note">
+        <strong>Главное правило</strong>
+        <p>Не публикуйте токены, owner code, client secret и локальные config-файлы.</p>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>IDE Gateway — мост между IDE и моделью</h1>
+
+      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1:8787</code>. IDE видит его как обычного AI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу. Мост работает через long-poll: модель держит <code>ide_gateway_wait_request</code> открытым, и когда IDE шлёт запрос — он мгновенно доходит до модели.</p>
+
+      <div class="callout info">
+        <strong>Зачем это нужно:</strong> инструменты MCP менее надёжны, чем у IDE. Этот плагин позволяет работать в привычном IDE, но с моделью, которая видит ваши файлы и может вызывать MCP-инструменты. Общение IDE ↔ модель идёт напрямую, без сообщений в чате.
+      </div>
+
+      <h2>Как это работает</h2>
+      <pre><code>IDE (Cursor, Continue, VS Code, ...)
+  → POST http://127.0.0.1:8787/v1/chat/completions
+  → ide_gateway endpoint (worker)
+  → очередь (file-based queue)
+  → ide_gateway_wait_request (модель держит long-poll)
+  → модель обрабатывает MCP-инструментами
+  → ide_gateway_send_response
+  → IDE получает ответ
+  → модель снова wait_request (цикл, без чат-сообщений)</code></pre>
+
+      <h2>Быстрый старт</h2>
+      <ol class="steps">
+        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>Через <code>SETUP.bat</code> в корне MCP включите trusted mode ответом <code>y</code>.</li>
+        <li><strong>Включите плагин.</strong><br>Откройте <code>plugins\ide_gateway</code> и запустите <code>SETUP.bat</code>. Выберите <code>current</code> scope, <code>full_access</code> mode, defaults.</li>
+        <li><strong>Перезапустите MCP.</strong><br><code>STOP.bat</code> → <code>START.bat</code>. Endpoint поднимется на <code>127.0.0.1:8787</code>.</li>
+        <li><strong>Получите промт-шаблон.</strong><br>Вызовите <code>ide_gateway_bridge_prompt</code> — он вернёт готовую инструкцию для системного промта Notion Agent.</li>
+        <li><strong>Вставьте промт в системный промт.</strong><br>Модель запустит цикл <code>wait_request</code> → мост стоит постоянно.</li>
+        <li><strong>Скопируйте настройки в IDE.</strong><br>Вызовите <code>ide_gateway_show_config</code> (<code>include_secret=true</code>) и скопируйте <code>base_url</code>, <code>api_key</code>, <code>model</code>.</li>
+        <li><strong>Работайте.</strong><br>IDE отправляет запросы — модель обслуживает их напрямую через мост.</li>
+      </ol>
+
+      <h2>Настройки IDE</h2>
+      <table><thead><tr><th>Поле</th><th>Значение</th></tr></thead><tbody>
+        <tr><td>Base URL</td><td><code>http://127.0.0.1:8787/v1</code></td></tr>
+        <tr><td>API key</td><td>Значение <code>api_key</code> из <code>ide_gateway_show_config</code> (начинается с <code>ideg_</code>)</td></tr>
+        <tr><td>Model</td><td>Значение <code>model</code>, обычно <code>ide-gateway</code></td></tr>
+      </tbody></table>
+
+      <h2>Инструменты</h2>
+      <table><thead><tr><th>Инструмент</th><th>Режим</th><th>Назначение</th></tr></thead><tbody>
+        <tr><td><code>ide_gateway_start</code></td><td><code>full_access</code></td><td>Запустить локальный endpoint.</td></tr>
+        <tr><td><code>ide_gateway_stop</code></td><td><code>full_access</code></td><td>Остановить endpoint и очистить очередь.</td></tr>
+        <tr><td><code>ide_gateway_status</code></td><td><code>read_only</code></td><td>Посмотреть статус endpoint и счётчики очереди.</td></tr>
+        <tr><td><code>ide_gateway_show_config</code></td><td><code>read_only</code></td><td>Показать настройки для IDE (с <code>include_secret=true</code> отдаёт ключ).</td></tr>
+        <tr><td><code>ide_gateway_bridge_prompt</code></td><td><code>read_only</code></td><td>Готовый промт-шаблон для системного промта Notion Agent.</td></tr>
+        <tr><td><code>ide_gateway_wait_request</code></td><td><code>read_only</code></td><td>Дождаться запроса от IDE (long-poll, модель держит открытым).</td></tr>
+        <tr><td><code>ide_gateway_send_response</code></td><td><code>read_only</code></td><td>Отправить ответ IDE.</td></tr>
+        <tr><td><code>ide_gateway_fail_request</code></td><td><code>read_only</code></td><td>Завершить запрос ошибкой.</td></tr>
+        <tr><td><code>ide_gateway_get_logs</code></td><td><code>read_only</code></td><td>Прочитать redacted logs.</td></tr>
+        <tr><td><code>ide_gateway_rotate_token</code></td><td><code>full_access</code></td><td>Сменить локальный API token.</td></tr>
+      </tbody></table>
+
+      <h2>Поддерживаемые эндпоинты</h2>
+      <ul>
+        <li><code>/v1/chat/completions</code> (stream + non-stream)</li>
+        <li><code>/v1/responses</code> (stream + non-stream, background, cancel, input_items)</li>
+        <li><code>/v1/completions</code> (legacy)</li>
+        <li><code>/v1/models</code></li>
+        <li><code>/v1/tools</code> + forced <code>tool_choice</code></li>
+        <li><code>/v1/files</code> (upload, list, get, content, delete)</li>
+        <li><code>/v1/images/generations</code>, <code>/v1/images/edits</code></li>
+        <li><code>/v1/audio/speech</code>, <code>/v1/audio/transcriptions</code>, <code>/v1/audio/translations</code></li>
+        <li><code>/v1/embeddings</code> (local fallback)</li>
+        <li><code>/v1/moderations</code> (local heuristic)</li>
+      </ul>
+
+      <h2>Цикл моста</h2>
+      <ol class="steps">
+        <li>Модель один раз запускает цикл (через промт-шаблон или вручную).</li>
+        <li>Модель вызывает <code>ide_gateway_wait_request(timeout_seconds=3600)</code> — это блокируется до прихода IDE-запроса.</li>
+        <li>IDE отправляет <code>POST /v1/chat/completions</code> → worker кладёт запрос в очередь → <code>wait_request</code> мгновенно возвращает его модели.</li>
+        <li>Модель обрабатывает запрос своими MCP-инструментами (<code>read_file</code>, <code>run_command</code>, <code>web_search</code> и т.д.).</li>
+        <li>Модель вызывает <code>ide_gateway_send_response(request_id=..., content=...)</code>.</li>
+        <li>IDE получает ответ. Модель снова вызывает <code>wait_request</code>. Цикл повторяется без сообщений в чате.</li>
+      </ol>
+
+      <div class="callout warning">
+        <strong>Важно:</strong> мост держится только пока активная модель в чате. Если чат закрыт или модель не запустила цикл <code>wait_request</code> — запросы из IDE будут висеть в очереди до таймаута.
+      </div>
+
+      <h2>Диагностика</h2>
+      <ul>
+        <li><code>ide_gateway_status</code> — статус endpoint + счётчики очереди (pending/claimed/completed/failed/expired).</li>
+        <li><code>ide_gateway_show_config</code> — готовые настройки для IDE.</li>
+        <li><code>ide_gateway_get_logs</code> — последние записи (секреты замаскированы).</li>
+        <li>Endpoint state и очереди живут в gitignored <code>temp/ide_gateway_runtime/</code>.</li>
+      </ul>
+
+      <footer class="page-footer">
+        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

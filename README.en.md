@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.8.4
+# Notion Local MCP Easy 1.8.5
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -60,24 +60,22 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 - `dual`: both legacy token and OAuth on the same `/mcp` endpoint.
 
 
-## IDE Provider plugin
+## IDE Gateway plugin — bridge between IDE and the model
 
-Version 1.7.8 adds the `ide_provider` active-bridge plugin. It starts a local OpenAI-compatible endpoint on `127.0.0.1` so an IDE can send chat-completion requests to the active MCP model. The model serves those requests through `ide_provider_wait_request` and `ide_provider_send_response` while still using Local MCP Easy tools.
+Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). The gateway starts a local endpoint on `127.0.0.1:8787` that the IDE sees as a regular OpenAI provider, but behind it is the active MCP model with access to your files, shell, and web.
 
-Use it only in trusted developer mode and only with IDEs/workspaces you trust. See the Russian beginner guide at `docs/ru/ide-provider.html`.
-
-
-## IDE Gateway plugin with autonomous responder
-
-Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Version 1.8.4 adds an autonomous responder loop that claims queued IDE requests and forwards them to a configured OpenAI-compatible upstream, so the IDE receives answers without manual `wait_request/send_response` calls.
+The bridge works via long-poll: the model in chat starts a `ide_gateway_wait_request` loop once and keeps it open. When the IDE sends a request, it reaches the model instantly; the model processes it with its MCP tools and replies through `ide_gateway_send_response`. No manual pings, no chat noise.
 
 Quick flow:
 
-1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode.
-3. Restart MCP — the endpoint starts on `127.0.0.1:8787` and the responder starts automatically.
-4. Call `ide_gateway_show_config` (`include_secret=true`) and copy `base_url`, `api_key`, `model` into your IDE.
-5. The IDE sends requests; the responder claims them and returns upstream answers automatically.
-6. Diagnostics: `ide_gateway_status`, `ide_gateway_responder_status`, `ide_gateway_responder_logs`.
+1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode. Choose `current` scope, `full_access` mode, defaults.
+2. Restart MCP — the endpoint starts on `127.0.0.1:8787`.
+3. Call `ide_gateway_bridge_prompt` and paste the prompt template into the Notion Agent system prompt (one-time).
+4. The model starts the `wait_request` loop — the bridge stays up permanently.
+5. In your IDE, add an OpenAI-compatible provider: `base_url = http://127.0.0.1:8787/v1`, `api_key` and `model` from `ide_gateway_show_config`.
+6. The IDE sends requests — the model serves them directly through the bridge.
+
+Diagnostics: `ide_gateway_status`, `ide_gateway_get_logs`, `ide_gateway_show_config`.
 
 
 ## Safety model

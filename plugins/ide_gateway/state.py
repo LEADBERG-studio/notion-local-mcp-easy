@@ -41,16 +41,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "embeddings_mode": "fallback",
     "embeddings_dim": 1536,
     "disabled_tools": "",
-    # Responder (autonomous serve loop) section.
-    "responder_enabled": False,
-    "responder_autostart": False,
-    "responder_upstream_type": "promptql_bridge",  # promptql_bridge | openai_compatible | manual
-    "responder_upstream_base_url": "",
-    "responder_upstream_api_key": "",
-    "responder_upstream_model": "",
-    "responder_request_timeout_seconds": 300,
-    "responder_poll_interval_seconds": 0.25,
-    "responder_max_concurrent_requests": 1,
 }
 
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -205,50 +195,6 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     if not isinstance(autostart, bool):
         autostart = str(autostart).strip().lower() in {"1", "true", "yes", "on"}
     normalized["autostart"] = autostart
-
-    # --- responder section ---
-    responder_enabled = normalized.get("responder_enabled", True)
-    if not isinstance(responder_enabled, bool):
-        responder_enabled = str(responder_enabled).strip().lower() in {"1", "true", "yes", "on"}
-    normalized["responder_enabled"] = responder_enabled
-
-    responder_autostart = normalized.get("responder_autostart", True)
-    if not isinstance(responder_autostart, bool):
-        responder_autostart = str(responder_autostart).strip().lower() in {"1", "true", "yes", "on"}
-    normalized["responder_autostart"] = responder_autostart
-
-    upstream_type = str(normalized.get("responder_upstream_type", "openai_compatible")).strip().lower()
-    if upstream_type not in {"promptql_bridge", "openai_compatible", "manual"}:
-        upstream_type = "promptql_bridge"
-    normalized["responder_upstream_type"] = upstream_type
-
-    normalized["responder_upstream_base_url"] = str(normalized.get("responder_upstream_base_url", "") or "").strip()
-    normalized["responder_upstream_api_key"] = str(normalized.get("responder_upstream_api_key", "") or "").strip()
-    normalized["responder_upstream_model"] = str(normalized.get("responder_upstream_model", "") or "").strip()
-
-    try:
-        r_timeout = int(normalized.get("responder_request_timeout_seconds", 300))
-    except (TypeError, ValueError):
-        r_timeout = 300
-    if r_timeout < 5 or r_timeout > 1800:
-        r_timeout = 300
-    normalized["responder_request_timeout_seconds"] = r_timeout
-
-    try:
-        poll_interval = float(normalized.get("responder_poll_interval_seconds", 0.25))
-    except (TypeError, ValueError):
-        poll_interval = 0.25
-    if poll_interval < 0.05 or poll_interval > 10:
-        poll_interval = 0.25
-    normalized["responder_poll_interval_seconds"] = poll_interval
-
-    try:
-        max_conc = int(normalized.get("responder_max_concurrent_requests", 1))
-    except (TypeError, ValueError):
-        max_conc = 1
-    if max_conc < 1 or max_conc > 16:
-        max_conc = 1
-    normalized["responder_max_concurrent_requests"] = max_conc
 
     return normalized
 
@@ -574,174 +520,48 @@ def read_logs(arguments: dict[str, Any], context: dict[str, Any], config: dict[s
     return {"ok": True, "name": name, "limit": limit, "lines": redacted}
 
 
-# --------------------------------------------------------------------------- #
-# Responder (autonomous serve loop) lifecycle
-# --------------------------------------------------------------------------- #
-def _responder_state_path(context: dict[str, Any], name: str) -> Path:
-    return safe_runtime_path(context, "responder", f"{name}.json")
-
-
-def _save_responder_state(context: dict[str, Any], state: dict[str, Any]) -> None:
-    path = _responder_state_path(context, state["name"])
-    _atomic_write_json(path, state)
-
-
-def _load_responder_state(context: dict[str, Any], name: str) -> dict[str, Any] | None:
-    path = _responder_state_path(context, name)
-    return _read_json(path, None)
-
-
-def start_responder(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    if context.get("effectiveMode") != "full_access":
-        raise ValueError("ide_gateway_responder_start requires full_access under a trusted profile")
-
+def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy-paste system-prompt snippet that turns the active MCP
+    model into a persistent long-poll bridge serving IDE requests."""
     name = normalize_name(arguments.get("name"))
-    if config.get("responder_upstream_type") in {"promptql_bridge", "manual"}:
-        return {
-            "ok": False,
-            "name": name,
-            "status": "promptql_bridge",
-            "message": "ide_gateway is a transport bridge to the active PromptQL/Notion agent. Local code must not call an external model or claim requests in this mode; queued requests are handled through the PromptQL bridge tools until callback automation is implemented.",
-        }
-    if config.get("responder_upstream_type") == "openai_compatible" and not str(config.get("responder_upstream_base_url", "")).strip():
-        return {
-            "ok": False,
-            "name": name,
-            "status": "not_configured",
-            "message": "Experimental external-upstream responder requires responder_upstream_base_url. Standard IDE Gateway setup does not use this mode.",
-        }
-    root = runtime_root(context)
-    (root / "responder").mkdir(parents=True, exist_ok=True)
-    (root / "logs").mkdir(parents=True, exist_ok=True)
+    state = _load_endpoint_state(context, name)
+    base_url = state["base_url"] if state else "http://127.0.0.1:8787/v1"
+    model = state["model_id"] if state else config.get("default_model_id", "ide-gateway")
+    token = state["token"] if state and arguments.get("include_secret") else "***"
+    wait_timeout = int(config.get("wait_timeout_seconds", 3600))
 
-    existing = _load_responder_state(context, name)
-    if existing and existing.get("status") == "running" and _is_process_alive(existing.get("pid")):
-        return {"ok": True, "already_running": True, "name": name, "status": "running",
-                "pid": existing.get("pid"),
-                "upstream_type": existing.get("upstream_type"),
-                "upstream_model": existing.get("upstream_model"),
-                "message": f"Responder {name} is already running."}
-
-    # Snapshot the config into the responder state so the subprocess reads it
-    # without re-running normalize_config.
-    responder_state: dict[str, Any] = {
-        "name": name,
-        "status": "starting",
-        "pid": None,
-        "started_at": datetime.datetime.now().isoformat(),
-        "last_request_id": "",
-        "last_error": "",
-        "upstream_type": config.get("responder_upstream_type", "openai_compatible"),
-        "upstream_model": config.get("responder_upstream_model", ""),
-        "upstream_base_url": config.get("responder_upstream_base_url", ""),
-        "responder_request_timeout_seconds": config.get("responder_request_timeout_seconds", 300),
-        "responder_poll_interval_seconds": config.get("responder_poll_interval_seconds", 0.25),
-        "responder_upstream_api_key": config.get("responder_upstream_api_key", ""),
-        "max_response_bytes": config.get("max_response_bytes", 4 * 1024 * 1024),
-        "responder_log_path": str(root / "logs" / f"{name}.responder.log"),
-        "log_path": str(root / "logs" / f"{name}.log"),
-    }
-    _save_responder_state(context, responder_state)
-
-    responder_path = Path(__file__).resolve().parent / "responder.py"
-    state_path = _responder_state_path(context, name)
-    workspace = Path(str(context.get("workspacePath", ""))).resolve()
-    responder_log = root / "logs" / f"{name}.responder.log"
-    with open(responder_log, "ab") as log_f:
-        proc = subprocess.Popen(
-            [sys.executable, str(responder_path), "--state", str(state_path)],
-            cwd=str(workspace), stdout=log_f, stderr=subprocess.STDOUT,
-            close_fds=(os.name != "nt"),
-        )
-    _ACTIVE_PROCS[proc.pid] = proc
-
-    pid = proc.pid
-    responder_state["pid"] = pid
-    _save_responder_state(context, responder_state)
-
-    # Give it a brief moment to initialize; if it crashes immediately, report failure.
-    time.sleep(0.5)
-    if not _is_process_alive(pid):
-        responder_state["status"] = "failed"
-        responder_state["last_error"] = "responder process exited immediately"
-        _save_responder_state(context, responder_state)
-        return {"ok": False, "status": "failed", "message": responder_state["last_error"]}
-
-    responder_state["status"] = "running"
-    _save_responder_state(context, responder_state)
-    return {
-        "ok": True, "already_running": False, "name": name, "status": "running",
-        "pid": pid,
-        "upstream_type": responder_state["upstream_type"],
-        "upstream_model": responder_state["upstream_model"],
-        "message": (f"Responder {name} is running. IDE requests will be served "
-                    f"automatically via {responder_state['upstream_type']} upstream."),
-    }
-
-
-def stop_responder(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    if context.get("effectiveMode") != "full_access":
-        raise ValueError("ide_gateway_responder_stop requires full_access under a trusted profile")
-
-    name = normalize_name(arguments.get("name"))
-    state = _load_responder_state(context, name)
-    if not state or state.get("status") != "running":
-        return {"ok": False, "status": "not_running", "message": f"Responder {name} is not running"}
-
-    pid = state.get("pid")
-    if pid and _is_process_alive(pid):
-        _kill_pid(pid)
-
-    state["status"] = "stopped"
-    _save_responder_state(context, state)
-    return {"ok": True, "name": name, "status": "stopped", "message": f"Responder {name} stopped"}
-
-
-def responder_status(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    name = arguments.get("name")
-    runtime = runtime_root(context)
-    resp_dir = runtime / "responder"
-    names = [normalize_name(name)] if name else (
-        [p.stem for p in sorted(resp_dir.glob("*.json"))] if resp_dir.is_dir() else ["default"]
+    prompt = (
+        f"# IDE Gateway bridge mode\n"
+        f"You are connected to an IDE through the ide_gateway plugin. "
+        f"Keep the bridge alive so IDE requests are served instantly without "
+        f"manual pings.\n\n"
+        f"## Loop (run continuously, do not write chat summaries between iterations)\n"
+        f"1. Call `ide_gateway_wait_request(timeout_seconds={wait_timeout})`. "
+        f"This blocks until an IDE request arrives.\n"
+        f"2. When it returns a request, process it using your MCP tools "
+        f"(read_file, run_command, web_search, etc.) as needed.\n"
+        f"3. Call `ide_gateway_send_response(request_id=<from step 2>, "
+        f"content=<your answer>)` to deliver the response to the IDE.\n"
+        f"4. If you cannot answer, call "
+        f"`ide_gateway_fail_request(request_id=<from step 2>, message=<reason>)`.\n"
+        f"5. Immediately go back to step 1. Do not emit a chat message "
+        f"between iterations — the bridge must stay quiet in the chat while "
+        f"serving IDE traffic.\n\n"
+        f"## Connection (for reference)\n"
+        f"- base_url: {base_url}\n"
+        f"- api_key: {token}\n"
+        f"- model: {model}\n\n"
+        f"## First-time setup\n"
+        f"Make sure `ide_gateway_status` shows the endpoint as running. "
+        f"If not, call `ide_gateway_start` first. Then start the loop above."
     )
-
-    responders: list[dict[str, Any]] = []
-    for n in names:
-        state = _load_responder_state(context, n)
-        if not state:
-            continue
-        if state.get("status") == "running" and not _is_process_alive(state.get("pid")):
-            state["status"] = "stopped"
-            _save_responder_state(context, state)
-        counts = request_counts(runtime, n)
-        responders.append({
-            "name": n,
-            "status": state.get("status"),
-            "pid": state.get("pid"),
-            "started_at": state.get("started_at"),
-            "last_request_id": state.get("last_request_id", ""),
-            "last_error": state.get("last_error", ""),
-            "claimed": counts.get("claimed", 0),
-            "completed": counts.get("completed", 0),
-            "failed": counts.get("failed", 0),
-            "upstream_type": state.get("upstream_type"),
-            "upstream_model": state.get("upstream_model"),
-        })
-    return {"ok": True, "responders": responders}
-
-
-def read_responder_logs(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    name = normalize_name(arguments.get("name"))
-    limit = int(arguments.get("limit") or 100)
-    log_path = safe_runtime_path(context, "logs", f"{name}.responder.log")
-    if not log_path.is_file():
-        return {"ok": True, "name": name, "limit": limit, "lines": []}
-
-    try:
-        text = log_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {"ok": True, "name": name, "limit": limit, "lines": []}
-
-    lines = text.splitlines()
-    redacted = [redact_line(line) for line in lines[-limit:]]
-    return {"ok": True, "name": name, "limit": limit, "lines": redacted}
+    return {
+        "ok": True,
+        "name": name,
+        "base_url": base_url,
+        "api_key": token,
+        "model": model,
+        "wait_timeout_seconds": wait_timeout,
+        "system_prompt": prompt,
+        "message": "Paste this snippet into the model's system prompt (or run it once as an instruction) to enable the persistent bridge.",
+    }

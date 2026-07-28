@@ -10,7 +10,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from plugin_runtime import PluginManager
-from plugin_setup import collect_enable_config, collect_ide_gateway_config, collect_ide_provider_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
+from plugin_setup import collect_ide_gateway_config, collect_config, local_config_path, remove_local_plugin_config, write_local_plugin_config
 
 class DummyMCP:
     def __init__(self):
@@ -127,15 +127,15 @@ class PluginLocalSetupTests(unittest.TestCase):
 
 
     def test_ide_gateway_enable_uses_safe_defaults_without_upstream(self):
-        config = collect_enable_config("ide_gateway", {})
+        # ENABLE path goes through collect_config with default (empty) inputs.
+        # The bridge is served by the model through a long-lived wait_request;
+        # no responder config is produced.
+        with mock.patch("builtins.input", return_value=""):
+            config = collect_config("ide_gateway", {})
         self.assertRegex(config["default_api_key"], r"^ideg_[A-Za-z0-9_-]{16,}$")
         self.assertTrue(config["autostart"])
         self.assertEqual(config["default_port"], 8787)
-        self.assertFalse(config["responder_enabled"])
-        self.assertFalse(config["responder_autostart"])
-        self.assertEqual(config["responder_upstream_type"], "promptql_bridge")
-        self.assertEqual(config["responder_upstream_base_url"], "")
-        self.assertEqual(config["responder_upstream_model"], "")
+        self.assertNotIn("responder_enabled", config)
 
     def test_packaged_plugins_have_bat_wrappers(self):
         for manifest in sorted((PROJECT / "plugins").glob("*/plugin.json")):
@@ -153,17 +153,7 @@ class PluginLocalSetupTests(unittest.TestCase):
         self.assertRegex(config["default_api_key"], r"^ideg_[A-Za-z0-9_-]{16,}$")
         self.assertTrue(config["autostart"])
         self.assertEqual(config["default_port"], 8787)
-
-    def test_ide_provider_setup_generates_api_key_with_default_preset(self):
-        with mock.patch("builtins.input", return_value=""):
-            config = collect_ide_provider_config({})
-        self.assertRegex(config["default_api_key"], r"^idep_[A-Za-z0-9_-]{16,}$")
-        self.assertNotIn("default_model_id", config)
-
-    def test_ide_provider_setup_keeps_existing_api_key(self):
-        with mock.patch("builtins.input", return_value=""):
-            config = collect_ide_provider_config({"default_api_key": "idep_existing-token-123456"})
-        self.assertEqual(config["default_api_key"], "idep_existing-token-123456")
+        self.assertNotIn("responder_enabled", config)
 
 if __name__ == "__main__":
     unittest.main()

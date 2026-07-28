@@ -10,10 +10,7 @@ from plugins.ide_gateway.state import (
     start_endpoint,
     stop_endpoint,
     endpoint_status,
-    start_responder,
-    stop_responder,
-    responder_status,
-    read_responder_logs,
+    bridge_prompt,
 )
 from plugins.ide_gateway.queue import (
     wait_request,
@@ -73,18 +70,6 @@ def startup(context: dict[str, Any]) -> dict[str, Any]:
     else:
         result["endpoint"] = "skipped (disabled in config)"
 
-    # Responder autostart (only meaningful if the endpoint is up)
-    if config.get("responder_enabled", True) and config.get("responder_autostart", True):
-        try:
-            rsp = start_responder({"name": "default"}, context, config)
-            result["responder"] = rsp.get("status", "unknown")
-            result["upstream_type"] = rsp.get("upstream_type")
-        except Exception as exc:
-            result["responder"] = "failed"
-            result["responder_error"] = str(exc)
-    else:
-        result["responder"] = "skipped (disabled in config)"
-
     return result
 
 
@@ -124,20 +109,7 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
             raise ValueError("ide_gateway_rotate_token requires full_access under a trusted profile")
         return rotate_token(arguments, context, config)
 
-    if tool_name == "ide_gateway_responder_start":
-        if context.get("effectiveMode") != "full_access":
-            raise ValueError("ide_gateway_responder_start requires full_access under a trusted profile")
-        return start_responder(arguments, context, config)
-
-    if tool_name == "ide_gateway_responder_stop":
-        if context.get("effectiveMode") != "full_access":
-            raise ValueError("ide_gateway_responder_stop requires full_access under a trusted profile")
-        return stop_responder(arguments, context, config)
-
-    if tool_name == "ide_gateway_responder_status":
-        return responder_status(arguments, context, config)
-
-    if tool_name == "ide_gateway_responder_logs":
-        return read_responder_logs(arguments, context, config)
+    if tool_name == "ide_gateway_bridge_prompt":
+        return bridge_prompt(arguments, context, config)
 
     raise ValueError(f"Unknown ide_gateway tool: {tool_name}")
