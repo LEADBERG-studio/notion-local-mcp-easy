@@ -77,6 +77,39 @@ def _config() -> dict[str, Any]:
     }
 
 
+STATE: dict[str, Any] = {}
+STATE_PATH: str = ""
+
+
+def _load_state(path: str) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
+def _config() -> dict[str, Any]:
+    # Start from env vars (sandbox auto-discovery)
+    cfg = {
+        "upstream_base_url": os.environ.get("OPENAI_BASE_URL", ""),
+        "upstream_api_key": os.environ.get("OPENAI_API_KEY", ""),
+        "upstream_model": os.environ.get("IDE_GATEWAY_MODEL", ""),
+        "request_timeout_seconds": int(os.environ.get("IDE_GATEWAY_TIMEOUT", "300")),
+        "extra_models": os.environ.get("IDE_GATEWAY_EXTRA_MODELS", ""),
+    }
+    # Override with state file values if present (from start_endpoint)
+    if STATE:
+        if STATE.get("upstream_base_url"):
+            cfg["upstream_base_url"] = STATE["upstream_base_url"]
+        if STATE.get("upstream_api_key"):
+            cfg["upstream_api_key"] = STATE["upstream_api_key"]
+        if STATE.get("upstream_model"):
+            cfg["upstream_model"] = STATE["upstream_model"]
+        if STATE.get("request_timeout_seconds"):
+            cfg["request_timeout_seconds"] = STATE["request_timeout_seconds"]
+        if STATE.get("extra_models"):
+            cfg["extra_models"] = STATE["extra_models"]
+    return cfg
+
+
 def _openai_error(message: str, code: str, status: int = 400) -> dict[str, Any]:
     return {"error": {"message": message, "type": "ide_gateway_error", "code": code}, "_status": status}
 
@@ -289,18 +322,29 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    global STATE, STATE_PATH
     parser = argparse.ArgumentParser(description="IDE Gateway sandbox server")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("IDE_GATEWAY_PORT", "8787")))
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--state", default=None, help="Path to endpoint state JSON")
     args = parser.parse_args()
 
-    port = args.port
+    # Load state file if provided (launched by start_endpoint)
+    if args.state:
+        STATE_PATH = args.state
+        try:
+            STATE = _load_state(STATE_PATH)
+        except Exception as e:
+            print(f"Warning: could not load state file: {e}")
+
+    port = args.port or (STATE.get("port") if STATE else None) or int(os.environ.get("IDE_GATEWAY_PORT", "8787"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
 
     cfg = _config()
     print(f"IDE Gateway sandbox server on :{port}")
-    print(f"  upstream: {cfg['upstream_base_url'] or '(not set)'}")
+    print(f"  upstream: {cfg['upstream_base_url'] or '(not set — will use env vars)'}")
     print(f"  models: {len(discover_models(cfg))}")
+    print(f"  mode: {STATE.get('gateway_mode', 'sandbox') if STATE else 'standalone'}")
     print(f"  endpoints: /v1/chat/completions, /v1/models, /v1/tools, "
           f"/v1/completions, /v1/images/generations, /v1/audio/speech, "
           f"/v1/embeddings, /v1/moderations, /health")

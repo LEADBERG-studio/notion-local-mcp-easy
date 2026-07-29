@@ -1,3 +1,10 @@
+## 1.9.1 - 2026-07-29
+
+- `start_endpoint` теперь автоматически запускает `sandbox_server.py` для режимов sandbox/external и `worker.py` для bridge.
+- `sandbox_server.py` принимает `--state` (читает настройки из endpoint state-файла).
+- `bridge_prompt` упрощён: короткие промты на русском — «подними мост» вместо длинных английских инструкций.
+- 275 тестов OK.
+
 ## 1.9.0 - 2026-07-29
 
 - Added universal backend layer (`backend.py`): model discovery from env vars, OpenAI ⇄ Anthropic translation, streaming passthrough.

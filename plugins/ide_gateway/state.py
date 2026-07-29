@@ -378,12 +378,19 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
     }
     _save_endpoint_state(context, state)
 
-    worker_path = Path(__file__).resolve().parent / "worker.py"
+    # Choose the server script based on gateway_mode.
+    # bridge → worker.py (queue-based, model serves via poll loop)
+    # sandbox/external → sandbox_server.py (direct upstream, no queue)
+    gw_mode = config.get("gateway_mode", "bridge")
+    if gw_mode in ("sandbox", "external"):
+        server_script = Path(__file__).resolve().parent / "sandbox_server.py"
+    else:
+        server_script = Path(__file__).resolve().parent / "worker.py"
     state_path = _endpoint_state_path(context, name)
     workspace = Path(str(context.get("workspacePath", ""))).resolve()
     with open(log_path, "ab") as log_f:
         proc = subprocess.Popen(
-            [sys.executable, str(worker_path), "--state", str(state_path)],
+            [sys.executable, str(server_script), "--state", str(state_path)],
             cwd=str(workspace), stdout=log_f, stderr=subprocess.STDOUT,
             close_fds=(os.name != "nt"),
         )
@@ -560,14 +567,14 @@ def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: di
 
     if gw_mode == "sandbox":
         prompt = _sandbox_prompt(base_url, model, token, sandbox_script, workspace)
-        msg = "Sandbox mode: launch sandbox_server.py as a resident background process. IDE requests are served directly through the LLM egress."
+        msg = "Скажите модели: «подними мост». Она запустит sandbox_server.py как фоновый процесс, и IDE будет работать напрямую с LLM."
     elif gw_mode == "external":
         upstream = config.get("upstream_base_url", "")
         prompt = _external_prompt(base_url, model, token, upstream)
-        msg = "External mode: the gateway worker calls the upstream provider directly. No model action needed."
+        msg = "External mode: шлюз уже работает напрямую с upstream. Модели ничего делать не нужно."
     else:
         prompt = _bridge_prompt_text(base_url, model, token, workspace, bridge_script)
-        msg = "Bridge mode: poll loop via run_program + bridge_step.py."
+        msg = "Bridge mode: скажите модели «подними мост» — она запустит poll-цикл через bridge_step.py."
 
     return {
         "ok": True,
@@ -642,51 +649,32 @@ def _bridge_prompt_text(base_url: str, model: str, token: str,
 def _sandbox_prompt(base_url: str, model: str, token: str,
                      sandbox_script: str, workspace: str) -> str:
     return (
-        "# IDE Gateway sandbox mode (resident server)\n"
-        "You are connected to an IDE through the ide_gateway plugin. "
-        "A resident server in this sandbox serves IDE requests directly "
-        "through the LLM egress — no poll loop, no queue, no blocking.\n\n"
-        "## How it works\n"
-        f"The IDE sends OpenAI-compatible requests to {base_url}. The "
-        "sandbox_server.py proxies them directly to the LLM egress "
-        "(OPENAI_BASE_URL / ANTHROPIC_BASE_URL from the environment).\n\n"
-        "## Launch (one-time, fire-and-forget)\n"
-        "Start the resident server as a background process:\n"
+        "# Подними мост\n"
+        "Запусти sandbox-сервер как фоновый процесс:\n"
         "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
-        "   (returns immediately — the server runs in the background)\n\n"
-        "The server auto-discovers available models from the egress. "
-        "No poll loop needed. IDE requests are served instantly.\n\n"
-        "## Connection (for IDE)\n"
-        f"- base_url: {base_url}\n"
-        f"- api_key: {token}\n"
-        f"- model: any from /v1/models (e.g. {model})\n\n"
-        "## Check\n"
+        "Сервер поднимется и будет сам обслуживать запросы от IDE через LLM egress.\n"
+        "Тебе больше ничего делать не нужно — IDE работает напрямую с LLM.\n\n"
+        "## Проверка\n"
         "   run_program: curl -s http://127.0.0.1:8787/health\n"
-        "Should return {\"status\": \"alive\", \"mode\": \"sandbox\"}.\n\n"
-        "## Notes\n"
-        "- The sandbox server must be restarted if the sandbox restarts.\n"
-        "- It reads OPENAI_BASE_URL, OPENAI_API_KEY, ANTHROPIC_BASE_URL "
-        "from the environment (set by the platform).\n"
-        "- Streaming is proxied directly from the upstream.\n"
-        "- Anthropic models (claude-*) are translated automatically."
+        "Должно быть: {\"status\": \"alive\", \"mode\": \"sandbox\"}\n\n"
+        "## Подключение IDE\n"
+        f"   base_url: {base_url}\n"
+        f"   api_key: {token}\n"
+        f"   model: {model} (или любой из /v1/models)"
     )
 
 
 def _external_prompt(base_url: str, model: str, token: str,
                       upstream: str) -> str:
     return (
-        "# IDE Gateway external mode (direct upstream)\n"
-        "The gateway worker calls the upstream provider directly. "
-        "No model action is needed — IDE requests are served automatically.\n\n"
-        "## Connection (for IDE)\n"
-        f"- base_url: {base_url}\n"
-        f"- api_key: {token}\n"
-        f"- model: {model}\n"
-        f"- upstream: {upstream}\n\n"
-        "## How it works\n"
-        "IDE → gateway worker → " + upstream + " → LLM → IDE. "
-        "The worker handles OpenAI/Anthropic translation automatically.\n\n"
-        "## Check\n"
-        "   run_program: curl -s http://127.0.0.1:8787/health\n"
-        "Should show the endpoint as running."
+        "# Мост уже работает\n"
+        "Шлюз настроен на прямой вызов upstream-провайдера.\n"
+        "Тебе ничего делать не нужно — IDE-запросы обслуживаются автоматически.\n\n"
+        "## Подключение IDE\n"
+        f"   base_url: {base_url}\n"
+        f"   api_key: {token}\n"
+        f"   model: {model}\n"
+        f"   upstream: {upstream}\n\n"
+        "## Проверка\n"
+        "   run_program: curl -s http://127.0.0.1:8787/health"
     )
