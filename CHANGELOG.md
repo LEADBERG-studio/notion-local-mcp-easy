@@ -1,3 +1,13 @@
+## 1.9.3 - 2026-07-29
+
+- Added `sandbox_tunnel.py`: Tunnellio reverse SSH tunnel for sandbox environments — registers SSH key, creates ephemeral/persistent domain via API, launches SSH reverse tunnel, returns public HTTPS URL.
+- Updated `bridge_prompt` for sandbox: two-step launch (sandbox_server.py + sandbox_tunnel.py).
+- Sandbox mode now fully functional: sandbox_server + Tunnellio tunnel = public URL for IDE.
+
+## 1.9.2 - 2026-07-29
+
+- Sandbox reverse proxy: worker на Windows проксирует к sandbox_server.
+
 ## 1.9.1 - 2026-07-29
 
 - `start_endpoint` теперь автоматически запускает `sandbox_server.py` для режимов sandbox/external и `worker.py` для bridge.

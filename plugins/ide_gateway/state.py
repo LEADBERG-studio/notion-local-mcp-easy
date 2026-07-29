@@ -650,21 +650,30 @@ def _bridge_prompt_text(base_url: str, model: str, token: str,
 
 def _sandbox_prompt(base_url: str, model: str, token: str,
                      sandbox_script: str, workspace: str) -> str:
+    tunnel_script = str(Path(__file__).resolve().parent / "sandbox_tunnel.py")
     return (
         "# Подними мост (sandbox mode)\n"
-        "Ты в sandbox-режиме: запусти sandbox_server.py как фоновый процесс.\n"
-        "Worker на Windows будет проксировать запросы от IDE к нему.\n\n"
-        "## Шаг 1: запусти сервер в sandbox\n"
+        "Ты в sandbox-режиме. Нужно запустить 2 процесса:\n"
+        "1. sandbox_server.py — LLM-шлюз\n"
+        "2. sandbox_tunnel.py — туннель к Tunnellio (публичный URL)\n\n"
+        "## Шаг 1: запусти sandbox-сервер\n"
         "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
-        "Сервер поднимется в sandbox и будет обслуживать запросы через LLM egress.\n\n"
-        "## Шаг 2: проверь\n"
+        "Сервер поднимется и будет обслуживать запросы через LLM egress.\n\n"
+        "## Шаг 2: запусти туннель к Tunnellio\n"
+        "Нужен Tunnellio API token. Если он есть в окружении (TUNNELLIO_TOKEN),\n"
+        "просто запусти:\n"
+        "   run_program: python " + repr(tunnel_script) + " --local-port 8787 --ephemeral\n"
+        "Если токена нет — спроси у пользователя.\n\n"
+        "Туннель вернёт публичный URL вида https://xxx.tunnellio.site.\n"
+        "Сообщи его пользователю — это адрес для подключения IDE.\n\n"
+        "## Проверка\n"
         "   run_program: curl -s http://127.0.0.1:8787/health\n"
         "Должно быть: {\"status\": \"alive\", \"mode\": \"sandbox\"}\n\n"
         "## Подключение IDE\n"
-        f"   base_url: {base_url}\n"
+        "   base_url: <публичный URL от туннеля>/v1\n"
         f"   api_key: {token}\n"
         f"   model: {model} (или любой из /v1/models)\n\n"
-        "Модель больше ничего не делает — worker сам пересылает запросы."
+        "Модель больше ничего не делает — туннель и сервер работают в фоне."
     )
 
 
