@@ -64,7 +64,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.1.0"
+VERSION = "2.0.0"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -787,6 +787,9 @@ def choose_workspace_from_connections(config: dict) -> dict:
         if active_profile is not None:
 
             _, config = activate_profile_config(storage, active_profile, config)
+
+        # Ensure ide_gateway_api_key exists in global config
+        config = ensure_ide_gateway_key(config)
 
         return config
 
@@ -2386,8 +2389,29 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     print("Keep this window open. Press Ctrl+C to stop.\n")
 
 
+def ensure_ide_gateway_key(config: dict) -> dict:
+    """Ensure ide_gateway_api_key exists in the global config.json.
+    If missing, generate one and save. If present, reuse."""
+    gw_key = str(config.get("ide_gateway_api_key", "")).strip()
+    if gw_key:
+        return config
+    # Check global config.json
+    existing = load_json(CONFIG_FILE)
+    gw_key = str(existing.get("ide_gateway_api_key", "")).strip()
+    if not gw_key:
+        import secrets as _secrets
+        gw_key = "ideg_" + _secrets.token_urlsafe(32)
+        existing["ide_gateway_api_key"] = gw_key
+        save_json(CONFIG_FILE, existing)
+        print(f"IDE Gateway API key generated: {gw_key[:20]}... (stored in global config)")
+    config["ide_gateway_api_key"] = gw_key
+    return config
+
+
 def run() -> int:
     config = setup()
+    # Ensure ide_gateway_api_key exists in global config (survives upgrades)
+    config = ensure_ide_gateway_key(config)
     runtime = load_json(RUNTIME_FILE)
     old_server = int(runtime.get("server_pid", 0) or 0)
     if pid_matches(old_server, str(runtime.get("server_match", "server.py"))):
