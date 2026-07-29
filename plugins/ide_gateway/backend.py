@@ -33,15 +33,43 @@ DEFAULT_TUNNELLIO_TOKEN = "tnl_OK1mxYApPxqTFhRi5K5EDtimMosumaC_"
 
 
 def _tunnellio_post(path: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Call Tunnellio API and return the full parsed response."""
+    """Call Tunnellio API and return the full parsed response.
+    On HTTP error, returns {"ok": False, "error": {...}} with the body."""
     url = TUNNELLIO_API_BASE + "/v1" + path
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST", headers={
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     })
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # Read the error body so we can handle 409 (conflict) gracefully
+        try:
+            error_body = json.loads(exc.read().decode("utf-8") or "{}")
+        except Exception:
+            error_body = {}
+        return {"ok": False, "error": {
+            "code": error_body.get("error", {}).get("code", str(exc.code)),
+            "message": error_body.get("error", {}).get("message", str(exc)),
+            "details": error_body,
+            "http_status": exc.code,
+        }}
+
+
+def _find_existing_key(token: str, fingerprint: str = "") -> str | None:
+    """Find an existing key by fingerprint, return key_id or None."""
+    resp = _tunnellio_post("/keys/list", token, {})
+    if not resp.get("ok"):
+        return None
+    keys = resp.get("data", {}).get("keys", [])
+    for k in keys:
+        if k.get("status") == "active" and (
+            not fingerprint or k.get("fingerprint") == fingerprint
+        ):
+            return str(k["id"])
+    return None
 
 
 def provision_sandbox_domain(
@@ -55,7 +83,7 @@ def provision_sandbox_domain(
     If hostname is set → persistent (requires paid plan token).
 
     Returns dict with: key_id, domain_id, public_url, ssh_host, ssh_port,
-    ssh_user, remote_hostname, connection_profile, mode.
+    ssh_user, remote_hostname, private_key, mode.
 
     Raises on error.
     """
@@ -71,15 +99,39 @@ def provision_sandbox_domain(
     public_key = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
     private_key = str(key_path)
 
-    # Register the SSH key
-    key_resp = _tunnellio_post("/keys", token, {
-        "name": f"ide-gateway-{'ephemeral' if not hostname else hostname}",
-        "publicKey": public_key,
-        "requestedLifetimeDays": 1 if not hostname else 365,
-    })
-    if not key_resp.get("ok"):
-        raise RuntimeError(f"Tunnellio key registration failed: {key_resp.get('error', {})}")
-    key_id = key_resp["data"]["key"]["id"]
+    # Get fingerprint of the generated key
+    fp_result = subprocess.run(
+        ["ssh-keygen", "-lf", str(key_path)],
+        capture_output=True, text=True,
+    )
+    fingerprint = ""
+    if fp_result.returncode == 0:
+        parts = fp_result.stdout.strip().split()
+        if len(parts) >= 2:
+            fingerprint = parts[1]
+
+    # Try to find an existing key by fingerprint (avoids 409 on duplicate keys)
+    key_id = _find_existing_key(token, fingerprint)
+    if not key_id:
+        # Register a new SSH key
+        key_resp = _tunnellio_post("/keys", token, {
+            "name": f"ide-gateway-{'ephemeral' if not hostname else hostname}",
+            "publicKey": public_key,
+            "requestedLifetimeDays": 1 if not hostname else 365,
+        })
+        if not key_resp.get("ok"):
+            # If 409 conflict (key already exists), try to find it by fingerprint
+            if key_resp.get("error", {}).get("http_status") == 409:
+                key_id = _find_existing_key(token, fingerprint)
+                if not key_id:
+                    # Try without fingerprint — any active key
+                    key_id = _find_existing_key(token)
+                    if not key_id:
+                        raise RuntimeError(f"Tunnellio key registration failed (409) and no existing key found: {key_resp.get('error', {})}")
+            else:
+                raise RuntimeError(f"Tunnellio key registration failed: {key_resp.get('error', {})}")
+        else:
+            key_id = str(key_resp["data"]["key"]["id"])
 
     # Create domain
     if not hostname:
@@ -136,7 +188,8 @@ def provision_sandbox_domain(
         "domain_id": str(domain_id),
         "public_url": public_url,
         "ssh_host": profile.get("sshHost", ""),
-        "ssh_port": str(profile.get("sshPort", 22)),        "ssh_user": profile.get("sshUser", ""),
+        "ssh_port": str(profile.get("sshPort", 22)),
+        "ssh_user": profile.get("sshUser", ""),
         "remote_hostname": profile.get("remoteHostname", ""),
         "private_key": private_key,
         "mode": mode,
@@ -187,7 +240,30 @@ def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, A
     if domain_id:
         domain = check_domain_status(token, domain_id)
         if domain:
-            # Domain is alive — return config as-is
+            # Domain is alive — update public_url and SSH config from the
+            # domain record, in case they were empty or stale.
+            config["tunnellio_public_url"] = domain.get("publicUrl", config.get("tunnellio_public_url", ""))
+            config["tunnellio_mode"] = domain.get("mode", config.get("tunnellio_mode", "ephemeral"))
+            # SSH host/port/user are in the connection profile, not the domain
+            # record. If they're missing in config, fetch a fresh profile.
+            if not config.get("tunnellio_ssh_host"):
+                try:
+                    cp = _tunnellio_post("/domains/connection-profile", token, {
+                        "domainId": int(domain_id),
+                        "localHost": "127.0.0.1",
+                        "localPort": local_port,
+                    })
+                    if cp.get("ok"):
+                        profile = cp["data"]["connectionProfile"]
+                        config["tunnellio_ssh_host"] = profile.get("sshHost", "")
+                        config["tunnellio_ssh_port"] = str(profile.get("sshPort", ""))
+                        config["tunnellio_ssh_user"] = profile.get("sshUser", "")
+                        config["tunnellio_remote_hostname"] = profile.get("remoteHostname", "")
+                        if not config.get("tunnellio_public_url"):
+                            config["tunnellio_public_url"] = profile.get("publicUrl", "")
+                except Exception:
+                    pass
+            config["upstream_base_url"] = config.get("tunnellio_public_url", "").rstrip("/") + "/v1"
             return config
 
     # Domain expired or doesn't exist — re-provision with same hostname (persistent)
