@@ -144,9 +144,61 @@ def provision_sandbox_domain(
     }
 
 
-# --------------------------------------------------------------------------- #
-# Model discovery
-# --------------------------------------------------------------------------- #
+def check_domain_status(token: str, domain_id: str) -> dict[str, Any] | None:
+    """Check if a Tunnellio domain is still active.
+
+    Returns the domain dict if active, None if expired/deleted.
+    """
+    if not domain_id:
+        return None
+    try:
+        resp = _tunnellio_post("/domains/get", token or DEFAULT_TUNNELLIO_TOKEN, {
+            "domainId": domain_id,
+        })
+        if not resp.get("ok"):
+            return None
+        domain = resp.get("data", {}).get("domain", {})
+        status = str(domain.get("status", "")).lower()
+        if status in ("active", "expired", "connecting", "reconnecting"):
+            # "expired" status still means the domain record exists; the route
+            # may be offline but the domain can be reconnected.
+            return domain
+        return None
+    except Exception:
+        return None
+
+
+def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, Any]:
+    """Check if the configured Tunnellio domain is still active.
+    If not, re-provision it and return updated config.
+
+    Returns the (possibly updated) config dict with fresh domain fields.
+    """
+    token = config.get("tunnellio_token", "") or DEFAULT_TUNNELLIO_TOKEN
+    domain_id = config.get("tunnellio_domain_id", "")
+    mode = config.get("tunnellio_mode", "ephemeral")
+    hostname = config.get("tunnellio_hostname", "") if mode == "persistent" else ""
+
+    # If we have a domain_id, check if it's alive
+    if domain_id:
+        domain = check_domain_status(token, domain_id)
+        if domain:
+            # Domain is alive — return config as-is
+            return config
+
+    # Domain expired or doesn't exist — re-provision
+    fresh = provision_sandbox_domain(token=token, hostname=hostname, local_port=local_port)
+    config["tunnellio_domain_id"] = fresh["domain_id"]
+    config["tunnellio_key_id"] = fresh["key_id"]
+    config["tunnellio_public_url"] = fresh["public_url"]
+    config["tunnellio_ssh_host"] = fresh["ssh_host"]
+    config["tunnellio_ssh_port"] = fresh["ssh_port"]
+    config["tunnellio_ssh_user"] = fresh["ssh_user"]
+    config["tunnellio_remote_hostname"] = fresh["remote_hostname"]
+    config["tunnellio_private_key"] = fresh["private_key"]
+    config["tunnellio_mode"] = fresh["mode"]
+    config["upstream_base_url"] = fresh["public_url"].rstrip("/") + "/v1"
+    return config
 def discover_models(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Discover available models from environment variables (sandbox egress) or
     from a static fallback list.

@@ -1,3 +1,10 @@
+## 1.9.5 - 2026-07-29
+
+- `startup()` хук: при sandbox mode проверяет жив ли Tunnellio домен (`check_domain_status`), пересоздаёт если истёк (`ensure_domain`).
+- `check_domain_status()` в `backend.py`: проверяет статус домена через Tunnellio API.
+- `ensure_domain()` в `backend.py`: если домен истёк/удалён — автоматически провижинит новый и обновляет config.
+- 275 тестов OK.
+
 ## 1.9.4 - 2026-07-29
 
 - Domain provisioning at plugin setup: `provision_sandbox_domain()` in `backend.py` creates Tunnellio domain (ephemeral or persistent) via API at SETUP time.

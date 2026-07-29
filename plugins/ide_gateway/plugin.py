@@ -49,13 +49,30 @@ def healthcheck(context: dict[str, Any]) -> dict[str, Any]:
 
 def startup(context: dict[str, Any]) -> dict[str, Any]:
     """Called by PluginManager after tools are registered, if the plugin is
-    attached in full_access. Autostarts the default endpoint on the preferred
-    port (8787) and the autonomous responder, unless disabled in config."""
+    attached in full_access. Autostarts the endpoint on the preferred
+    port (8787). For sandbox mode, also checks/re-provisions the Tunnellio
+    domain before starting."""
     config = normalize_config(context.get("pluginConfig") or {}, context)
     result: dict[str, Any] = {"provider": "ide_gateway"}
     if context.get("effectiveMode") != "full_access":
         result["autostart"] = "skipped (full_access required)"
         return result
+
+    # Sandbox mode: check if Tunnellio domain is still alive, re-provision if expired
+    if config.get("gateway_mode") == "sandbox":
+        try:
+            from plugins.ide_gateway.backend import ensure_domain
+            local_port = int(config.get("default_port", 8787))
+            config = ensure_domain(config, local_port=local_port)
+            result["tunnel_url"] = config.get("tunnellio_public_url", "")
+            result["tunnel_mode"] = config.get("tunnellio_mode", "")
+            if config.get("tunnellio_domain_id"):
+                result["tunnel_status"] = "active"
+            else:
+                result["tunnel_status"] = "provisioned"
+        except Exception as exc:
+            result["tunnel_status"] = "failed"
+            result["tunnel_error"] = str(exc)
 
     # Endpoint autostart
     if config.get("autostart", True):
