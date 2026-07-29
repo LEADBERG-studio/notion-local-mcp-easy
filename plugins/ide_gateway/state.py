@@ -380,9 +380,11 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
 
     # Choose the server script based on gateway_mode.
     # bridge → worker.py (queue-based, model serves via poll loop)
-    # sandbox/external → sandbox_server.py (direct upstream, no queue)
+    # sandbox → worker.py too, but the model launches sandbox_server.py
+    #   separately in the sandbox via run_program (where env vars live).
+    # external → sandbox_server.py on this machine (direct upstream, no queue)
     gw_mode = config.get("gateway_mode", "bridge")
-    if gw_mode in ("sandbox", "external"):
+    if gw_mode == "external":
         server_script = Path(__file__).resolve().parent / "sandbox_server.py"
     else:
         server_script = Path(__file__).resolve().parent / "worker.py"
@@ -649,18 +651,20 @@ def _bridge_prompt_text(base_url: str, model: str, token: str,
 def _sandbox_prompt(base_url: str, model: str, token: str,
                      sandbox_script: str, workspace: str) -> str:
     return (
-        "# Подними мост\n"
-        "Запусти sandbox-сервер как фоновый процесс:\n"
+        "# Подними мост (sandbox mode)\n"
+        "Ты в sandbox-режиме: запусти sandbox_server.py как фоновый процесс.\n"
+        "Worker на Windows будет проксировать запросы от IDE к нему.\n\n"
+        "## Шаг 1: запусти сервер в sandbox\n"
         "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
-        "Сервер поднимется и будет сам обслуживать запросы от IDE через LLM egress.\n"
-        "Тебе больше ничего делать не нужно — IDE работает напрямую с LLM.\n\n"
-        "## Проверка\n"
+        "Сервер поднимется в sandbox и будет обслуживать запросы через LLM egress.\n\n"
+        "## Шаг 2: проверь\n"
         "   run_program: curl -s http://127.0.0.1:8787/health\n"
         "Должно быть: {\"status\": \"alive\", \"mode\": \"sandbox\"}\n\n"
         "## Подключение IDE\n"
         f"   base_url: {base_url}\n"
         f"   api_key: {token}\n"
-        f"   model: {model} (или любой из /v1/models)"
+        f"   model: {model} (или любой из /v1/models)\n\n"
+        "Модель больше ничего не делает — worker сам пересылает запросы."
     )
 
 

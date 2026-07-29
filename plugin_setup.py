@@ -199,10 +199,11 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     config["gateway_mode"] = gw_mode
 
     if gw_mode == "sandbox":
-        print("Sandbox mode: the model launches sandbox_server.py as a resident")
-        print("background process. IDE requests go directly to the LLM egress.")
-        print("No poll loop needed.")
-        config["upstream_base_url"] = ""  # auto-detected from env
+        print("Sandbox mode: модель запускает sandbox_server.py в sandbox,")
+        print("а worker на Windows проксирует запросы к нему по туннелю.")
+        sandbox_url = prompt_text("Sandbox tunnel URL (e.g. http://localhost:8888 or https://xxx.ngrok.io)",
+                                   str(config.get("upstream_base_url", "")))
+        config["upstream_base_url"] = sandbox_url.rstrip("/")
         config["upstream_api_key"] = ""
         config["upstream_model"] = ""
     elif gw_mode == "external":

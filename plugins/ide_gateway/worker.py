@@ -224,6 +224,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, self._health())
             return
+        # Sandbox mode: proxy GET requests to the sandbox_server
+        if str(STATE.get("gateway_mode", "bridge")).lower() == "sandbox":
+            sandbox_url = str(STATE.get("upstream_base_url", "") or "").rstrip("/")
+            if sandbox_url:
+                import urllib.request as _urlreq
+                target = sandbox_url + path
+                try:
+                    req = _urlreq.Request(target)
+                    with _urlreq.urlopen(req, timeout=10) as resp:
+                        raw = resp.read()
+                        ctype = resp.headers.get("Content-Type", "application/json")
+                        self._send_bytes(resp.status, ctype, raw)
+                        return
+                except Exception as exc:
+                    self._send_json(502, _openai_error(f"Sandbox proxy error: {exc}", "sandbox_proxy_error", status=502))
+                    return
         if path in ("/v1/models", "/models"):
             if not self._authorized():
                 self._send_json(401, _openai_error("Unauthorized", "unauthorized", status=401))
@@ -451,6 +467,43 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except Exception as exc:
                 self._send_json(502, _openai_error(f"Upstream error: {exc}", "upstream_error", status=502))
+                return
+
+        # Sandbox mode: proxy the raw request to the sandbox_server running in
+        # the Notion Agent sandbox. The sandbox URL is stored in upstream_base_url
+        # (set during setup or discovered via the tunnel). The worker acts as a
+        # simple reverse proxy — no queue, no translation, just forward the HTTP
+        # request and stream the response back.
+        if gw_mode == "sandbox":
+            sandbox_url = str(STATE.get("upstream_base_url", "") or "").rstrip("/")
+            if not sandbox_url:
+                self._send_json(502, _openai_error("Sandbox upstream URL not configured. Set upstream_base_url in plugin config or call ide_gateway_start with the sandbox tunnel URL.", "sandbox_not_configured", status=502))
+                return
+            # Forward the request as-is to the sandbox_server
+            import urllib.request
+            target = sandbox_url + "/v1/chat/completions"
+            try:
+                req = urllib.request.Request(target, data=body, method="POST",
+                                             headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+                with urllib.request.urlopen(req, timeout=float(STATE.get("request_timeout_seconds", 300))) as resp:
+                    ctype = resp.headers.get("Content-Type", "")
+                    if "text/event-stream" in ctype:
+                        # Stream SSE directly back to IDE
+                        self._begin_sse()
+                        while True:
+                            chunk = resp.read(8192)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            try: self.wfile.flush()
+                            except Exception: pass
+                        return
+                    # Non-stream: forward the JSON response
+                    raw = resp.read()
+                    self._send_bytes(200, ctype or "application/json", raw)
+                    return
+            except Exception as exc:
+                self._send_json(502, _openai_error(f"Sandbox proxy error: {exc}", "sandbox_proxy_error", status=502))
                 return
 
         forced = forced_tool_name(validated["tool_choice"])
