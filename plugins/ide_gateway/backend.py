@@ -16,8 +16,132 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import tempfile
 import urllib.request
+from pathlib import Path
 from typing import Any
+
+
+# --------------------------------------------------------------------------- #
+# Tunnellio API — domain provisioning at plugin setup time
+# --------------------------------------------------------------------------- #
+TUNNELLIO_API_BASE = "https://api.tunnellio.ru"
+# Default token for free ephemeral domains (1-day lifetime).
+# Users with a paid plan can use their own token for persistent/custom domains.
+DEFAULT_TUNNELLIO_TOKEN = "tnl_OK1mxYApPxqTFhRi5K5EDtimMosumaC_"
+
+
+def _tunnellio_post(path: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Call Tunnellio API and return the full parsed response."""
+    url = TUNNELLIO_API_BASE + "/v1" + path
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST", headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def provision_sandbox_domain(
+    token: str = "",
+    hostname: str = "",
+    local_port: int = 8787,
+) -> dict[str, Any]:
+    """Provision a Tunnellio domain for the sandbox.
+
+    If hostname is empty → ephemeral (random, 1-day, auto-deleted on disconnect).
+    If hostname is set → persistent (requires paid plan token).
+
+    Returns dict with: key_id, domain_id, public_url, ssh_host, ssh_port,
+    ssh_user, remote_hostname, connection_profile, mode.
+
+    Raises on error.
+    """
+    token = token or DEFAULT_TUNNELLIO_TOKEN
+
+    # Generate a temporary SSH keypair for this domain
+    key_dir = Path(tempfile.mkdtemp(prefix="ide_gateway_tnl_"))
+    key_path = key_dir / "tunnel_key"
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", "", "-q"],
+        check=True, capture_output=True,
+    )
+    public_key = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
+    private_key = str(key_path)
+
+    # Register the SSH key
+    key_resp = _tunnellio_post("/keys", token, {
+        "name": f"ide-gateway-{'ephemeral' if not hostname else hostname}",
+        "publicKey": public_key,
+        "requestedLifetimeDays": 1 if not hostname else 365,
+    })
+    if not key_resp.get("ok"):
+        raise RuntimeError(f"Tunnellio key registration failed: {key_resp.get('error', {})}")
+    key_id = key_resp["data"]["id"]
+
+    # Create domain
+    if not hostname:
+        # Ephemeral
+        resp = _tunnellio_post("/sessions/ephemeral", token, {
+            "keyId": key_id,
+            "localHost": "127.0.0.1",
+            "localPort": local_port,
+            "note": "ide-gateway-sandbox",
+        })
+        if not resp.get("ok"):
+            raise RuntimeError(f"Tunnellio ephemeral session failed: {resp.get('error', {})}")
+        data = resp["data"]
+        session = data.get("session", {})
+        domain = data.get("domain", {})
+        profile = data.get("connectionProfile", {})
+        domain_id = domain.get("id", "")
+        public_url = session.get("publicUrl") or domain.get("publicUrl", "")
+        mode = "ephemeral"
+    else:
+        # Persistent
+        check = _tunnellio_post("/domains/check", token, {"hostname": hostname})
+        if not check.get("ok") or not check.get("data", {}).get("available"):
+            raise RuntimeError(f"Hostname '{hostname}' is not available: {check.get('error', check)}")
+        resp = _tunnellio_post("/domains", token, {
+            "hostname": hostname,
+            "keyId": key_id,
+            "localPort": local_port,
+            "note": "ide-gateway-sandbox",
+            "requestedLifetimeDays": 365,
+            "authMode": "legacy",
+            "stableUrlRequired": True,
+            "connectionMode": "direct",
+        })
+        if not resp.get("ok"):
+            raise RuntimeError(f"Tunnellio domain creation failed: {resp.get('error', {})}")
+        data = resp["data"]
+        domain = data.get("domain", {})
+        domain_id = domain.get("id", "")
+        # Get connection profile
+        cp_resp = _tunnellio_post("/domains/connection-profile", token, {
+            "domainId": domain_id,
+            "localHost": "127.0.0.1",
+            "localPort": local_port,
+        })
+        if not cp_resp.get("ok"):
+            raise RuntimeError(f"Tunnellio connection-profile failed: {cp_resp.get('error', {})}")
+        profile = cp_resp["data"]["connectionProfile"]
+        public_url = profile.get("publicUrl", domain.get("publicUrl", ""))
+        mode = "persistent"
+
+    return {
+        "key_id": key_id,
+        "domain_id": domain_id,
+        "public_url": public_url,
+        "ssh_host": profile.get("sshHost", ""),
+        "ssh_port": str(profile.get("sshPort", 22)),
+        "ssh_user": profile.get("sshUser", ""),
+        "remote_hostname": profile.get("remoteHostname", ""),
+        "private_key": private_key,
+        "mode": mode,
+    }
 
 
 # --------------------------------------------------------------------------- #

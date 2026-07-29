@@ -1,3 +1,13 @@
+## 1.9.4 - 2026-07-29
+
+- Domain provisioning at plugin setup: `provision_sandbox_domain()` in `backend.py` creates Tunnellio domain (ephemeral or persistent) via API at SETUP time.
+- Default Tunnellio token (free, 1-day ephemeral domains) is built-in; users with paid plans can use their own token for persistent/custom domains.
+- `plugin_setup.py`: sandbox mode creates domain automatically — asks for own token or uses default, ephemeral or custom hostname.
+- `sandbox_tunnel.py`: simplified — reads domain/key/SSH config from state file, just launches SSH reverse tunnel.
+- `start_endpoint`: saves all Tunnellio config (domain_id, key_id, public_url, ssh_host/port/user, private_key) into endpoint state.
+- `bridge_prompt`: sandbox prompt includes the provisioned public URL from state.
+- 275 tests pass.
+
 ## 1.9.3 - 2026-07-29
 
 - Added `sandbox_tunnel.py`: Tunnellio reverse SSH tunnel for sandbox environments — registers SSH key, creates ephemeral/persistent domain via API, launches SSH reverse tunnel, returns public HTTPS URL.

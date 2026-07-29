@@ -199,13 +199,46 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     config["gateway_mode"] = gw_mode
 
     if gw_mode == "sandbox":
-        print("Sandbox mode: модель запускает sandbox_server.py в sandbox,")
-        print("а worker на Windows проксирует запросы к нему по туннелю.")
-        sandbox_url = prompt_text("Sandbox tunnel URL (e.g. http://localhost:8888 or https://xxx.ngrok.io)",
-                                   str(config.get("upstream_base_url", "")))
-        config["upstream_base_url"] = sandbox_url.rstrip("/")
-        config["upstream_api_key"] = ""
-        config["upstream_model"] = ""
+        print("Sandbox mode: LLM-шлюз в sandbox + Tunnellio туннель.")
+        print("При подключении плагина создаётся временный домен Tunnellio.")
+        use_own_token = prompt_bool("Использовать свой Tunnellio API token (платный тариф)?", False)
+        if use_own_token:
+            tnl_token = prompt_text("Tunnellio API token", "")
+            domain_type = prompt_choice("Тип домена", ["ephemeral", "custom"], "ephemeral")
+            hostname = ""
+            if domain_type == "custom":
+                hostname = prompt_text("Имя постоянного домена (e.g. my-sandbox)", "")
+        else:
+            tnl_token = ""  # будет использовать зашитый дефолтный
+            hostname = ""  # ephemeral
+            print("Будет создан временный домен (жизнь 1 сутки, бесплатный).")
+        # Provision domain via API
+        try:
+            from plugins.ide_gateway.backend import provision_sandbox_domain
+            print("Создаю домен через Tunnellio API...")
+            domain = provision_sandbox_domain(
+                token=tnl_token, hostname=hostname, local_port=config.get("default_port", 8787))
+            config["tunnellio_token"] = tnl_token
+            config["tunnellio_domain_id"] = domain["domain_id"]
+            config["tunnellio_key_id"] = domain["key_id"]
+            config["tunnellio_public_url"] = domain["public_url"]
+            config["tunnellio_ssh_host"] = domain["ssh_host"]
+            config["tunnellio_ssh_port"] = domain["ssh_port"]
+            config["tunnellio_ssh_user"] = domain["ssh_user"]
+            config["tunnellio_remote_hostname"] = domain["remote_hostname"]
+            config["tunnellio_private_key"] = domain["private_key"]
+            config["tunnellio_mode"] = domain["mode"]
+            print(f"Домен создан: {domain['public_url']}")
+            print(f"Режим: {domain['mode']}")
+            config["upstream_base_url"] = domain["public_url"].rstrip("/") + "/v1"
+            config["upstream_api_key"] = ""
+            config["upstream_model"] = ""
+        except Exception as exc:
+            print(f"Ошибка создания домена: {exc}")
+            print("Продолжаю без туннеля — модель создаст его вручную.")
+            config["upstream_base_url"] = ""
+            config["upstream_api_key"] = ""
+            config["upstream_model"] = ""
     elif gw_mode == "external":
         print("External mode: the gateway worker calls an OpenAI-compatible")
         print("upstream provider directly (Ollama, OpenAI, etc.).")

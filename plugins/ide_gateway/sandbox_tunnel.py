@@ -1,29 +1,20 @@
 """Tunnellio tunnel helper for sandbox environments.
 
-This script runs inside the Notion Agent sandbox (Linux) and establishes a
-reverse SSH tunnel to Tunnellio, exposing sandbox_server.py (port 8787) on a
-public HTTPS URL.
-
-It uses the Tunnellio Integration API (https://api.tunnellio.ru/v1) to:
-  1. Register an SSH public key (if not already registered)
-  2. Create a persistent or ephemeral domain
-  3. Get a ConnectionProfile (SSH command + public URL)
-  4. Launch the SSH reverse tunnel
+Reads domain configuration from a JSON state file (created at plugin setup
+time by provision_sandbox_domain). The sandbox just needs to launch the SSH
+reverse tunnel — the domain, key, and public URL are already provisioned.
 
 Usage:
-  python sandbox_tunnel.py --tunnellio-token <token> --local-port 8787
-  python sandbox_tunnel.py --tunnellio-token <token> --local-port 8787 --hostname my-sandbox
-  python sandbox_tunnel.py --tunnellio-token <token> --local-port 8787 --ephemeral
+  python sandbox_tunnel.py --state <state.json> --ssh-key <key_path>
+  python sandbox_tunnel.py --state <state.json>   (reads ssh_key from state)
 
-Environment variables (alternative to flags):
-  TUNNELLIO_TOKEN    — Tunnellio API token
-  TUNNELLIO_BASE_URL — API base (default: https://api.tunnellio.ru)
-  TUNNELLIO_DOMAIN   — persistent hostname (e.g. my-sandbox)
-  TUNNELLIO_KEY      — path to SSH private key (auto-generated if not set)
-  LOCAL_PORT         — local port to expose (default: 8787)
+State JSON fields (from plugin setup):
+  tunnellio_ssh_host, tunnellio_ssh_port, tunnellio_ssh_user,
+  tunnellio_remote_hostname, tunnellio_private_key, tunnellio_public_url,
+  port (local sandbox_server port)
 
 Output (JSON on stdout):
-  {"ok": true, "public_url": "https://my-sandbox.tunnellio.site", "ssh_command": "..."}
+  {"ok": true, "public_url": "https://xxx.tunnellio.site"}
 """
 from __future__ import annotations
 
@@ -183,67 +174,48 @@ def _build_ssh_command(profile: dict[str, Any], private_key: str) -> list[str]:
 
 def main() -> int:
     import argparse
-    global API_BASE
-    parser = argparse.ArgumentParser(description="Tunnellio sandbox tunnel")
-    parser.add_argument("--tunnellio-token", default=os.environ.get("TUNNELLIO_TOKEN", ""))
-    parser.add_argument("--tunnellio-base-url", default=os.environ.get("TUNNELLIO_BASE_URL", API_BASE))
-    parser.add_argument("--local-port", type=int, default=int(os.environ.get("LOCAL_PORT", "8787")))
-    parser.add_argument("--hostname", default=os.environ.get("TUNNELLIO_DOMAIN", ""))
-    parser.add_argument("--ephemeral", action="store_true", default=not bool(os.environ.get("TUNNELLIO_DOMAIN", "")))
-    parser.add_argument("--ssh-key", default=os.environ.get("TUNNELLIO_KEY", ""))
-    parser.add_argument("--no-connect", action="store_true", help="Only get the URL, don't start SSH")
+    parser = argparse.ArgumentParser(description="Tunnellio sandbox tunnel (reads config from state)")
+    parser.add_argument("--state", required=True, help="Path to endpoint state JSON")
+    parser.add_argument("--ssh-key", default="", help="Override path to SSH private key")
+    parser.add_argument("--local-port", type=int, default=None, help="Override local port")
     args = parser.parse_args()
 
-    API_BASE = args.tunnellio_base_url.rstrip("/")
+    # Load state file (created at plugin setup by provision_sandbox_domain)
+    with open(args.state, "r", encoding="utf-8-sig") as f:
+        state = json.load(f)
 
-    token = args.tunnellio_token
-    if not token:
-        print(json.dumps({"ok": False, "error": "TUNNELLIO_TOKEN is required"}))
-        return 1
+    ssh_host = state.get("tunnellio_ssh_host", "")
+    ssh_port = str(state.get("tunnellio_ssh_port", "22"))
+    ssh_user = state.get("tunnellio_ssh_user", "")
+    remote_hostname = state.get("tunnellio_remote_hostname", "")
+    private_key = args.ssh_key or state.get("tunnellio_private_key", "")
+    public_url = state.get("tunnellio_public_url", "")
+    local_port = str(args.local_port or state.get("port", 8787))
 
-    # Determine SSH key path
-    key_path = Path(args.ssh_key or os.path.expanduser("~/.ssh/ide_gateway_tunnellio"))
-
-    # Find or register key
-    key_id, private_key = _find_or_register_key(token, key_path)
-
-    # Create domain or ephemeral session
-    if args.ephemeral or not args.hostname:
-        session_data = _create_ephemeral_session(token, key_id, args.local_port)
-        session = session_data.get("session", {})
-        domain = session_data.get("domain", {})
-        profile = session_data.get("connectionProfile", {})
-        public_url = session.get("publicUrl") or domain.get("publicUrl", "")
-    else:
-        domain_data = _create_persistent_domain(token, key_id, args.hostname, args.local_port)
-        domain = domain_data.get("domain", {})
-        domain_id = domain.get("id", "")
-        profile = _get_connection_profile(token, domain_id, args.local_port)
-        public_url = profile.get("publicUrl", "")
-
-    if not profile:
-        print(json.dumps({"ok": False, "error": "No connection profile in response"}))
+    if not ssh_host or not private_key or not remote_hostname:
+        print(json.dumps({"ok": False, "error": "State file missing tunnel config",
+                          "needed": ["tunnellio_ssh_host", "tunnellio_private_key",
+                                     "tunnellio_remote_hostname"]}))
         return 1
 
     if not public_url:
-        public_url = profile.get("publicUrl", "")
+        print(json.dumps({"ok": False, "error": "No public_url in state"}))
+        return 1
 
-    ssh_cmd = _build_ssh_command(profile, private_key)
+    ssh_cmd = [
+        "ssh",
+        "-i", private_key,
+        "-p", ssh_port,
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ServerAliveInterval=10",
+        "-o", "ServerAliveCountMax=3",
+        "-o", "ExitOnForwardFailure=yes",
+        "-R", f"{remote_hostname}:80:127.0.0.1:{local_port}",
+        f"{ssh_user}@{ssh_host}",
+    ]
 
-    result = {
-        "ok": True,
-        "public_url": public_url,
-        "ssh_command": " ".join(ssh_cmd),
-        "private_key": private_key,
-        "mode": "ephemeral" if (args.ephemeral or not args.hostname) else "persistent",
-    }
-
-    if args.no_connect:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
-
-    # Start SSH tunnel
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps({"ok": True, "public_url": public_url, "ssh_command": " ".join(ssh_cmd)}))
     print(f"\nStarting SSH tunnel: {' '.join(ssh_cmd)}", file=sys.stderr)
 
     try:

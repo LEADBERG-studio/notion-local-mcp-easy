@@ -373,6 +373,17 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
         "upstream_api_key": config.get("upstream_api_key", ""),
         "upstream_model": config.get("upstream_model", ""),
         "extra_models": config.get("extra_models", ""),
+        # Tunnellio sandbox tunnel config (provisioned at setup time)
+        "tunnellio_token": config.get("tunnellio_token", ""),
+        "tunnellio_domain_id": config.get("tunnellio_domain_id", ""),
+        "tunnellio_key_id": config.get("tunnellio_key_id", ""),
+        "tunnellio_public_url": config.get("tunnellio_public_url", ""),
+        "tunnellio_ssh_host": config.get("tunnellio_ssh_host", ""),
+        "tunnellio_ssh_port": config.get("tunnellio_ssh_port", ""),
+        "tunnellio_ssh_user": config.get("tunnellio_ssh_user", ""),
+        "tunnellio_remote_hostname": config.get("tunnellio_remote_hostname", ""),
+        "tunnellio_private_key": config.get("tunnellio_private_key", ""),
+        "tunnellio_mode": config.get("tunnellio_mode", ""),
         "log_path": str(log_path),
         "requests_total": 0, "responses_total": 0, "errors_total": 0, "last_error": "",
     }
@@ -568,7 +579,7 @@ def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: di
     gw_mode = config.get("gateway_mode", "bridge")
 
     if gw_mode == "sandbox":
-        prompt = _sandbox_prompt(base_url, model, token, sandbox_script, workspace)
+        prompt = _sandbox_prompt(base_url, model, token, sandbox_script, workspace, state)
         msg = "Скажите модели: «подними мост». Она запустит sandbox_server.py как фоновый процесс, и IDE будет работать напрямую с LLM."
     elif gw_mode == "external":
         upstream = config.get("upstream_base_url", "")
@@ -649,32 +660,59 @@ def _bridge_prompt_text(base_url: str, model: str, token: str,
 
 
 def _sandbox_prompt(base_url: str, model: str, token: str,
-                     sandbox_script: str, workspace: str) -> str:
+                     sandbox_script: str, workspace: str,
+                     state: dict[str, Any] | None = None) -> str:
     tunnel_script = str(Path(__file__).resolve().parent / "sandbox_tunnel.py")
-    return (
+    state_path = ""
+    public_url = ""
+    if state:
+        state_path = str(Path(state.get("log_path", "")).parent.parent / "endpoints" / f"{state.get('name', 'default')}.json")
+        public_url = state.get("tunnellio_public_url", "")
+
+    prompt = (
         "# Подними мост (sandbox mode)\n"
         "Ты в sandbox-режиме. Нужно запустить 2 процесса:\n"
         "1. sandbox_server.py — LLM-шлюз\n"
-        "2. sandbox_tunnel.py — туннель к Tunnellio (публичный URL)\n\n"
+        "2. sandbox_tunnel.py — туннель к Tunnellio\n\n"
         "## Шаг 1: запусти sandbox-сервер\n"
         "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
         "Сервер поднимется и будет обслуживать запросы через LLM egress.\n\n"
-        "## Шаг 2: запусти туннель к Tunnellio\n"
-        "Нужен Tunnellio API token. Если он есть в окружении (TUNNELLIO_TOKEN),\n"
-        "просто запусти:\n"
-        "   run_program: python " + repr(tunnel_script) + " --local-port 8787 --ephemeral\n"
-        "Если токена нет — спроси у пользователя.\n\n"
-        "Туннель вернёт публичный URL вида https://xxx.tunnellio.site.\n"
-        "Сообщи его пользователю — это адрес для подключения IDE.\n\n"
+    )
+    if state_path and public_url:
+        prompt += (
+            "## Шаг 2: запусти туннель\n"
+            "Домен уже создан при установке плагина. Просто запусти туннель:\n"
+            "   run_program: python " + repr(tunnel_script) + " --state " + repr(state_path) + "\n"
+            f"Публичный URL: {public_url}\n"
+            "Туннель поднимется и соединит sandbox с Tunnellio.\n\n"
+        )
+    else:
+        prompt += (
+            "## Шаг 2: запусти туннель\n"
+            "   run_program: python " + repr(tunnel_script) + " --state <state_path>\n"
+            "Туннель использует Tunnellio API для создания домена.\n\n"
+        )
+    prompt += (
         "## Проверка\n"
         "   run_program: curl -s http://127.0.0.1:8787/health\n"
         "Должно быть: {\"status\": \"alive\", \"mode\": \"sandbox\"}\n\n"
-        "## Подключение IDE\n"
-        "   base_url: <публичный URL от туннеля>/v1\n"
-        f"   api_key: {token}\n"
-        f"   model: {model} (или любой из /v1/models)\n\n"
-        "Модель больше ничего не делает — туннель и сервер работают в фоне."
     )
+    if public_url:
+        prompt += (
+            "## Подключение IDE\n"
+            f"   base_url: {public_url.rstrip('/')}/v1\n"
+            f"   api_key: {token}\n"
+            f"   model: {model} (или любой из /v1/models)\n\n"
+        )
+    else:
+        prompt += (
+            "## Подключение IDE\n"
+            f"   base_url: {base_url}\n"
+            f"   api_key: {token}\n"
+            f"   model: {model}\n\n"
+        )
+    prompt += "Модель больше ничего не делает — туннель и сервер работают в фоне."
+    return prompt
 
 
 def _external_prompt(base_url: str, model: str, token: str,
