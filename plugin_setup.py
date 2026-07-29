@@ -190,9 +190,38 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             config["default_port"] = 8787
 
-    # The bridge is served by the model itself through a long-lived
-    # ide_gateway_wait_request call (the canonical MCP bridge pattern). No
-    # external upstream or subprocess responder is needed.
+    # Gateway mode: bridge (model in chat, poll loop) | sandbox (resident egress)
+    # | external (direct OpenAI-compatible provider)
+    gw_mode = prompt_choice(
+        "Gateway mode",
+        ["bridge", "sandbox", "external"],
+        str(config.get("gateway_mode", "bridge")) or "bridge")
+    config["gateway_mode"] = gw_mode
+
+    if gw_mode == "sandbox":
+        print("Sandbox mode: the model launches sandbox_server.py as a resident")
+        print("background process. IDE requests go directly to the LLM egress.")
+        print("No poll loop needed.")
+        config["upstream_base_url"] = ""  # auto-detected from env
+        config["upstream_api_key"] = ""
+        config["upstream_model"] = ""
+    elif gw_mode == "external":
+        print("External mode: the gateway worker calls an OpenAI-compatible")
+        print("upstream provider directly (Ollama, OpenAI, etc.).")
+        base = prompt_text("Upstream base URL (e.g. http://127.0.0.1:11434/v1)",
+                           str(config.get("upstream_base_url", "")))
+        config["upstream_base_url"] = base.rstrip("/")
+        key = prompt_text("Upstream API key (empty for local unauthenticated)",
+                          str(config.get("upstream_api_key", "")))
+        config["upstream_api_key"] = key
+        umodel = prompt_text("Upstream model id",
+                             str(config.get("upstream_model", "")))
+        config["upstream_model"] = umodel
+    else:
+        print("Bridge mode: the model runs bridge_step.py poll loop via run_program.")
+        config["upstream_base_url"] = ""
+        config["upstream_api_key"] = ""
+        config["upstream_model"] = ""
 
     setup_mode = prompt_choice("Endpoint defaults", ["default", "custom"], "default")
     if setup_mode == "default":

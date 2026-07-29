@@ -1,3 +1,15 @@
+## 1.9.0 - 2026-07-29
+
+- Added universal backend layer (`backend.py`): model discovery from env vars, OpenAI ⇄ Anthropic translation, streaming passthrough.
+- Added `sandbox_server.py` — standalone server for sandbox environments: serves IDE requests directly through the LLM egress (no queue, no poll-loop, no MCP tool-call blocking).
+- Added three gateway modes: `bridge` (model in chat, poll loop), `sandbox` (resident egress server), `external` (direct OpenAI-compatible provider).
+- Updated `worker.py` with external mode: calls upstream directly, skips the queue entirely.
+- Updated `bridge_prompt` to return mode-specific instructions (bridge/sandbox/external).
+- Updated `plugin_setup.py` with mode selection in setup wizard.
+- Anthropic translation (`openai_to_anthropic`, `anthropic_to_openai`) handles Claude-family models automatically.
+- Dynamic model discovery reads `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`ANTHROPIC_BASE_URL` from the environment.
+- 275 tests pass.
+
 ## 1.8.7 - 2026-07-28
 
 - Updated `bridge_step.py` with prompt classification: `poll` now returns `prompt_type` ("chat" | "memory_extraction" | "other"), `user_message` (extracted last user message), and `prompt_tail` (last 3000 chars for context).

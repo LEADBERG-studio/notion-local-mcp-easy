@@ -41,6 +41,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "embeddings_mode": "fallback",
     "embeddings_dim": 1536,
     "disabled_tools": "",
+    # Gateway mode: "bridge" (queue + model in chat) | "sandbox" (resident egress)
+    # | "external" (direct OpenAI-compatible provider)
+    "gateway_mode": "bridge",
+    # Sandbox/external backend settings (used when gateway_mode != "bridge")
+    "upstream_base_url": "",
+    "upstream_api_key": "",
+    "upstream_model": "",
+    "sandbox_script": "",  # path to sandbox_server.py (auto-detected if empty)
+    "extra_models": "",
 }
 
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -196,6 +205,18 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
         autostart = str(autostart).strip().lower() in {"1", "true", "yes", "on"}
     normalized["autostart"] = autostart
 
+    # Gateway mode
+    gw_mode = str(normalized.get("gateway_mode", "bridge")).strip().lower()
+    if gw_mode not in {"bridge", "sandbox", "external"}:
+        gw_mode = "bridge"
+    normalized["gateway_mode"] = gw_mode
+
+    normalized["upstream_base_url"] = str(normalized.get("upstream_base_url", "") or "").strip()
+    normalized["upstream_api_key"] = str(normalized.get("upstream_api_key", "") or "").strip()
+    normalized["upstream_model"] = str(normalized.get("upstream_model", "") or "").strip()
+    normalized["sandbox_script"] = str(normalized.get("sandbox_script", "") or "").strip()
+    normalized["extra_models"] = str(normalized.get("extra_models", "") or "")
+
     return normalized
 
 
@@ -347,6 +368,11 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
         "embeddings_mode": config["embeddings_mode"],
         "embeddings_dim": config["embeddings_dim"],
         "disabled_tools": config["disabled_tools"],
+        "gateway_mode": config.get("gateway_mode", "bridge"),
+        "upstream_base_url": config.get("upstream_base_url", ""),
+        "upstream_api_key": config.get("upstream_api_key", ""),
+        "upstream_model": config.get("upstream_model", ""),
+        "extra_models": config.get("extra_models", ""),
         "log_path": str(log_path),
         "requests_total": 0, "responses_total": 0, "errors_total": 0, "last_error": "",
     }
@@ -521,8 +547,7 @@ def read_logs(arguments: dict[str, Any], context: dict[str, Any], config: dict[s
 
 
 def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy-paste system-prompt snippet that turns the active MCP
-    model into a persistent bridge serving IDE requests via run_program."""
+    """Return a system-prompt snippet for the configured gateway mode."""
     name = normalize_name(arguments.get("name"))
     state = _load_endpoint_state(context, name)
     base_url = state["base_url"] if state else "http://127.0.0.1:8787/v1"
@@ -530,8 +555,37 @@ def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: di
     token = state["token"] if state and arguments.get("include_secret") else "***"
     workspace = str(context.get("workspacePath", ""))
     bridge_script = str(Path(__file__).resolve().parent / "bridge_step.py")
+    sandbox_script = str(Path(__file__).resolve().parent / "sandbox_server.py")
+    gw_mode = config.get("gateway_mode", "bridge")
 
-    prompt = (
+    if gw_mode == "sandbox":
+        prompt = _sandbox_prompt(base_url, model, token, sandbox_script, workspace)
+        msg = "Sandbox mode: launch sandbox_server.py as a resident background process. IDE requests are served directly through the LLM egress."
+    elif gw_mode == "external":
+        upstream = config.get("upstream_base_url", "")
+        prompt = _external_prompt(base_url, model, token, upstream)
+        msg = "External mode: the gateway worker calls the upstream provider directly. No model action needed."
+    else:
+        prompt = _bridge_prompt_text(base_url, model, token, workspace, bridge_script)
+        msg = "Bridge mode: poll loop via run_program + bridge_step.py."
+
+    return {
+        "ok": True,
+        "name": name,
+        "gateway_mode": gw_mode,
+        "base_url": base_url,
+        "api_key": token,
+        "model": model,
+        "bridge_script": bridge_script if gw_mode == "bridge" else None,
+        "sandbox_script": sandbox_script if gw_mode == "sandbox" else None,
+        "system_prompt": prompt,
+        "message": msg,
+    }
+
+
+def _bridge_prompt_text(base_url: str, model: str, token: str,
+                         workspace: str, bridge_script: str) -> str:
+    return (
         "# IDE Gateway bridge mode (run_program loop)\n"
         "You are connected to an IDE through the ide_gateway plugin. "
         "Keep the bridge alive so IDE requests are served automatically.\n\n"
@@ -583,13 +637,56 @@ def bridge_prompt(arguments: dict[str, Any], context: dict[str, Any], config: di
         "Make sure ide_gateway_status shows the endpoint as running. "
         "If not, call ide_gateway_start first."
     )
-    return {
-        "ok": True,
-        "name": name,
-        "base_url": base_url,
-        "api_key": token,
-        "model": model,
-        "bridge_script": bridge_script,
-        "system_prompt": prompt,
-        "message": "Paste this snippet into the model's system prompt. The loop uses run_program + bridge_step.py to avoid MCP tool-call timeouts.",
-    }
+
+
+def _sandbox_prompt(base_url: str, model: str, token: str,
+                     sandbox_script: str, workspace: str) -> str:
+    return (
+        "# IDE Gateway sandbox mode (resident server)\n"
+        "You are connected to an IDE through the ide_gateway plugin. "
+        "A resident server in this sandbox serves IDE requests directly "
+        "through the LLM egress — no poll loop, no queue, no blocking.\n\n"
+        "## How it works\n"
+        f"The IDE sends OpenAI-compatible requests to {base_url}. The "
+        "sandbox_server.py proxies them directly to the LLM egress "
+        "(OPENAI_BASE_URL / ANTHROPIC_BASE_URL from the environment).\n\n"
+        "## Launch (one-time, fire-and-forget)\n"
+        "Start the resident server as a background process:\n"
+        "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
+        "   (returns immediately — the server runs in the background)\n\n"
+        "The server auto-discovers available models from the egress. "
+        "No poll loop needed. IDE requests are served instantly.\n\n"
+        "## Connection (for IDE)\n"
+        f"- base_url: {base_url}\n"
+        f"- api_key: {token}\n"
+        f"- model: any from /v1/models (e.g. {model})\n\n"
+        "## Check\n"
+        "   run_program: curl -s http://127.0.0.1:8787/health\n"
+        "Should return {\"status\": \"alive\", \"mode\": \"sandbox\"}.\n\n"
+        "## Notes\n"
+        "- The sandbox server must be restarted if the sandbox restarts.\n"
+        "- It reads OPENAI_BASE_URL, OPENAI_API_KEY, ANTHROPIC_BASE_URL "
+        "from the environment (set by the platform).\n"
+        "- Streaming is proxied directly from the upstream.\n"
+        "- Anthropic models (claude-*) are translated automatically."
+    )
+
+
+def _external_prompt(base_url: str, model: str, token: str,
+                      upstream: str) -> str:
+    return (
+        "# IDE Gateway external mode (direct upstream)\n"
+        "The gateway worker calls the upstream provider directly. "
+        "No model action is needed — IDE requests are served automatically.\n\n"
+        "## Connection (for IDE)\n"
+        f"- base_url: {base_url}\n"
+        f"- api_key: {token}\n"
+        f"- model: {model}\n"
+        f"- upstream: {upstream}\n\n"
+        "## How it works\n"
+        "IDE → gateway worker → " + upstream + " → LLM → IDE. "
+        "The worker handles OpenAI/Anthropic translation automatically.\n\n"
+        "## Check\n"
+        "   run_program: curl -s http://127.0.0.1:8787/health\n"
+        "Should show the endpoint as running."
+    )

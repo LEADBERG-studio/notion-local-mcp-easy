@@ -56,6 +56,7 @@ from plugins.ide_gateway.openai_toolbridge import (
     forced_tool_name,
     primary_param,
 )
+from plugins.ide_gateway.backend import call_upstream as backend_call_upstream
 from plugins.ide_gateway.openai_streaming import (
     render_chat_stream_events,
     render_responses_stream_events,
@@ -344,6 +345,17 @@ class Handler(BaseHTTPRequestHandler):
     # --------------------------- handlers --------------------------------- #
     def _models_response(self) -> dict[str, Any]:
         model_id = STATE.get("model_id", "ide-gateway")
+        gw_mode = str(STATE.get("gateway_mode", "bridge")).lower()
+        if gw_mode == "external":
+            from plugins.ide_gateway.backend import discover_models
+            cfg = {
+                "upstream_base_url": STATE.get("upstream_base_url", ""),
+                "upstream_api_key": STATE.get("upstream_api_key", ""),
+                "extra_models": STATE.get("extra_models", ""),
+            }
+            models = discover_models(cfg)
+            if models:
+                return {"object": "list", "data": models}
         return {"object": "list", "data": [model_object(model_id, name=model_id, description="Active MCP model")]}
 
     def _file_object(self, rec: dict[str, Any]) -> dict[str, Any]:
@@ -406,6 +418,41 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         model_id = STATE.get("model_id", "ide-gateway")
+
+        # External mode: call upstream directly, skip the queue entirely.
+        gw_mode = str(STATE.get("gateway_mode", "bridge")).lower()
+        if gw_mode == "external":
+            upstream_cfg = {
+                "upstream_base_url": STATE.get("upstream_base_url", ""),
+                "upstream_api_key": STATE.get("upstream_api_key", ""),
+                "upstream_model": STATE.get("upstream_model", "") or model_id,
+                "request_timeout_seconds": STATE.get("request_timeout_seconds", 300),
+            }
+            try:
+                if validated["stream"]:
+                    self._begin_sse(200)
+                    cid = "chatcmpl-" + uuid.uuid4().hex[:24]
+                    self._write_sse_event({"id": cid, "object": "chat.completion.chunk",
+                                           "created": int(time.time()), "model": model_id,
+                                           "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})
+                    for chunk in call_upstream_stream(payload, upstream_cfg):
+                        self.wfile.write(chunk)
+                        try: self.wfile.flush()
+                        except Exception: pass
+                    self._write_sse_event({"id": cid, "object": "chat.completion.chunk",
+                                           "created": int(time.time()), "model": model_id,
+                                           "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+                    self._write_sse("data: [DONE]\n\n".encode("utf-8"))
+                    return
+                result = backend_call_upstream(payload, upstream_cfg)
+                content = result.get("content") or ""
+                finish = result.get("finish_reason", "stop")
+                self._send_json(200, build_chat_completion(model_id, content, finish=finish))
+                return
+            except Exception as exc:
+                self._send_json(502, _openai_error(f"Upstream error: {exc}", "upstream_error", status=502))
+                return
+
         forced = forced_tool_name(validated["tool_choice"])
         # Mode C: client forced a canonical tool with tool_choice.
         if forced:
