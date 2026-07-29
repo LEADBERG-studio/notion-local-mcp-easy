@@ -1,3 +1,10 @@
+## 2.0.1 - 2026-07-29
+
+- Fixed `provision_sandbox_domain()`: API возвращает `data.key.id` (а не `data.id`), `id` — число.
+- Приведение `key_id` и `domain_id` к строке для сохранения в config.
+- Проверено live: provision → ephemeral domain → `check_domain_status` → `ensure_domain` — всё работает.
+- 276 тестов OK.
+
 ## 2.0.0 - 2026-07-29
 
 - **sandbox — режим по умолчанию**. `gateway_mode` в DEFAULT_CONFIG и `plugin_setup.py` теперь `sandbox`.

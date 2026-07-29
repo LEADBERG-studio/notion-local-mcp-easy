@@ -79,7 +79,7 @@ def provision_sandbox_domain(
     })
     if not key_resp.get("ok"):
         raise RuntimeError(f"Tunnellio key registration failed: {key_resp.get('error', {})}")
-    key_id = key_resp["data"]["id"]
+    key_id = key_resp["data"]["key"]["id"]
 
     # Create domain
     if not hostname:
@@ -132,12 +132,11 @@ def provision_sandbox_domain(
         mode = "persistent"
 
     return {
-        "key_id": key_id,
-        "domain_id": domain_id,
+        "key_id": str(key_id),
+        "domain_id": str(domain_id),
         "public_url": public_url,
         "ssh_host": profile.get("sshHost", ""),
-        "ssh_port": str(profile.get("sshPort", 22)),
-        "ssh_user": profile.get("sshUser", ""),
+        "ssh_port": str(profile.get("sshPort", 22)),        "ssh_user": profile.get("sshUser", ""),
         "remote_hostname": profile.get("remoteHostname", ""),
         "private_key": private_key,
         "mode": mode,
