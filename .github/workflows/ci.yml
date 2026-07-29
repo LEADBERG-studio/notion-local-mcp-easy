@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
   pull_request:
@@ -18,7 +17,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,7 +28,11 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          # Устанавливаем httpx для надежной отправки запроса в Gemini из Python
+          python -m pip install httpx 
 
       - name: Compile core modules
         run: python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py
@@ -41,4 +43,67 @@ jobs:
           MCP_ALLOW_COMMANDS: "0"
           MCP_AUTH_MODE: legacy
           MCP_SERVEO_HOSTNAME: ""
-        run: python -m unittest discover -s tests -v
+        # Используем специальный скрипт запуска, чтобы перенаправить логи тестов в файл failure_context.txt
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -v 2>&1 | tee failure_context.txt
+
+      - name: Analyze Errors with Gemini
+        # Выполняется только если тесты (или компиляция) завершились неудачей
+        if: failure()
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: python
+        run: |
+          import os
+          import httpx
+          import sys
+
+          api_key = os.environ.get("GEMINI_API_KEY")
+          if not api_key:
+              print("Ошибка: GEMINI_API_KEY не найден в секретах репозитория.")
+              sys.exit(0)
+
+          log_file = "failure_context.txt"
+          if not os.path.exists(log_file):
+              print("Лог-файл тестов не найден.")
+              sys.exit(0)
+
+          with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+              # Берем последние 120 строк лога, чтобы не выйти за лимиты токенов
+              log_lines = f.readlines()[-120:]
+              log_content = "".join(log_lines)
+
+          if not log_content.strip():
+              print("Лог-файл пуст.")
+              sys.exit(0)
+
+          prompt = (
+              "Ты — эксперт по разработке MCP-серверов на Python. Мой CI/CD упал со следующей ошибкой. "
+              "Проанализируй этот лог тестов, понятно объясни причину проблемы простыми словами на русском языке "
+              "и покажи готовый код (исправление) для файлов проекта, если это возможно:\n\n"
+              f"{log_content}"
+          )
+
+          url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+          payload = {
+              "contents": [{
+                  "parts": [{"text": prompt}]
+              }]
+          }
+
+          print("\n=== [Отправка логов в Gemini для анализа...] ===")
+          try:
+              with httpx.Client(timeout=60.0) as client:
+                  response = client.post(url, json=payload)
+                  if response.status_code == 200:
+                      result = response.json()
+                      analysis = result['candidates'][0]['content']['parts'][0]['text']
+                      print("\n=== АНАЛИЗ ОШИБКИ ОТ GEMINI ===")
+                      print(analysis)
+                      print("================================\n")
+                  else:
+                      print(f"Не удалось связаться с Gemini API. Код ответа: {response.status_code}")
+                      print(response.text)
+          except Exception as e:
+              print(f"Произошла ошибка при вызове API: {e}")
