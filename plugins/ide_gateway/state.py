@@ -66,9 +66,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tunnellio_custom_hostname": "",
 }
 
-_ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
+_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0"}
 _MODEL_ID_RE = re.compile(r"^[a-zA-Z0-9._/-]{1,80}$")
 _API_KEY_RE = re.compile(r"^ideg_[A-Za-z0-9_-]{16,}$")
+
+
+def _is_allowed_host(host: str) -> bool:
+    """Check if the host is allowed for binding. Allows loopback, 0.0.0.0,
+    and LAN IP addresses."""
+    if host in _ALLOWED_HOSTS:
+        return True
+    # Allow IP addresses (IPv4)
+    try:
+        import ipaddress
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 
 def runtime_root(context: dict[str, Any]) -> Path:
@@ -139,8 +153,8 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     host = str(normalized.get("default_host", "")).strip().lower()
     if host == "localhost":
         host = "127.0.0.1"
-    if host not in _ALLOWED_HOSTS:
-        raise ValueError(f"default_host must be one of {_ALLOWED_HOSTS}")
+    if not _is_allowed_host(host):
+        raise ValueError(f"default_host must be 127.0.0.1, localhost, 0.0.0.0, or a LAN IP address")
     normalized["default_host"] = "127.0.0.1"
 
     port_range = normalized.get("port_range")
@@ -310,8 +324,8 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
     host = str(arguments.get("host") or config["default_host"]).strip().lower()
     if host == "localhost":
         host = "127.0.0.1"
-    if host not in _ALLOWED_HOSTS:
-        raise ValueError(f"host must be one of {_ALLOWED_HOSTS}")
+    if not _is_allowed_host(host):
+        raise ValueError(f"host must be 127.0.0.1, localhost, 0.0.0.0, or a LAN IP address")
 
     model_id = str(arguments.get("model_id") or config["default_model_id"]).strip()
     if not _MODEL_ID_RE.match(model_id):
@@ -369,7 +383,19 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
             low, high = config["port_range"]
             port = find_free_port(host, low, high)
 
-    token = str(config.get("default_api_key") or "").strip() or generate_token()
+    token = str(config.get("default_api_key") or "").strip()
+    if not token:
+        # Try reading from global config.json (survives version upgrades)
+        try:
+            global_cfg_path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "NotionMcpEasy" / "config.json"
+            if global_cfg_path.is_file():
+                import json as _json
+                global_cfg = _json.loads(global_cfg_path.read_text(encoding="utf-8"))
+                token = str(global_cfg.get("ide_gateway_api_key", "")).strip()
+        except Exception:
+            pass
+    if not token:
+        token = generate_token()
     now = datetime.datetime.now().isoformat()
     root = runtime_root(context)
     root.mkdir(parents=True, exist_ok=True)

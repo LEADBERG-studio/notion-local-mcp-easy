@@ -337,7 +337,10 @@ def main() -> None:
             print(f"Warning: could not load state file: {e}")
 
     port = args.port or (STATE.get("port") if STATE else None) or int(os.environ.get("IDE_GATEWAY_PORT", "8787"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    bind_host = "0.0.0.0"
+    if STATE and STATE.get("host"):
+        bind_host = STATE["host"]
+    server = ThreadingHTTPServer((bind_host, port), Handler)
     server.daemon_threads = True
 
     cfg = _config()

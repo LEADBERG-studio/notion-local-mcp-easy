@@ -179,7 +179,12 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
         config["default_api_key"] = api_key
         print("Generated local IDE Gateway API key and saved it to the plugin-local config.")
     else:
-        print("Keeping existing local IDE Gateway API key from the plugin-local config.")
+        print(f"Keeping existing local IDE Gateway API key: {api_key[:20]}...")
+        regen = prompt_bool("Regenerate API key?", False)
+        if regen:
+            api_key = generate_ide_gateway_api_key()
+            config["default_api_key"] = api_key
+            print(f"New API key generated: {api_key[:20]}...")
 
     autostart = prompt_bool("Enable endpoint autostart (preferred port 8787)?", True)
     config["autostart"] = autostart

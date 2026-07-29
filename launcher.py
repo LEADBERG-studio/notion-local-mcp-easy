@@ -64,7 +64,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -1227,6 +1227,17 @@ def setup(force: bool = False) -> dict:
         print("OAuth owner code (use it to approve new OAuth clients):")
         print(f"    {config['oauth_owner_code']}")
     print("Access token is stored in the config and reused on later launches.\n")
+    # Generate or reuse ide_gateway API key
+    gw_key = str(existing.get("ide_gateway_api_key", "")).strip()
+    if not gw_key:
+        import secrets as _secrets
+        gw_key = "ideg_" + _secrets.token_urlsafe(32)
+        config["ide_gateway_api_key"] = gw_key
+        save_json(CONFIG_FILE, config)
+        print(f"IDE Gateway API key generated: {gw_key[:20]}... (stored in config)")
+    else:
+        config["ide_gateway_api_key"] = gw_key
+        print(f"IDE Gateway API key reused from config: {gw_key[:20]}...")
     return config
 
 
@@ -2356,6 +2367,21 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     if public_url:
         print(f" Public URL: {public_url}")
     print(f" Connection info: {CONNECTION_FILE}")
+    # IDE Gateway info
+    gw_key = str(config.get("ide_gateway_api_key", "")).strip()
+    gw_mode = str(config.get("ide_gateway_mode", "sandbox")).strip()
+    gw_port = int(config.get("ide_gateway_port", 8787) or 8787)
+    gw_host = str(config.get("ide_gateway_host", "127.0.0.1")).strip()
+    gw_url = str(config.get("ide_gateway_public_url", "")).strip()
+    if gw_key:
+        print("---")
+        print(f" IDE Gateway: {gw_mode} mode")
+        print(f"   Local:  http://{gw_host}:{gw_port}/v1")
+        if gw_url:
+            print(f"   Public: {gw_url}")
+        print(f"   API key: {gw_key}")
+        print(f"   Model:   ide-gateway")
+        print(f"   (call ide_gateway_bridge_prompt in chat to start the bridge)")
     print("=======================================================")
     print("Keep this window open. Press Ctrl+C to stop.\n")
 
