@@ -190,17 +190,16 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             config["default_port"] = 8787
 
-    # Gateway mode: bridge (model in chat, poll loop) | sandbox (resident egress)
-    # | external (direct OpenAI-compatible provider)
+    # Gateway mode: sandbox (default, resident egress) | bridge | external
     gw_mode = prompt_choice(
         "Gateway mode",
-        ["bridge", "sandbox", "external"],
-        str(config.get("gateway_mode", "bridge")) or "bridge")
+        ["sandbox", "bridge", "external"],
+        str(config.get("gateway_mode", "sandbox")) or "sandbox")
     config["gateway_mode"] = gw_mode
 
     if gw_mode == "sandbox":
-        print("Sandbox mode: LLM-шлюз в sandbox + Tunnellio туннель.")
-        print("При подключении плагина создаётся временный домен Tunnellio.")
+        print("Sandbox mode (по умолчанию): LLM-шлюз в sandbox + Tunnellio туннель.")
+        print("При подключении плагина создаётся домен Tunnellio.")
         use_own_token = prompt_bool("Использовать свой Tunnellio API token (платный тариф)?", False)
         if use_own_token:
             tnl_token = prompt_text("Tunnellio API token", "")
@@ -208,6 +207,7 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
             hostname = ""
             if domain_type == "custom":
                 hostname = prompt_text("Имя постоянного домена (e.g. my-sandbox)", "")
+                config["tunnellio_custom_hostname"] = hostname
         else:
             tnl_token = ""  # будет использовать зашитый дефолтный
             hostname = ""  # ephemeral
@@ -228,6 +228,7 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
             config["tunnellio_remote_hostname"] = domain["remote_hostname"]
             config["tunnellio_private_key"] = domain["private_key"]
             config["tunnellio_mode"] = domain["mode"]
+            config["tunnellio_hostname"] = hostname
             print(f"Домен создан: {domain['public_url']}")
             print(f"Режим: {domain['mode']}")
             config["upstream_base_url"] = domain["public_url"].rstrip("/") + "/v1"

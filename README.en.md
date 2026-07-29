@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.9.5
+# Notion Local MCP Easy 2.0.0
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -62,7 +62,11 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 
 ## IDE Gateway plugin — bridge between IDE and the model
 
-Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). The gateway starts a local endpoint on `127.0.0.1:8787` that the IDE sees as a regular OpenAI provider, but behind it is the active MCP model with access to your files, shell, and web.
+Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Three modes:
+
+- **sandbox** (default) — model launches `sandbox_server.py` + `sandbox_tunnel.py` in Notion Agent sandbox. IDE connects to a Tunnellio public URL. Direct LLM egress access, no poll-loop.
+- **bridge** — model runs `bridge_step.py poll` loop via `run_program`. Universal, works on all platforms.
+- **external** — worker calls OpenAI-compatible provider directly (Ollama, OpenAI).
 
 The bridge works via long-poll: the model in chat starts a `ide_gateway_wait_request` loop once and keeps it open. When the IDE sends a request, it reaches the model instantly; the model processes it with its MCP tools and replies through `ide_gateway_send_response`. No manual pings, no chat noise.
 

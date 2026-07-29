@@ -1,3 +1,13 @@
+## 2.0.0 - 2026-07-29
+
+- **sandbox — режим по умолчанию**. `gateway_mode` в DEFAULT_CONFIG и `plugin_setup.py` теперь `sandbox`.
+- `ensure_domain()`: для persistent пересоздаёт с тем же hostname; для ephemeral — новая session.
+- Tunnellio-настройки сохраняются в config (`tunnellio_hostname`, `tunnellio_custom_hostname`).
+- Все Tunnellio-поля проходят через `normalize_config`.
+- `startup()` хук проверяет/пересоздаёт домен при старте MCP.
+- Три режима полностью работают: sandbox (Tunnellio tunnel + LLM egress), bridge (poll-loop), external (direct provider).
+- 276 тестов OK.
+
 ## 1.9.5 - 2026-07-29
 
 - `startup()` хук: при sandbox mode проверяет жив ли Tunnellio домен (`check_domain_status`), пересоздаёт если истёк (`ensure_domain`).

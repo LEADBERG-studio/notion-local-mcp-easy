@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 1.9.5
+# Notion Local MCP Easy 2.0.0
 
 
 
@@ -90,7 +90,11 @@ docs/ru/index.html
 
 ## IDE Gateway — мост между IDE и моделью
 
-Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Шлюз поднимает локальный endpoint на `127.0.0.1:8787`, который IDE видит как обычного OpenAI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу.
+Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Шлюз поддерживает три режима:
+
+- **sandbox** (по умолчанию) — модель запускает `sandbox_server.py` + `sandbox_tunnel.py` в sandbox Notion Agent. IDE подключается к публичному URL Tunnellio. Прямой доступ к LLM egress, без poll-loop.
+- **bridge** — модель крутит `bridge_step.py poll` цикл через `run_program`. Универсальный, работает на всех платформах.
+- **external** — worker напрямую зовёт OpenAI-compatible провайдера (Ollama, OpenAI).
 
 Мост работает через `run_program`: модель в чате запускает `bridge_step.py poll` (ждёт запрос от IDE 30 сек), обрабатывает его своими MCP-инструментами, отвечает через `bridge_step.py complete`, и снова `poll`. Никаких ручных «пинков», сообщения в чате не плодятся, не требует долгоживущих MCP-tool-call'ов (которые таймаутят).
 

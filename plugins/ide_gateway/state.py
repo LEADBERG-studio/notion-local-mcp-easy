@@ -41,15 +41,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "embeddings_mode": "fallback",
     "embeddings_dim": 1536,
     "disabled_tools": "",
-    # Gateway mode: "bridge" (queue + model in chat) | "sandbox" (resident egress)
+    # Gateway mode: "sandbox" (default, resident egress) | "bridge" (queue + model)
     # | "external" (direct OpenAI-compatible provider)
-    "gateway_mode": "bridge",
+    "gateway_mode": "sandbox",
     # Sandbox/external backend settings (used when gateway_mode != "bridge")
     "upstream_base_url": "",
     "upstream_api_key": "",
     "upstream_model": "",
     "sandbox_script": "",  # path to sandbox_server.py (auto-detected if empty)
     "extra_models": "",
+    # Tunnellio sandbox tunnel config (provisioned at setup time)
+    "tunnellio_token": "",
+    "tunnellio_domain_id": "",
+    "tunnellio_key_id": "",
+    "tunnellio_public_url": "",
+    "tunnellio_ssh_host": "",
+    "tunnellio_ssh_port": "",
+    "tunnellio_ssh_user": "",
+    "tunnellio_remote_hostname": "",
+    "tunnellio_private_key": "",
+    "tunnellio_mode": "",
+    "tunnellio_hostname": "",
+    "tunnellio_custom_hostname": "",
 }
 
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -206,9 +219,9 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     normalized["autostart"] = autostart
 
     # Gateway mode
-    gw_mode = str(normalized.get("gateway_mode", "bridge")).strip().lower()
+    gw_mode = str(normalized.get("gateway_mode", "sandbox")).strip().lower()
     if gw_mode not in {"bridge", "sandbox", "external"}:
-        gw_mode = "bridge"
+        gw_mode = "sandbox"
     normalized["gateway_mode"] = gw_mode
 
     normalized["upstream_base_url"] = str(normalized.get("upstream_base_url", "") or "").strip()
@@ -216,6 +229,13 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     normalized["upstream_model"] = str(normalized.get("upstream_model", "") or "").strip()
     normalized["sandbox_script"] = str(normalized.get("sandbox_script", "") or "").strip()
     normalized["extra_models"] = str(normalized.get("extra_models", "") or "")
+
+    # Tunnellio config fields (pass-through, validated at provision time)
+    for k in ("tunnellio_token", "tunnellio_domain_id", "tunnellio_key_id",
+              "tunnellio_public_url", "tunnellio_ssh_host", "tunnellio_ssh_port",
+              "tunnellio_ssh_user", "tunnellio_remote_hostname", "tunnellio_private_key",
+              "tunnellio_mode", "tunnellio_hostname", "tunnellio_custom_hostname"):
+        normalized[k] = str(normalized.get(k, "") or "").strip()
 
     return normalized
 

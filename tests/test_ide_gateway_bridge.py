@@ -164,22 +164,36 @@ class IdeGatewayBridgeTests(unittest.TestCase):
         self.assertIn("model answer via bridge", result.get("body", ""))
         self.assertTrue(result["body"].rstrip().endswith("data: [DONE]"))
 
-    # 3. setup defaults produce bridge mode (no responder)
-    def test_setup_defaults_produce_bridge_mode(self):
+    # 3. setup defaults produce sandbox mode (default)
+    def test_setup_defaults_produce_sandbox_mode(self):
         with mock.patch("builtins.input", return_value=""):
             config = plugin_setup.collect_ide_gateway_config({})
         self.assertTrue(config["autostart"])
         self.assertEqual(config["default_port"], 8787)
+        self.assertEqual(config.get("gateway_mode"), "sandbox")
         self.assertNotIn("responder_enabled", config)
+
+    # 3b. bridge_prompt for sandbox mode (default)
+    def test_bridge_prompt_sandbox_mode(self):
+        from plugins.ide_gateway.plugin import invoke
+        ctx = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
+        cfg = normalize_config({}, ctx)  # default = sandbox
+        result = invoke("ide_gateway_bridge_prompt", {"name": "default", "include_secret": True},
+                        {**ctx, "pluginConfig": cfg})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["gateway_mode"], "sandbox")
+        self.assertIn("sandbox_server.py", result["system_prompt"])
+        self.assertIn("sandbox_tunnel.py", result["system_prompt"])
 
     # 4. bridge_prompt tool returns loop instruction with prompt_type routing
     def test_bridge_prompt_returns_loop_instruction(self):
         from plugins.ide_gateway.plugin import invoke
         ctx = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
-        cfg = normalize_config({}, ctx)
+        cfg = normalize_config({"gateway_mode": "bridge"}, ctx)
         result = invoke("ide_gateway_bridge_prompt", {"name": "default", "include_secret": True},
                         {**ctx, "pluginConfig": cfg})
         self.assertTrue(result["ok"])
+        self.assertEqual(result["gateway_mode"], "bridge")
         self.assertIn("bridge_step.py", result["system_prompt"])
         self.assertIn("run_program", result["system_prompt"])
         self.assertIn("poll --timeout 3", result["system_prompt"])

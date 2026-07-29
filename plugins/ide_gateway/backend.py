@@ -170,14 +170,19 @@ def check_domain_status(token: str, domain_id: str) -> dict[str, Any] | None:
 
 def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, Any]:
     """Check if the configured Tunnellio domain is still active.
-    If not, re-provision it and return updated config.
+    If not, re-provision it with the SAME hostname (persistent) or a new
+    ephemeral session, and return updated config.
 
     Returns the (possibly updated) config dict with fresh domain fields.
     """
     token = config.get("tunnellio_token", "") or DEFAULT_TUNNELLIO_TOKEN
     domain_id = config.get("tunnellio_domain_id", "")
     mode = config.get("tunnellio_mode", "ephemeral")
+    # For persistent mode, always reuse the same hostname
     hostname = config.get("tunnellio_hostname", "") if mode == "persistent" else ""
+    # Also save hostname from config if not already stored
+    if not hostname and mode == "persistent":
+        hostname = config.get("tunnellio_custom_hostname", "")
 
     # If we have a domain_id, check if it's alive
     if domain_id:
@@ -186,7 +191,8 @@ def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, A
             # Domain is alive — return config as-is
             return config
 
-    # Domain expired or doesn't exist — re-provision
+    # Domain expired or doesn't exist — re-provision with same hostname (persistent)
+    # or new ephemeral session
     fresh = provision_sandbox_domain(token=token, hostname=hostname, local_port=local_port)
     config["tunnellio_domain_id"] = fresh["domain_id"]
     config["tunnellio_key_id"] = fresh["key_id"]
@@ -197,8 +203,14 @@ def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, A
     config["tunnellio_remote_hostname"] = fresh["remote_hostname"]
     config["tunnellio_private_key"] = fresh["private_key"]
     config["tunnellio_mode"] = fresh["mode"]
+    config["tunnellio_hostname"] = hostname
     config["upstream_base_url"] = fresh["public_url"].rstrip("/") + "/v1"
     return config
+
+
+# --------------------------------------------------------------------------- #
+# Model discovery
+# --------------------------------------------------------------------------- #
 def discover_models(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Discover available models from environment variables (sandbox egress) or
     from a static fallback list.

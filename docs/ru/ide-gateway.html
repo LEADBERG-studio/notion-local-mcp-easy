@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v1.9.5</small>
+        <small>документация для начинающих · v2.0.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -62,7 +62,7 @@
     <main class="content">
       <h1>IDE Gateway — мост между IDE и моделью</h1>
 
-      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает локальный OpenAI-compatible endpoint на <code>127.0.0.1:8787</code>. IDE видит его как обычного AI-провайдера, но за ним стоит активная MCP-модель с доступом к вашим файлам, shell и вебу. Мост работает через <code>run_program</code>: модель запускает <code>bridge_step.py poll</code>, обрабатывает запрос и отвечает через <code>bridge_step.py complete</code>.</p>
+      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает OpenAI-compatible шлюз для IDE. Три режима: <strong>sandbox</strong> (по умолчанию, LLM egress напрямую через Tunnellio), <strong>bridge</strong> (модель крутит poll-цикл), <strong>external</strong> (прямой провайдер).</p>
 
       <div class="callout info">
         <strong>Зачем это нужно:</strong> инструменты MCP менее надёжны, чем у IDE. Этот плагин позволяет работать в привычном IDE, но с моделью, которая видит ваши файлы и может вызывать MCP-инструменты. Общение IDE ↔ модель идёт напрямую, без сообщений в чате.
