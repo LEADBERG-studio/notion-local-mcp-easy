@@ -97,6 +97,7 @@ def provision_sandbox_domain(
         check=True, capture_output=True,
     )
     public_key = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
+    private_key_content = Path(str(key_path)).read_text(encoding="utf-8").strip()
     private_key = str(key_path)
 
     # Get fingerprint of the generated key
@@ -192,6 +193,7 @@ def provision_sandbox_domain(
         "ssh_user": profile.get("sshUser", ""),
         "remote_hostname": profile.get("remoteHostname", ""),
         "private_key": private_key,
+        "private_key_content": private_key_content,
         "mode": mode,
     }
 
@@ -277,6 +279,7 @@ def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, A
     config["tunnellio_ssh_user"] = fresh["ssh_user"]
     config["tunnellio_remote_hostname"] = fresh["remote_hostname"]
     config["tunnellio_private_key"] = fresh["private_key"]
+    config["tunnellio_private_key_content"] = fresh["private_key_content"]
     config["tunnellio_mode"] = fresh["mode"]
     config["tunnellio_hostname"] = hostname
     config["upstream_base_url"] = fresh["public_url"].rstrip("/") + "/v1"

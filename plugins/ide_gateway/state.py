@@ -60,6 +60,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tunnellio_ssh_user": "",
     "tunnellio_remote_hostname": "",
     "tunnellio_private_key": "",
+    "tunnellio_private_key_content": "",
     "tunnellio_mode": "",
     "tunnellio_hostname": "",
     "tunnellio_custom_hostname": "",
@@ -233,7 +234,8 @@ def normalize_config(config: dict[str, Any], context: dict[str, Any] | None = No
     # Tunnellio config fields (pass-through, validated at provision time)
     for k in ("tunnellio_token", "tunnellio_domain_id", "tunnellio_key_id",
               "tunnellio_public_url", "tunnellio_ssh_host", "tunnellio_ssh_port",
-              "tunnellio_ssh_user", "tunnellio_remote_hostname", "tunnellio_private_key",
+              "tunnellio_ssh_user",               "tunnellio_remote_hostname", "tunnellio_private_key",
+              "tunnellio_private_key_content",
               "tunnellio_mode", "tunnellio_hostname", "tunnellio_custom_hostname"):
         normalized[k] = str(normalized.get(k, "") or "").strip()
 
@@ -403,6 +405,7 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
         "tunnellio_ssh_user": config.get("tunnellio_ssh_user", ""),
         "tunnellio_remote_hostname": config.get("tunnellio_remote_hostname", ""),
         "tunnellio_private_key": config.get("tunnellio_private_key", ""),
+        "tunnellio_private_key_content": config.get("tunnellio_private_key_content", ""),
         "tunnellio_mode": config.get("tunnellio_mode", ""),
         "log_path": str(log_path),
         "requests_total": 0, "responses_total": 0, "errors_total": 0, "last_error": "",

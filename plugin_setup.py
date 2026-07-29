@@ -227,6 +227,7 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
             config["tunnellio_ssh_user"] = domain["ssh_user"]
             config["tunnellio_remote_hostname"] = domain["remote_hostname"]
             config["tunnellio_private_key"] = domain["private_key"]
+            config["tunnellio_private_key_content"] = domain["private_key_content"]
             config["tunnellio_mode"] = domain["mode"]
             config["tunnellio_hostname"] = hostname
             print(f"Домен создан: {domain['public_url']}")

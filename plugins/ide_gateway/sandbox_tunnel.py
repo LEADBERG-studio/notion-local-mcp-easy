@@ -174,6 +174,8 @@ def _build_ssh_command(profile: dict[str, Any], private_key: str) -> list[str]:
 
 def main() -> int:
     import argparse
+    import tempfile
+    import stat
     parser = argparse.ArgumentParser(description="Tunnellio sandbox tunnel (reads config from state)")
     parser.add_argument("--state", required=True, help="Path to endpoint state JSON")
     parser.add_argument("--ssh-key", default="", help="Override path to SSH private key")
@@ -188,13 +190,29 @@ def main() -> int:
     ssh_port = str(state.get("tunnellio_ssh_port", "22"))
     ssh_user = state.get("tunnellio_ssh_user", "")
     remote_hostname = state.get("tunnellio_remote_hostname", "")
-    private_key = args.ssh_key or state.get("tunnellio_private_key", "")
     public_url = state.get("tunnellio_public_url", "")
     local_port = str(args.local_port or state.get("port", 8787))
 
+    # Get private key: either from --ssh-key (file path) or from
+    # tunnellio_private_key_content (inline key content written to a temp file).
+    private_key_content = state.get("tunnellio_private_key_content", "")
+    if args.ssh_key:
+        private_key = args.ssh_key
+    elif private_key_content:
+        # Write the key content to a temp file (sandbox can't read the
+        # original Windows file path).
+        key_file = Path(tempfile.mktemp(prefix="tunnel_key_", suffix=".pem"))
+        key_file.write_text(private_key_content + "\n", encoding="utf-8")
+        # SSH requires 0600 permissions on private key files
+        key_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        private_key = str(key_file)
+    else:
+        # Fall back to the file path (if the tunnel runs on the same machine)
+        private_key = state.get("tunnellio_private_key", "")
+
     if not ssh_host or not private_key or not remote_hostname:
         print(json.dumps({"ok": False, "error": "State file missing tunnel config",
-                          "needed": ["tunnellio_ssh_host", "tunnellio_private_key",
+                          "needed": ["tunnellio_ssh_host", "tunnellio_private_key_content",
                                      "tunnellio_remote_hostname"]}))
         return 1
 
