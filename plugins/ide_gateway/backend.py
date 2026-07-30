@@ -260,24 +260,38 @@ def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, A
 # Model discovery
 # --------------------------------------------------------------------------- #
 def discover_models(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Discover available models from environment variables (sandbox egress) or
-    from a static fallback list.
+    """Discover available models from environment variables (sandbox egress).
 
-    Sandbox environments typically expose OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-    and a model list. We try to read /v1/models from the egress; if that fails,
-    we return a sensible default list.
+    Sandbox environments expose various env vars depending on the platform:
+    - OPENAI_BASE_URL / OPENAI_API_KEY (standard)
+    - ACCIO_GATEWAY_TOKEN (Xi|Omega sandbox)
+    - ANTHROPIC_BASE_URL (Anthropic egress)
+
+    We try to read /v1/models from the egress; if that fails, return fallback.
     """
     config = config or {}
     models: list[dict[str, Any]] = []
 
-    # Try OpenAI egress
-    openai_base = os.environ.get("OPENAI_BASE_URL", "")
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    if openai_base:
+    # Try all known egress env vars
+    egress_configs = [
+        # (base_url_env, key_env, key_fallback_envs)
+        ("OPENAI_BASE_URL", "OPENAI_API_KEY", ["ACCIO_GATEWAY_TOKEN"]),
+        ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", ["ACCIO_GATEWAY_TOKEN"]),
+    ]
+
+    for base_env, key_env, fallback_key_envs in egress_configs:
+        base_url = os.environ.get(base_env, "").strip()
+        if not base_url:
+            continue
+        api_key = os.environ.get(key_env, "").strip()
+        for fb_env in fallback_key_envs:
+            if not api_key:
+                api_key = os.environ.get(fb_env, "").strip()
+
         try:
             req = urllib.request.Request(
-                openai_base.rstrip("/") + "/models",
-                headers={"Authorization": f"Bearer {openai_key}"} if openai_key else {},
+                base_url.rstrip("/") + "/models",
+                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -288,8 +302,7 @@ def discover_models(config: dict[str, Any] | None = None) -> list[dict[str, Any]
         except Exception:
             pass
 
-    # If egress didn't return models, use the static fallback (covers known
-    # sandbox models + any custom models from config).
+    # If egress didn't return models, use the static fallback
     if not models:
         for name in _DEFAULT_MODELS:
             models.append({"id": name, "object": "model", "created": 0, "owned_by": "fallback"})
@@ -434,6 +447,13 @@ def call_upstream(payload: dict[str, Any], config: dict[str, Any]) -> dict[str, 
         raise ValueError("upstream_base_url is required for sandbox/external backend")
 
     api_key = str(config.get("upstream_api_key", "")).strip()
+    # Fallback to env vars if config is empty (sandbox auto-discovery)
+    if not api_key:
+        api_key = (
+            os.environ.get("OPENAI_API_KEY", "")
+            or os.environ.get("ACCIO_GATEWAY_TOKEN", "")
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        ).strip()
     model = str(config.get("upstream_model", "")).strip() or payload.get("model", "ide-gateway")
     stream = bool(payload.get("stream", False))
 
@@ -489,6 +509,12 @@ def call_upstream_stream(payload: dict[str, Any], config: dict[str, Any]):
     if not base_url:
         raise ValueError("upstream_base_url is required")
     api_key = str(config.get("upstream_api_key", "")).strip()
+    if not api_key:
+        api_key = (
+            os.environ.get("OPENAI_API_KEY", "")
+            or os.environ.get("ACCIO_GATEWAY_TOKEN", "")
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        ).strip()
     model = str(config.get("upstream_model", "")).strip() or payload.get("model", "ide-gateway")
 
     anthropic = is_anthropic_model(model) and "anthropic" in base_url.lower()

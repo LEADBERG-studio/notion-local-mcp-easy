@@ -88,9 +88,15 @@ def _load_state(path: str) -> dict[str, Any]:
 
 def _config() -> dict[str, Any]:
     # Start from env vars (sandbox auto-discovery)
+    # Check multiple env var names for compatibility across platforms
+    openai_base = os.environ.get("OPENAI_BASE_URL", "")
+    api_key = (
+        os.environ.get("OPENAI_API_KEY", "")
+        or os.environ.get("ACCIO_GATEWAY_TOKEN", "")
+    )
     cfg = {
-        "upstream_base_url": os.environ.get("OPENAI_BASE_URL", ""),
-        "upstream_api_key": os.environ.get("OPENAI_API_KEY", ""),
+        "upstream_base_url": openai_base,
+        "upstream_api_key": api_key,
         "upstream_model": os.environ.get("IDE_GATEWAY_MODEL", ""),
         "request_timeout_seconds": int(os.environ.get("IDE_GATEWAY_TIMEOUT", "300")),
         "extra_models": os.environ.get("IDE_GATEWAY_EXTRA_MODELS", ""),
