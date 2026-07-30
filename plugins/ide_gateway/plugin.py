@@ -58,18 +58,15 @@ def startup(context: dict[str, Any]) -> dict[str, Any]:
         result["autostart"] = "skipped (full_access required)"
         return result
 
-    # Sandbox mode: check if Tunnellio domain is still alive, re-provision if expired
+    # Sandbox mode: reserve Tunnellio hostname (worker needs to know public_url)
     if config.get("gateway_mode") == "sandbox":
         try:
             from plugins.ide_gateway.backend import ensure_domain
             local_port = int(config.get("default_port", 8787))
             config = ensure_domain(config, local_port=local_port)
             result["tunnel_url"] = config.get("tunnellio_public_url", "")
-            result["tunnel_mode"] = config.get("tunnellio_mode", "")
-            if config.get("tunnellio_domain_id"):
-                result["tunnel_status"] = "active"
-            else:
-                result["tunnel_status"] = "provisioned"
+            result["tunnel_hostname"] = config.get("tunnellio_hostname", "")
+            result["tunnel_status"] = "hostname_reserved" if config.get("tunnellio_hostname") else "failed"
         except Exception as exc:
             result["tunnel_status"] = "failed"
             result["tunnel_error"] = str(exc)

@@ -426,6 +426,7 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
         "tunnellio_domain_id": config.get("tunnellio_domain_id", ""),
         "tunnellio_key_id": config.get("tunnellio_key_id", ""),
         "tunnellio_public_url": config.get("tunnellio_public_url", ""),
+        "tunnellio_hostname": config.get("tunnellio_hostname", ""),
         "tunnellio_ssh_host": config.get("tunnellio_ssh_host", ""),
         "tunnellio_ssh_port": config.get("tunnellio_ssh_port", ""),
         "tunnellio_ssh_user": config.get("tunnellio_ssh_user", ""),
@@ -712,17 +713,15 @@ def _sandbox_prompt(base_url: str, model: str, token: str,
                      sandbox_script: str, workspace: str,
                      state: dict[str, Any] | None = None) -> str:
     tunnel_script = str(Path(__file__).resolve().parent / "sandbox_tunnel.py")
+    # Compute the endpoint state file path (where worker stores its config)
     state_path = ""
     public_url = ""
-    hostname = ""
     if state:
-        state_path = str(_endpoint_state_path(state, state.get("name", "default")) if "name" in state else "")
-        # Fallback: compute path
-        if not state_path:
-            root = runtime_root({"workspacePath": workspace})
-            state_path = str(root / "endpoints" / f"{state.get('name', 'default')}.json")
+        name = state.get("name", "default")
+        # The state file is at <runtime>/endpoints/<name>.json
+        rt = runtime_root({"workspacePath": workspace})
+        state_path = str(rt / "endpoints" / f"{name}.json")
         public_url = state.get("tunnellio_public_url", "")
-        hostname = state.get("tunnellio_hostname", "")
 
     prompt = (
         "# Подними мост (sandbox mode)\n"
@@ -733,11 +732,11 @@ def _sandbox_prompt(base_url: str, model: str, token: str,
         "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
         "Сервер поднимется и будет обслуживать запросы через LLM egress.\n\n"
         "## Шаг 2: запусти туннель\n"
+        "Воркер уже зарезервировал имя домена. Туннель читает hostname из state,\n"
+        "генерирует SSH-ключ в sandbox, создаёт домен с этим hostname и поднимает туннель.\n"
     )
     if state_path:
         prompt += (
-            "Воркер уже зарезервировал имя домена. Туннель читает его из state,\n"
-            "генерирует SSH-ключ, создаёт домен и поднимает туннель:\n"
             "   run_program: python " + repr(tunnel_script) + " --state " + repr(state_path) + "\n"
         )
     else:
