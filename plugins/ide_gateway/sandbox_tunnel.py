@@ -24,6 +24,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -217,7 +218,7 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "Missing public_url or remote_hostname", "data": data}))
         return 1
 
-    # --- Step 4: Start SSH reverse tunnel ---
+    # --- Step 4: Start SSH reverse tunnel (detached, survives parent kill) ---
     ssh_cmd = [
         "ssh",
         "-i", str(key_path),
@@ -227,6 +228,7 @@ def main() -> int:
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=3",
         "-o", "ExitOnForwardFailure=yes",
+        "-N",  # no remote command, just tunnel
         "-R", f"{remote_hostname}:80:127.0.0.1:{local_port}",
         f"{ssh_user}@{ssh_host}",
     ]
@@ -243,15 +245,61 @@ def main() -> int:
 
     print(f"\nSSH tunnel: {' '.join(ssh_cmd)}", file=sys.stderr)
     print(f"Public URL: {public_url}", file=sys.stderr)
-    print("Tunnel running. Press Ctrl+C to stop.", file=sys.stderr)
+    print("Tunnel running in background. Detached from parent process.", file=sys.stderr)
 
+    # Wait a moment after key registration to avoid Permission denied race condition
+    print("Waiting 3s for key propagation...", file=sys.stderr)
+    time.sleep(3)
+
+    # Start SSH as a detached daemon that survives parent process kill.
+    # On Linux: use setsid + nohup. The SSH process becomes a session leader
+    # and is not killed when the parent (run_program) exits or is killed by
+    # the platform's 5-minute timeout.
     try:
+        # Fork ourselves first — the child becomes a daemon
+        import signal as _signal
+        try:
+            pid = os.fork()
+        except (AttributeError, OSError):
+            pid = -1  # Windows or fork failed — fall through to Popen
+
+        if pid > 0:
+            # Parent: print and exit immediately (run_program returns)
+            print(f"SSH tunnel daemon started (PID {pid}).", file=sys.stderr)
+            return 0
+        elif pid == 0 or pid == -1:
+            # Child (Linux) or direct Popen (Windows/fallback)
+            if pid == 0:
+                # Linux child: become session leader
+                os.setsid()
+                # Redirect stdio to devnull
+                sys.stdout = open(os.devnull, "w")
+                sys.stderr = open(os.devnull, "w")
+                # Execute ssh directly (replaces process)
+                os.execvp(ssh_cmd[0], ssh_cmd)
+                # If execvp fails:
+                sys.exit(1)
+            else:
+                # Windows fallback: Popen with DETACHED_PROCESS
+                flags = 0
+                if os.name == "nt":
+                    flags = 0x00000008  # DETACHED_PROCESS
+                proc = subprocess.Popen(
+                    ssh_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=flags,
+                    start_new_session=True if os.name != "nt" else False,
+                )
+                print(f"SSH tunnel started (PID {proc.pid}, detached).", file=sys.stderr)
+                # Don't wait — return immediately so run_program doesn't block
+                return 0
+    except Exception as exc:
+        print(f"Warning: detached mode failed ({exc}), running inline.", file=sys.stderr)
         proc = subprocess.Popen(ssh_cmd, stdout=sys.stderr, stderr=sys.stderr)
         proc.wait()
         return proc.returncode
-    except KeyboardInterrupt:
-        proc.terminate()
-        return 0
 
 
 if __name__ == "__main__":

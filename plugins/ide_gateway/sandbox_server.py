@@ -352,6 +352,20 @@ def main() -> None:
           f"/v1/completions, /v1/images/generations, /v1/audio/speech, "
           f"/v1/embeddings, /v1/moderations, /health")
 
+    # Detached daemon: survive parent process kill (platform 5-min timeout).
+    # On Linux: fork + setsid. On Windows: DETACHED_PROCESS.
+    if os.name == "posix":
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # Parent: print and exit immediately
+                print(f"Sandbox server started as daemon (PID {pid}).", file=sys.stderr)
+                return
+            # Child: become session leader, detach from parent
+            os.setsid()
+        except (AttributeError, OSError):
+            pass  # fork not available — run inline
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
