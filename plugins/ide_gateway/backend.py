@@ -223,66 +223,36 @@ def check_domain_status(token: str, domain_id: str) -> dict[str, Any] | None:
 
 
 def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, Any]:
-    """Check if the configured Tunnellio domain is still active.
-    If not, re-provision it with the SAME hostname (persistent) or a new
-    ephemeral session, and return updated config.
+    """Reserve a Tunnellio hostname (check availability) and compute public_url.
 
-    Returns the (possibly updated) config dict with fresh domain fields.
+    The worker does NOT create the domain — it only reserves the hostname and
+    computes the predictable public_url (https://<hostname>.tunnellio.site).
+    The sandbox creates the actual domain + SSH key + tunnel at runtime.
+
+    Returns the updated config with tunnellio_public_url and tunnellio_hostname.
     """
     token = config.get("tunnellio_token", "") or DEFAULT_TUNNELLIO_TOKEN
-    domain_id = config.get("tunnellio_domain_id", "")
-    mode = config.get("tunnellio_mode", "ephemeral")
-    # For persistent mode, always reuse the same hostname
-    hostname = config.get("tunnellio_hostname", "") if mode == "persistent" else ""
-    # Also save hostname from config if not already stored
-    if not hostname and mode == "persistent":
-        hostname = config.get("tunnellio_custom_hostname", "")
+    hostname = config.get("tunnellio_hostname", "")
 
-    # If we have a domain_id, check if it's alive
-    if domain_id:
-        domain = check_domain_status(token, domain_id)
-        if domain:
-            # Domain is alive — update public_url and SSH config from the
-            # domain record, in case they were empty or stale.
-            config["tunnellio_public_url"] = domain.get("publicUrl", config.get("tunnellio_public_url", ""))
-            config["tunnellio_mode"] = domain.get("mode", config.get("tunnellio_mode", "ephemeral"))
-            # SSH host/port/user are in the connection profile, not the domain
-            # record. If they're missing in config, fetch a fresh profile.
-            if not config.get("tunnellio_ssh_host"):
-                try:
-                    cp = _tunnellio_post("/domains/connection-profile", token, {
-                        "domainId": int(domain_id),
-                        "localHost": "127.0.0.1",
-                        "localPort": local_port,
-                    })
-                    if cp.get("ok"):
-                        profile = cp["data"]["connectionProfile"]
-                        config["tunnellio_ssh_host"] = profile.get("sshHost", "")
-                        config["tunnellio_ssh_port"] = str(profile.get("sshPort", ""))
-                        config["tunnellio_ssh_user"] = profile.get("sshUser", "")
-                        config["tunnellio_remote_hostname"] = profile.get("remoteHostname", "")
-                        if not config.get("tunnellio_public_url"):
-                            config["tunnellio_public_url"] = profile.get("publicUrl", "")
-                except Exception:
-                    pass
-            config["upstream_base_url"] = config.get("tunnellio_public_url", "").rstrip("/") + "/v1"
-            return config
+    # If no hostname configured, generate a random one
+    if not hostname:
+        import secrets as _secrets
+        hostname = "ide-gateway-" + _secrets.token_hex(4)
+        config["tunnellio_hostname"] = hostname
 
-    # Domain expired or doesn't exist — re-provision with same hostname (persistent)
-    # or new ephemeral session
-    fresh = provision_sandbox_domain(token=token, hostname=hostname, local_port=local_port)
-    config["tunnellio_domain_id"] = fresh["domain_id"]
-    config["tunnellio_key_id"] = fresh["key_id"]
-    config["tunnellio_public_url"] = fresh["public_url"]
-    config["tunnellio_ssh_host"] = fresh["ssh_host"]
-    config["tunnellio_ssh_port"] = fresh["ssh_port"]
-    config["tunnellio_ssh_user"] = fresh["ssh_user"]
-    config["tunnellio_remote_hostname"] = fresh["remote_hostname"]
-    config["tunnellio_private_key"] = fresh["private_key"]
-    config["tunnellio_private_key_content"] = fresh["private_key_content"]
-    config["tunnellio_mode"] = fresh["mode"]
-    config["tunnellio_hostname"] = hostname
-    config["upstream_base_url"] = fresh["public_url"].rstrip("/") + "/v1"
+    # Check availability (does NOT create the domain)
+    check = _tunnellio_post("/domains/check", token, {"hostname": hostname})
+    if check.get("ok") and not check.get("data", {}).get("available"):
+        # Hostname taken — try another
+        import secrets as _secrets
+        hostname = "ide-gateway-" + _secrets.token_hex(4)
+        config["tunnellio_hostname"] = hostname
+
+    # Compute predictable public_url for persistent hostname
+    public_url = f"https://{hostname}.tunnellio.site"
+    config["tunnellio_public_url"] = public_url
+    config["tunnellio_mode"] = "persistent"
+    config["upstream_base_url"] = public_url.rstrip("/") + "/v1"
     return config
 
 

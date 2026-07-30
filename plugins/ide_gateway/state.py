@@ -712,7 +712,17 @@ def _sandbox_prompt(base_url: str, model: str, token: str,
                      sandbox_script: str, workspace: str,
                      state: dict[str, Any] | None = None) -> str:
     tunnel_script = str(Path(__file__).resolve().parent / "sandbox_tunnel.py")
-    public_url = state.get("tunnellio_public_url", "") if state else ""
+    state_path = ""
+    public_url = ""
+    hostname = ""
+    if state:
+        state_path = str(_endpoint_state_path(state, state.get("name", "default")) if "name" in state else "")
+        # Fallback: compute path
+        if not state_path:
+            root = runtime_root({"workspacePath": workspace})
+            state_path = str(root / "endpoints" / f"{state.get('name', 'default')}.json")
+        public_url = state.get("tunnellio_public_url", "")
+        hostname = state.get("tunnellio_hostname", "")
 
     prompt = (
         "# Подними мост (sandbox mode)\n"
@@ -723,27 +733,26 @@ def _sandbox_prompt(base_url: str, model: str, token: str,
         "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
         "Сервер поднимется и будет обслуживать запросы через LLM egress.\n\n"
         "## Шаг 2: запусти туннель\n"
-        "Туннель сам сгенерирует SSH-ключ, зарегистрирует его в Tunnellio\n"
-        "и поднимет SSH reverse tunnel. Ничего передавать не нужно:\n"
-        "   run_program: python " + repr(tunnel_script) + " --local-port 8787\n"
-        "В выводе будет публичный URL вида https://xxx.tunnellio.site.\n"
-        "Если нужен постоянный домен:\n"
-        "   run_program: python " + repr(tunnel_script) + " --local-port 8787 --hostname my-sandbox\n\n"
     )
-    if public_url:
+    if state_path:
         prompt += (
-            "## Публичный URL (создан при установке, может быть истёкшим)\n"
-            f"   {public_url}\n"
-            "Если туннель из шага 2 вернул другой URL — используй новый.\n\n"
+            "Воркер уже зарезервировал имя домена. Туннель читает его из state,\n"
+            "генерирует SSH-ключ, создаёт домен и поднимает туннель:\n"
+            "   run_program: python " + repr(tunnel_script) + " --state " + repr(state_path) + "\n"
+        )
+    else:
+        prompt += (
+            "   run_program: python " + repr(tunnel_script) + " --local-port 8787\n"
         )
     prompt += (
+        "В выводе будет публичный URL.\n\n"
         "## Проверка\n"
         "   run_program: curl -s http://127.0.0.1:8787/health\n"
         "Должно быть: {\"status\": \"alive\", \"mode\": \"sandbox\"}\n\n"
         "## Подключение IDE\n"
     )
     if public_url:
-        prompt += f"   base_url: <URL из туннеля>/v1\n"
+        prompt += f"   base_url: {public_url.rstrip('/')}/v1\n"
     else:
         prompt += f"   base_url: {base_url}\n"
     prompt += (

@@ -1,21 +1,21 @@
-"""Tunnellio tunnel for sandbox — self-contained.
+"""Tunnellio tunnel for sandbox — creates a persistent domain with a
+hostname reserved by the worker.
 
-Generates SSH keypair IN THE SANDBOX, registers with Tunnellio API,
-creates session, and starts SSH reverse tunnel. No Windows file access,
-no cross-platform permission issues.
+The worker (on Windows) reserves the hostname and computes the public_url.
+The sandbox reads the hostname, generates an SSH key, creates the domain
+with that hostname, registers the key, and starts the SSH reverse tunnel.
 
 Usage:
-  python sandbox_tunnel.py --local-port 8787
+  python sandbox_tunnel.py --state <state.json>
   python sandbox_tunnel.py --local-port 8787 --hostname my-sandbox
-  python sandbox_tunnel.py --local-port 8787 --tunnellio-token tnl_xxx
+
+The state.json contains tunnellio_hostname (reserved by the worker).
+If --hostname is passed, it overrides the state value.
 
 Environment variables:
   TUNNELLIO_TOKEN  — Tunnellio API token (default: built-in free token)
-  TUNNELLIO_DOMAIN — persistent hostname (empty = ephemeral)
+  TUNNELLIO_DOMAIN — persistent hostname (overrides state)
   LOCAL_PORT       — local port (default: 8787)
-
-Output (JSON on stdout first):
-  {"ok": true, "public_url": "https://xxx.tunnellio.site"}
 """
 from __future__ import annotations
 
@@ -67,10 +67,12 @@ def _find_existing_key(token: str, fingerprint: str = "") -> str | None:
 
 def main() -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="Tunnellio sandbox tunnel (self-contained)")
+    parser = argparse.ArgumentParser(description="Tunnellio sandbox tunnel")
+    parser.add_argument("--state", default="", help="Path to endpoint state JSON (reads hostname)")
     parser.add_argument("--local-port", type=int, default=int(os.environ.get("LOCAL_PORT", "8787")))
     parser.add_argument("--tunnellio-token", default=os.environ.get("TUNNELLIO_TOKEN", ""))
-    parser.add_argument("--hostname", default=os.environ.get("TUNNELLIO_DOMAIN", ""))
+    parser.add_argument("--hostname", default=os.environ.get("TUNNELLIO_DOMAIN", ""),
+                        help="Override hostname (otherwise read from state)")
     parser.add_argument("--ssh-key", default="", help="Reuse existing key file")
     args = parser.parse_args()
 
@@ -78,7 +80,24 @@ def main() -> int:
     hostname = args.hostname.strip()
     local_port = args.local_port
 
-    # --- Step 1: Generate or reuse SSH keypair (in the sandbox!) ---
+    # Read hostname from state file if not passed explicitly
+    if not hostname and args.state:
+        try:
+            with open(args.state, "r", encoding="utf-8-sig") as f:
+                state = json.load(f)
+            hostname = str(state.get("tunnellio_hostname", "")).strip()
+            if not local_port and state.get("port"):
+                local_port = int(state["port"])
+        except Exception as exc:
+            print(f"Warning: could not read state file: {exc}", file=sys.stderr)
+
+    if not hostname:
+        # No hostname — use ephemeral (random, different each time)
+        print("No hostname configured — using ephemeral mode.", file=sys.stderr)
+    else:
+        print(f"Using hostname: {hostname}", file=sys.stderr)
+
+    # --- Step 1: Generate SSH keypair (in the sandbox!) ---
     key_dir = Path(tempfile.mkdtemp(prefix="tunnel_"))
     key_path = Path(args.ssh_key) if args.ssh_key else key_dir / "key"
 
@@ -88,7 +107,6 @@ def main() -> int:
             ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", "", "-q"],
             check=True, capture_output=True,
         )
-        # Set correct permissions (0600) — SSH refuses "too open" keys
         key_path.chmod(0o600)
 
     public_key = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
@@ -104,55 +122,42 @@ def main() -> int:
         if len(parts) >= 2:
             fingerprint = parts[1]
 
-    # --- Step 2: Find or register key with Tunnellio ---
+    # --- Step 2: Find or register key ---
     key_id = _find_existing_key(token, fingerprint)
     if not key_id:
         print("Registering SSH key with Tunnellio...", file=sys.stderr)
         resp = _api_post("/keys", token, {
-            "name": f"ide-gateway-{'ephemeral' if not hostname else hostname}",
+            "name": f"ide-gateway-{hostname or 'ephemeral'}",
             "publicKey": public_key,
-            "requestedLifetimeDays": 1 if not hostname else 365,
+            "requestedLifetimeDays": 365 if hostname else 1,
         })
         if not resp.get("ok"):
-            # Maybe 409 — try finding any active key
             if resp.get("error", {}).get("code") == "409":
                 key_id = _find_existing_key(token)
                 if not key_id:
-                    print(json.dumps({"ok": False, "error": "Key registration failed (409) and no existing key found"}))
+                    print(json.dumps({"ok": False, "error": "Key 409 and no existing key"}))
                     return 1
             else:
-                print(json.dumps({"ok": False, "error": f"Key registration failed: {resp.get('error', {})}"}))
+                print(json.dumps({"ok": False, "error": f"Key failed: {resp.get('error', {})}"}))
                 return 1
         else:
             key_id = str(resp["data"]["key"]["id"])
-
     print(f"Key ID: {key_id}", file=sys.stderr)
 
-    # --- Step 3: Create ephemeral session or persistent domain ---
-    if not hostname:
-        print("Creating ephemeral session...", file=sys.stderr)
-        resp = _api_post("/sessions/ephemeral", token, {
-            "keyId": int(key_id) if str(key_id).isdigit() else key_id,
-            "localHost": "127.0.0.1",
-            "localPort": local_port,
-            "note": "ide-gateway-sandbox",
-        })
-    else:
-        print(f"Creating persistent domain '{hostname}'...", file=sys.stderr)
-        # Check availability
+    key_id_val = int(key_id) if str(key_id).isdigit() else key_id
+
+    # --- Step 3: Create persistent domain (with hostname from worker) ---
+    if hostname:
+        # Check if domain already exists
         check = _api_post("/domains/check", token, {"hostname": hostname})
-        if check.get("ok") and not check.get("data", {}).get("available"):
-            # Domain already exists — try to get its connection profile
-            print(f"Domain '{hostname}' already exists, getting profile...", file=sys.stderr)
-            resp = _api_post("/domains/connection-profile", token, {
-                "domainId": 0,  # Will need domain ID — try listing
-                "localHost": "127.0.0.1",
-                "localPort": local_port,
-            })
-        else:
+        available = check.get("ok") and check.get("data", {}).get("available", False)
+
+        if available:
+            # Create persistent domain with this hostname
+            print(f"Creating persistent domain '{hostname}'...", file=sys.stderr)
             resp = _api_post("/domains", token, {
                 "hostname": hostname,
-                "keyId": int(key_id) if str(key_id).isdigit() else key_id,
+                "keyId": key_id_val,
                 "localPort": local_port,
                 "note": "ide-gateway-sandbox",
                 "requestedLifetimeDays": 365,
@@ -160,17 +165,41 @@ def main() -> int:
                 "stableUrlRequired": True,
                 "connectionMode": "direct",
             })
-            if resp.get("ok"):
-                domain_id = resp["data"]["domain"]["id"]
-                # Get connection profile
-                resp = _api_post("/domains/connection-profile", token, {
-                    "domainId": domain_id,
-                    "localHost": "127.0.0.1",
-                    "localPort": local_port,
-                })
+            if not resp.get("ok"):
+                print(json.dumps({"ok": False, "error": f"Domain creation failed: {resp.get('error', {})}"}))
+                return 1
+            domain_id = resp["data"]["domain"]["id"]
+        else:
+            # Domain already exists — find it
+            print(f"Domain '{hostname}' already exists, finding it...", file=sys.stderr)
+            domains_resp = _api_post("/domains/list", token, {})
+            domain_id = None
+            for d in domains_resp.get("data", {}).get("domains", []):
+                if d.get("hostname") == hostname:
+                    domain_id = d.get("id")
+                    break
+            if not domain_id:
+                print(json.dumps({"ok": False, "error": f"Domain '{hostname}' not found"}))
+                return 1
+
+        # Get connection profile
+        resp = _api_post("/domains/connection-profile", token, {
+            "domainId": domain_id,
+            "localHost": "127.0.0.1",
+            "localPort": local_port,
+        })
+    else:
+        # Ephemeral
+        print("Creating ephemeral session...", file=sys.stderr)
+        resp = _api_post("/sessions/ephemeral", token, {
+            "keyId": key_id_val,
+            "localHost": "127.0.0.1",
+            "localPort": local_port,
+            "note": "ide-gateway-sandbox",
+        })
 
     if not resp.get("ok"):
-        print(json.dumps({"ok": False, "error": f"Session/domain creation failed: {resp.get('error', {})}"}))
+        print(json.dumps({"ok": False, "error": f"Session/domain failed: {resp.get('error', {})}"}))
         return 1
 
     data = resp["data"]
@@ -185,8 +214,7 @@ def main() -> int:
     remote_hostname = profile.get("remoteHostname", "")
 
     if not public_url or not remote_hostname:
-        print(json.dumps({"ok": False, "error": "Missing public_url or remote_hostname",
-                          "data": data}))
+        print(json.dumps({"ok": False, "error": "Missing public_url or remote_hostname", "data": data}))
         return 1
 
     # --- Step 4: Start SSH reverse tunnel ---
@@ -203,7 +231,6 @@ def main() -> int:
         f"{ssh_user}@{ssh_host}",
     ]
 
-    # Print JSON result for the model to read
     print(json.dumps({
         "ok": True,
         "public_url": public_url,
@@ -211,7 +238,7 @@ def main() -> int:
         "ssh_port": ssh_port,
         "remote_hostname": remote_hostname,
         "key_path": str(key_path),
-        "mode": "ephemeral" if not hostname else "persistent",
+        "mode": "persistent" if hostname else "ephemeral",
     }))
 
     print(f"\nSSH tunnel: {' '.join(ssh_cmd)}", file=sys.stderr)
