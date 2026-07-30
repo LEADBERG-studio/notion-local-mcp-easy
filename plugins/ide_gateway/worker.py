@@ -224,27 +224,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, self._health())
             return
-        # Sandbox mode: proxy GET requests to the sandbox_server
+        # Sandbox mode: proxy GET requests to the sandbox_server, but fall back
+        # to local handlers if the sandbox is not up yet (so IDE can connect
+        # before the sandbox starts).
         if str(STATE.get("gateway_mode", "bridge")).lower() == "sandbox":
             sandbox_url = str(STATE.get("upstream_base_url", "") or "").rstrip("/")
             if sandbox_url:
                 import urllib.request as _urlreq
-                # upstream_base_url already includes /v1, strip it from path
-                # to avoid double /v1/v1/...
                 proxied_path = path
                 if proxied_path.startswith("/v1/"):
-                    proxied_path = proxied_path[3:]  # remove leading /v1 -> /models etc
+                    proxied_path = proxied_path[3:]
                 target = sandbox_url + proxied_path
                 try:
                     req = _urlreq.Request(target)
-                    with _urlreq.urlopen(req, timeout=10) as resp:
+                    with _urlreq.urlopen(req, timeout=5) as resp:
                         raw = resp.read()
                         ctype = resp.headers.get("Content-Type", "application/json")
                         self._send_bytes(resp.status, ctype, raw)
                         return
-                except Exception as exc:
-                    self._send_json(502, _openai_error(f"Sandbox proxy error: {exc}", "sandbox_proxy_error", status=502))
-                    return
+                except Exception:
+                    pass  # Sandbox not up yet — fall through to local handlers
         if path in ("/v1/models", "/models"):
             if not self._authorized():
                 self._send_json(401, _openai_error("Unauthorized", "unauthorized", status=401))
