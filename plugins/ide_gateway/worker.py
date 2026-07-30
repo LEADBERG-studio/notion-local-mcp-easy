@@ -229,7 +229,12 @@ class Handler(BaseHTTPRequestHandler):
             sandbox_url = str(STATE.get("upstream_base_url", "") or "").rstrip("/")
             if sandbox_url:
                 import urllib.request as _urlreq
-                target = sandbox_url + path
+                # upstream_base_url already includes /v1, strip it from path
+                # to avoid double /v1/v1/...
+                proxied_path = path
+                if proxied_path.startswith("/v1/"):
+                    proxied_path = proxied_path[3:]  # remove leading /v1 -> /models etc
+                target = sandbox_url + proxied_path
                 try:
                     req = _urlreq.Request(target)
                     with _urlreq.urlopen(req, timeout=10) as resp:
@@ -477,11 +482,10 @@ class Handler(BaseHTTPRequestHandler):
         if gw_mode == "sandbox":
             sandbox_url = str(STATE.get("upstream_base_url", "") or "").rstrip("/")
             if not sandbox_url:
-                self._send_json(502, _openai_error("Sandbox upstream URL not configured. Set upstream_base_url in plugin config or call ide_gateway_start with the sandbox tunnel URL.", "sandbox_not_configured", status=502))
+                self._send_json(502, _openai_error("Sandbox upstream URL not configured.", "sandbox_not_configured", status=502))
                 return
-            # Forward the request as-is to the sandbox_server
-            import urllib.request
-            target = sandbox_url + "/v1/chat/completions"
+            # upstream_base_url already includes /v1, so just append the path
+            target = sandbox_url + "/chat/completions"
             try:
                 req = urllib.request.Request(target, data=body, method="POST",
                                              headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
