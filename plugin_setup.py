@@ -204,48 +204,20 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
 
     if gw_mode == "sandbox":
         print("Sandbox mode (по умолчанию): LLM-шлюз в sandbox + Tunnellio туннель.")
-        print("При подключении плагина создаётся домен Tunnellio.")
+        print("Туннель и SSH-ключ создаются в sandbox при запуске модели.")
         use_own_token = prompt_bool("Использовать свой Tunnellio API token (платный тариф)?", False)
         if use_own_token:
             tnl_token = prompt_text("Tunnellio API token", "")
+            config["tunnellio_token"] = tnl_token
             domain_type = prompt_choice("Тип домена", ["ephemeral", "custom"], "ephemeral")
-            hostname = ""
             if domain_type == "custom":
                 hostname = prompt_text("Имя постоянного домена (e.g. my-sandbox)", "")
-                config["tunnellio_custom_hostname"] = hostname
+                config["tunnellio_hostname"] = hostname
         else:
-            tnl_token = ""  # будет использовать зашитый дефолтный
-            hostname = ""  # ephemeral
             print("Будет создан временный домен (жизнь 1 сутки, бесплатный).")
-        # Provision domain via API
-        try:
-            from plugins.ide_gateway.backend import provision_sandbox_domain
-            print("Создаю домен через Tunnellio API...")
-            domain = provision_sandbox_domain(
-                token=tnl_token, hostname=hostname, local_port=config.get("default_port", 8787))
-            config["tunnellio_token"] = tnl_token
-            config["tunnellio_domain_id"] = domain["domain_id"]
-            config["tunnellio_key_id"] = domain["key_id"]
-            config["tunnellio_public_url"] = domain["public_url"]
-            config["tunnellio_ssh_host"] = domain["ssh_host"]
-            config["tunnellio_ssh_port"] = domain["ssh_port"]
-            config["tunnellio_ssh_user"] = domain["ssh_user"]
-            config["tunnellio_remote_hostname"] = domain["remote_hostname"]
-            config["tunnellio_private_key"] = domain["private_key"]
-            config["tunnellio_private_key_content"] = domain["private_key_content"]
-            config["tunnellio_mode"] = domain["mode"]
-            config["tunnellio_hostname"] = hostname
-            print(f"Домен создан: {domain['public_url']}")
-            print(f"Режим: {domain['mode']}")
-            config["upstream_base_url"] = domain["public_url"].rstrip("/") + "/v1"
-            config["upstream_api_key"] = ""
-            config["upstream_model"] = ""
-        except Exception as exc:
-            print(f"Ошибка создания домена: {exc}")
-            print("Продолжаю без туннеля — модель создаст его вручную.")
-            config["upstream_base_url"] = ""
-            config["upstream_api_key"] = ""
-            config["upstream_model"] = ""
+        config["upstream_base_url"] = ""
+        config["upstream_api_key"] = ""
+        config["upstream_model"] = ""
     elif gw_mode == "external":
         print("External mode: the gateway worker calls an OpenAI-compatible")
         print("upstream provider directly (Ollama, OpenAI, etc.).")
