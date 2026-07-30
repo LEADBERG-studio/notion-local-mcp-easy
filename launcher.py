@@ -2370,12 +2370,23 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     if public_url:
         print(f" Public URL: {public_url}")
     print(f" Connection info: {CONNECTION_FILE}")
-    # IDE Gateway info
+    # IDE Gateway info — read from endpoint state if available
     gw_key = str(config.get("ide_gateway_api_key", "")).strip()
     gw_mode = str(config.get("ide_gateway_mode", "sandbox")).strip()
     gw_port = int(config.get("ide_gateway_port", 8787) or 8787)
     gw_host = str(config.get("ide_gateway_host", "127.0.0.1")).strip()
-    gw_url = str(config.get("ide_gateway_public_url", "")).strip()
+    # Try to read public_url from endpoint state
+    gw_url = ""
+    try:
+        import json as _json
+        ep_state_path = Path(config["workspace"]) / "temp" / "ide_gateway_runtime" / "endpoints" / "default.json"
+        if ep_state_path.is_file():
+            ep_state = _json.loads(ep_state_path.read_text(encoding="utf-8"))
+            gw_url = str(ep_state.get("tunnellio_public_url", "")).strip()
+            if not gw_key:
+                gw_key = str(ep_state.get("token", "")).strip()
+    except Exception:
+        pass
     if gw_key:
         print("---")
         print(f" IDE Gateway: {gw_mode} mode")
@@ -2390,21 +2401,36 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
 
 
 def ensure_ide_gateway_key(config: dict) -> dict:
-    """Ensure ide_gateway_api_key exists in the global config.json.
-    If missing, generate one and save. If present, reuse."""
-    gw_key = str(config.get("ide_gateway_api_key", "")).strip()
-    if gw_key:
-        return config
-    # Check global config.json
+    """Ensure ide_gateway_api_key and mode exist in the global config.json."""
     existing = load_json(CONFIG_FILE)
+    changed = False
+
     gw_key = str(existing.get("ide_gateway_api_key", "")).strip()
     if not gw_key:
         import secrets as _secrets
         gw_key = "ideg_" + _secrets.token_urlsafe(32)
         existing["ide_gateway_api_key"] = gw_key
-        save_json(CONFIG_FILE, existing)
+        changed = True
         print(f"IDE Gateway API key generated: {gw_key[:20]}... (stored in global config)")
     config["ide_gateway_api_key"] = gw_key
+
+    # Also store mode/host/port in global config if missing
+    if not existing.get("ide_gateway_mode"):
+        existing["ide_gateway_mode"] = "sandbox"
+        changed = True
+    if not existing.get("ide_gateway_host"):
+        existing["ide_gateway_host"] = "127.0.0.1"
+        changed = True
+    if not existing.get("ide_gateway_port"):
+        existing["ide_gateway_port"] = 8787
+        changed = True
+
+    config["ide_gateway_mode"] = existing["ide_gateway_mode"]
+    config["ide_gateway_host"] = existing["ide_gateway_host"]
+    config["ide_gateway_port"] = existing["ide_gateway_port"]
+
+    if changed:
+        save_json(CONFIG_FILE, existing)
     return config
 
 

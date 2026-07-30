@@ -338,6 +338,20 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
     # Idempotent same-endpoint check MUST happen before port-free check.
     existing = _load_endpoint_state(context, name)
     if existing and existing.get("status") == "running" and _is_process_alive(existing.get("pid")):
+        # Ensure the token in state matches the global key (in case it was
+        # generated randomly on a previous run before global config existed).
+        global_key = ""
+        try:
+            global_cfg_path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "NotionMcpEasy" / "config.json"
+            if global_cfg_path.is_file():
+                import json as _json
+                global_cfg = _json.loads(global_cfg_path.read_text(encoding="utf-8"))
+                global_key = str(global_cfg.get("ide_gateway_api_key", "")).strip()
+        except Exception:
+            pass
+        if global_key and existing.get("token", "") != global_key:
+            existing["token"] = global_key
+            _save_endpoint_state(context, existing)
         return {
             "ok": True, "name": name, "status": "already_running",
             "base_url": existing["base_url"], "api_key": existing["token"],
