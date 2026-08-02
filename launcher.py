@@ -44,6 +44,20 @@ from urllib.parse import urlsplit
 
 
 from core import DEFAULT_ALLOWED_COMMANDS
+
+
+def configure_stdio_for_unicode() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(errors="replace")
+            except Exception:
+                pass
+
+
+configure_stdio_for_unicode()
 from profiles import (
 
     access_mode_from_allow_commands,

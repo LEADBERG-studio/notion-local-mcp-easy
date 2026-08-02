@@ -38,15 +38,22 @@ DEFAULT_ALLOWED_COMMANDS = {
 
 
 def safe_path(base_dir: Path, value: str | os.PathLike[str]) -> Path:
-    """Resolve a user path and guarantee that it stays inside base_dir."""
-    base = base_dir.resolve()
+    """Return a path inside base_dir while blocking symlink/parent escapes.
+
+    On Windows CI, tempfile may expose 8.3 short paths while Path.resolve()
+    expands them to long paths. Keep the caller-facing spelling stable, but use
+    resolved paths for the security check.
+    """
+    base_display = Path(base_dir)
+    base_resolved = base_display.resolve()
     raw = Path(value).expanduser()
-    candidate = raw.resolve() if raw.is_absolute() else (base / raw).resolve()
+    candidate_display = raw if raw.is_absolute() else (base_display / raw)
+    candidate_resolved = candidate_display.resolve()
     try:
-        candidate.relative_to(base)
+        candidate_resolved.relative_to(base_resolved)
     except ValueError as exc:
-        raise ValueError(f"Access denied: path is outside {base}") from exc
-    return candidate
+        raise ValueError(f"Access denied: path is outside {base_resolved}") from exc
+    return candidate_display
 
 
 def normalized_program_name(program: str) -> str:

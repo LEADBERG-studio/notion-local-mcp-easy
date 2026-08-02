@@ -25,3 +25,9 @@
 ## CI hotfix
 
 - Added `.gitattributes` with `VERSION text eol=crlf`, so GitHub Actions on Linux checks out `VERSION` with CRLF and the byte-exact version test passes.
+
+## Windows CI hotfix
+
+- Launcher and plugin setup now configure stdout/stderr with `errors=replace`, so cp1252 Windows runners do not crash on Cyrillic messages.
+- `safe_path()` keeps caller-facing 8.3/short path spelling while using resolved paths for security checks.
+- Plugin local config writes no longer force-resolve plugin paths, avoiding short-vs-long path mismatches in Windows CI.

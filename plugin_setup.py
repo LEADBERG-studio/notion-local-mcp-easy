@@ -15,6 +15,20 @@ APP_NAME = "NotionMcpEasy"
 ALLOWED_SCOPES = {"current", "global"}
 ALLOWED_MODES = {"read_only", "full_access"}
 
+
+def configure_stdio_for_unicode() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(errors="replace")
+            except Exception:
+                pass
+
+
+configure_stdio_for_unicode()
+
 def now_iso() -> str:
     from datetime import datetime
     return datetime.now().isoformat(timespec="seconds")
@@ -328,7 +342,7 @@ def validate_config(plugin_dir: Path, manifest: dict[str, Any], config: dict[str
     return config
 
 def write_local_plugin_config(plugin_dir: Path, scope: str, requested_mode: str, config: dict[str, Any], profile_storage_path: Path | None = None) -> Path:
-    plugin_dir = plugin_dir.resolve()
+    plugin_dir = Path(plugin_dir)
     manifest = load_manifest(plugin_dir)
     plugin_id = str(manifest["id"])
     if scope not in ALLOWED_SCOPES:
@@ -374,7 +388,7 @@ def write_local_plugin_config(plugin_dir: Path, scope: str, requested_mode: str,
     return path
 
 def remove_local_plugin_config(plugin_dir: Path, scope: str, profile_storage_path: Path | None = None) -> Path:
-    plugin_dir = plugin_dir.resolve()
+    plugin_dir = Path(plugin_dir)
     load_manifest(plugin_dir)
     profile_id = ""
     if scope == "current":
@@ -384,7 +398,7 @@ def remove_local_plugin_config(plugin_dir: Path, scope: str, profile_storage_pat
     return path
 
 def print_status(plugin_dir: Path, profile_storage_path: Path | None = None) -> None:
-    plugin_dir = plugin_dir.resolve()
+    plugin_dir = Path(plugin_dir)
     manifest = load_manifest(plugin_dir)
     print(f"Plugin: {manifest['id']} ({manifest.get('display_name', manifest['id'])})")
     print(f"Plugin dir: {plugin_dir}")

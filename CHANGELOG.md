@@ -1,5 +1,6 @@
 ## 2.2.0 - 2026-08-02
 
+- CI hotfix: Windows cp1252 stdout no longer crashes on Cyrillic setup messages; safe path tests keep caller path spelling while still checking resolved containment.
 - CI hotfix: added `.gitattributes` rule `VERSION text eol=crlf` so Linux checkout preserves byte-exact VERSION CRLF invariant.
 - Hotfix: launcher self-heals shared config missing `workspace`, `token`, `auth_mode`, or `tunnel_backend` instead of crashing old/new builds.
 - Hotfix: built-in tunnel startup now cleans stale runtime and retries when SSH relay reports `remote port forwarding failed for listen port 80`.
