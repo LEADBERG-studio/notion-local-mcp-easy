@@ -101,6 +101,20 @@ OAUTH_OWNER_GRANT_SCOPES = [
     for scope in os.environ.get("MCP_OAUTH_OWNER_GRANT_SCOPES", "").split()
     if scope in ALL_SCOPES
 ]
+
+
+def display_path(path: Path) -> Path | str:
+    """Return a BASE_DIR-relative display path robust to Windows 8.3 aliases."""
+    path = Path(path)
+    try:
+        return path.relative_to(BASE_DIR)
+    except ValueError:
+        pass
+    try:
+        return path.resolve().relative_to(BASE_DIR.resolve())
+    except ValueError:
+        return path
+
 ALLOW_COMMANDS = os.environ.get("MCP_ALLOW_COMMANDS", "0").lower() in {"1", "true", "yes"}
 ALLOWED_COMMANDS = {
     item.strip().lower()
@@ -320,7 +334,7 @@ def _ensure_writable(path: Path) -> None:
             "Use setup_git_context(...) / configure_repo_context(...) instead."
         )
     try:
-        parts = path.relative_to(BASE_DIR).parts
+        parts = Path(display_path(path)).parts
     except ValueError:
         parts = path.parts
     if ".git" in parts:
@@ -1067,7 +1081,7 @@ def _discover_workspace_git_roots(base_dir: Path, limit: int = 25) -> list[Path]
 
 def _format_workspace_repo_line(repo_root: Path) -> str:
     state, config, detected, _ = _repo_context_state(repo_root)
-    rel = "." if repo_root == BASE_DIR else str(repo_root.relative_to(BASE_DIR))
+    rel = "." if repo_root == BASE_DIR else str(display_path(repo_root))
     current_branch = str(detected.get("branch", "")).strip() or "(detached or unknown)"
     target_branch = _target_commit_branch(config) if config else ""
     parts = [_repo_state_label(state), f"current {current_branch}"]
@@ -1195,7 +1209,7 @@ def _setup_git_context_sync(
             last_detected_branch=str(detected_before["branch"]),
         )
         summary = _repo_context_summary(cwd)
-        return f"Saved disabled git policy to {config_path.relative_to(BASE_DIR)}\n\n{summary}"
+        return f"Saved disabled git policy to {display_path(config_path)}\n\n{summary}"
 
     if mode == "bind_existing_repo" and not detected_before["repo_present"]:
         raise ValueError(
@@ -1296,7 +1310,7 @@ def _setup_git_context_sync(
     )
     summary = _repo_context_summary(work_root)
     return (
-        f"Saved repo context to {config_path.relative_to(BASE_DIR)}\n"
+        f"Saved repo context to {display_path(config_path)}\n"
         f"mode: {mode}\n"
         f"branch policy: {branch_mode}\n"
         f"actions: {', '.join(actions)}\n\n"
@@ -2133,7 +2147,7 @@ async def configure_repo_context(
         last_detected_branch=str(detected["branch"] or default_branch),
     )
     summary = await asyncio.to_thread(_repo_context_summary, workdir)
-    return f"Saved repo context to {config_path.relative_to(BASE_DIR)}\n\n{summary}"
+    return f"Saved repo context to {display_path(config_path)}\n\n{summary}"
 
 
 @tool(scope=SCOPE_GIT)
@@ -2232,7 +2246,7 @@ async def file_info(path: str) -> str:
     kind = "directory" if item.is_dir() else "file"
     modified = dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
     return (
-        f"path: {item.relative_to(BASE_DIR)}\ntype: {kind}\n"
+        f"path: {display_path(item)}\ntype: {kind}\n"
         f"size: {stat.st_size:,}\nmodified: {modified}"
     )
 
@@ -2250,7 +2264,7 @@ async def read_file(path: str, offset: int = 0, limit: int = 0, char_offset: int
         _text_file(item)
         with item.open("rb") as handle:
             if _is_binary_bytes(handle.read(8192)):
-                label = path if is_temp_file else str(item.relative_to(BASE_DIR))
+                label = path if is_temp_file else str(display_path(item))
                 return f"(binary file, not shown as text): {label} — {item.stat().st_size:,} bytes"
         text_content = _read_text_with_replace(item)
         rendered, is_complete = _format_chunk_text(
@@ -2285,7 +2299,7 @@ async def write_file(path: str, content: str, overwrite: bool = True) -> str:
         _atomic_write_text(item, content)
 
     await asyncio.to_thread(_write)
-    return f"Wrote {len(content):,} characters to {item.relative_to(BASE_DIR)}"
+    return f"Wrote {len(content):,} characters to {display_path(item)}"
 
 
 @tool(scope=SCOPE_FILES_WRITE)
@@ -2306,7 +2320,7 @@ async def append_file(path: str, content: str) -> str:
             handle.write(content)
 
     await asyncio.to_thread(_append)
-    return f"Appended {len(content):,} characters to {item.relative_to(BASE_DIR)}"
+    return f"Appended {len(content):,} characters to {display_path(item)}"
 
 
 @tool(scope=SCOPE_FILES_WRITE)
@@ -2324,7 +2338,7 @@ async def edit_file(
     def _edit() -> int:
         data = item.read_bytes()
         if _is_binary_bytes(data):
-            raise ValueError(f"Refusing to edit binary file: {item.relative_to(BASE_DIR)}")
+            raise ValueError(f"Refusing to edit binary file: {display_path(item)}")
         text_content = data.decode("utf-8", errors="replace")
         found = text_content.count(old_string)
         if found == 0:
@@ -2345,7 +2359,7 @@ async def edit_file(
         return count
 
     count = await asyncio.to_thread(_edit)
-    return f"Replaced {count} occurrence(s) in {item.relative_to(BASE_DIR)}"
+    return f"Replaced {count} occurrence(s) in {display_path(item)}"
 
 
 @tool(scope=SCOPE_FILES_WRITE)
@@ -2354,7 +2368,7 @@ async def create_dir(path: str) -> str:
     item = _path(path)
     _ensure_writable(item)
     await asyncio.to_thread(item.mkdir, parents=True, exist_ok=True)
-    return f"Directory ready: {item.relative_to(BASE_DIR)}"
+    return f"Directory ready: {display_path(item)}"
 
 
 @tool(scope=SCOPE_FILES_WRITE)
@@ -2368,7 +2382,7 @@ async def delete_file(path: str) -> str:
         await asyncio.to_thread(item.rmdir)
     else:
         await asyncio.to_thread(item.unlink)
-    return f"Deleted: {item.relative_to(BASE_DIR)}"
+    return f"Deleted: {display_path(item)}"
 
 
 @tool(scope=SCOPE_FILES_WRITE)
@@ -2385,7 +2399,7 @@ async def copy_file(src: str, dst: str, overwrite: bool = False) -> str:
         raise ValueError(f"Destination exists: {dst}")
     target.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(shutil.copy2, source, target)
-    return f"Copied {source.relative_to(BASE_DIR)} -> {target.relative_to(BASE_DIR)}"
+    return f"Copied {display_path(source)} -> {display_path(target)}"
 
 
 @tool(scope=SCOPE_FILES_WRITE)
@@ -2403,7 +2417,7 @@ async def move_file(src: str, dst: str, overwrite: bool = False) -> str:
         raise ValueError(f"Destination exists: {dst}")
     target.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(shutil.move, str(source), str(target))
-    return f"Moved {source.relative_to(BASE_DIR)} -> {target.relative_to(BASE_DIR)}"
+    return f"Moved {display_path(source)} -> {display_path(target)}"
 
 
 @tool(scope=SCOPE_FILES_READ)
@@ -2817,7 +2831,7 @@ async def start_command(
         job_id=job_id,
         program=program,
         args=args_list,
-        cwd=str(workdir.relative_to(BASE_DIR)) if workdir != BASE_DIR else ".",
+        cwd=str(display_path(workdir)) if workdir != BASE_DIR else ".",
         timeout=seconds,
         command=_command_summary(program, args_list),
         stdout_path=stdout_capture,

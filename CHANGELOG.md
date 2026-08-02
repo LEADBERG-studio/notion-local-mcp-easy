@@ -1,9 +1,10 @@
 ## 2.2.0 - 2026-08-02
 
+- CI hotfix: repo-context status messages now use robust display paths, avoiding Windows 8.3 short-path `relative_to()` crashes.
 - CI hotfix: Windows cp1252 stdout no longer crashes on Cyrillic setup messages; safe path tests keep caller path spelling while still checking resolved containment.
 - CI hotfix: added `.gitattributes` rule `VERSION text eol=crlf` so Linux checkout preserves byte-exact VERSION CRLF invariant.
-- Hotfix: launcher self-heals shared config missing `workspace`, `token`, `auth_mode`, or `tunnel_backend` instead of crashing old/new builds.
-- Hotfix: built-in tunnel startup now cleans stale runtime and retries when SSH relay reports `remote port forwarding failed for listen port 80`.
+- Hotfix: launcher self-heals shared config missing `workspace`, `token`, or `auth_mode`, but never guesses/rewrites `tunnel_backend`.
+- Hotfix: Serveo hostname is normalized from accidental full URLs to the reserved label, `.pub` ssh keys are rejected/auto-corrected to private keys, and retry is limited to real relay port-busy errors.
 - Split the queue/poll IDE mode out of `ide_gateway` into a standalone `ide_bridge` plugin.
 - `ide_gateway` is now focused on sandbox/external direct serving; sandbox remains the keyless Tunnellio TCP bridge path.
 - Added separate IDE Bridge defaults: port `8797`, model alias `ide-bridge`, token prefix `ideb_`, runtime `temp/ide_bridge_runtime`, and `ide_bridge_*` tools.

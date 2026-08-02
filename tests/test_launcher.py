@@ -118,6 +118,10 @@ class LauncherTests(unittest.TestCase):
     def test_start_and_resolve_tunnel_retries_when_relay_port_is_busy(self):
         class Proc:
             pid = 12345
+            def poll(self):
+                return 255
+            def terminate(self):
+                pass
 
         calls = {"count": 0}
 
@@ -142,6 +146,35 @@ class LauncherTests(unittest.TestCase):
 
         self.assertEqual(url, "https://retry.serveousercontent.com")
         self.assertEqual(calls["count"], 2)
+
+    def test_heal_legacy_config_does_not_guess_tunnel_backend(self):
+        healed = launcher.heal_legacy_config({"workspace": "x", "token": "t", "auth_mode": "legacy"}, persist=False)
+        self.assertNotIn("tunnel_backend", healed)
+
+    def test_normalize_serveo_hostname_accepts_full_url_but_returns_label(self):
+        self.assertEqual(
+            launcher.normalize_serveo_hostname("https://my-notion-mcp.serveousercontent.com/mcp"),
+            "my-notion-mcp",
+        )
+
+    def test_start_and_resolve_tunnel_does_not_retry_configuration_errors(self):
+        class Proc:
+            pid = 12345
+            def poll(self):
+                return 3
+            def terminate(self):
+                pass
+
+        with (
+            mock.patch.object(launcher, "start_tunnel", return_value=(Proc(), queue.Queue())),
+            mock.patch.object(launcher, "resolve_tunnel_url", side_effect=RuntimeError("API token is required")),
+            mock.patch.object(launcher, "tunnel_log_suggests_remote_port_busy", return_value=False),
+            mock.patch.object(launcher, "stop_previous_tunnel_runtime"),
+            mock.patch.object(launcher.time, "sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "API token is required"):
+                launcher.start_and_resolve_tunnel({"tunnel_backend": "tunnellio"}, attempts=4)
+        sleep.assert_not_called()
 
     def test_setup_saves_first_workspace_to_first_slot(self):
 

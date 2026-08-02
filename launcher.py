@@ -364,15 +364,16 @@ def config_public_url(config: dict) -> str:
     custom = custom_public_url(config)
     if custom:
         return custom
-    hostname = str(config.get("serveo_hostname", "")).strip().lower()
     backend = tunnel_backend(config)
     if backend == "sish":
+        hostname = str(config.get("serveo_hostname", "")).strip().lower()
         domain = str(config.get("tunnel_domain", "")).strip().lower().strip(".")
         if hostname and domain:
             return f"https://{hostname}.{domain}"
         return ""
     if backend == "custom_proxy":
         return ""
+    hostname = normalize_serveo_hostname(config.get("serveo_hostname", ""))
     if hostname:
         return f"https://{hostname}.serveousercontent.com"
     return ""
@@ -439,9 +440,8 @@ def heal_legacy_config(config: dict, *, persist: bool = True) -> dict:
     if config.get("auth_mode") != auth_mode:
         config["auth_mode"] = auth_mode
         changed = True
-    if not str(config.get("tunnel_backend", "")).strip():
-        config["tunnel_backend"] = default_tunnel_backend(config)
-        changed = True
+    # Do not infer tunnel_backend here. Guessing Tunnellio because tunnellio.exe
+    # exists rewrites shared config and breaks existing Serveo installations.
     if changed and persist:
         save_json(CONFIG_FILE, config)
         print(f"Config recovered missing legacy fields in: {CONFIG_FILE}")
@@ -478,13 +478,20 @@ def start_and_resolve_tunnel(config: dict, *, attempts: int = 4) -> tuple[subpro
             return tunnel, lines, url
         except Exception as exc:
             last_error = exc
-            with contextlib.suppress(Exception):
-                stop_pid(tunnel.pid, tunnel_process_match(config))
+            if tunnel.poll() is None:
+                with contextlib.suppress(Exception):
+                    tunnel.terminate()
             if tunnel_log_suggests_remote_port_busy():
+                if attempt >= attempts:
+                    raise RuntimeError(
+                        "Remote tunnel port is still busy on the relay. Wait until it is released "
+                        "or choose another tunnel mode/hostname."
+                    ) from exc
                 print("Tunnel remote port is still busy on the relay; cleaning up and retrying.")
                 continue
-            if attempt >= attempts:
-                raise
+            # Non-transient configuration errors (bad Serveo hostname, missing
+            # Tunnellio token, bad key path, etc.) must not be retried.
+            raise
     assert last_error is not None
     raise last_error
 
@@ -1900,6 +1907,66 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
 
 
 
+def normalize_serveo_hostname(value: object) -> str:
+
+    raw = str(value or "").strip().lower().strip()
+
+    if not raw:
+
+        return ""
+
+    if "://" in raw:
+
+        parsed = urlsplit(raw)
+
+        raw = parsed.hostname or ""
+
+    raw = raw.split("/", 1)[0].split(":", 1)[0].strip().strip(".")
+
+    suffix = ".serveousercontent.com"
+
+    if raw.endswith(suffix):
+
+        raw = raw[: -len(suffix)]
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", raw or ""):
+
+        raise RuntimeError(
+
+            "Serveo hostname must be only the reserved label, for example 'my-notion-mcp', "
+
+            "not a full URL."
+
+        )
+
+    return raw
+
+
+def serveo_private_key_path(config: dict) -> Path:
+
+    raw = str(config.get("ssh_key", "")).strip()
+
+    key_path = Path(raw).expanduser().resolve()
+
+    if key_path.suffix == ".pub":
+
+        private_candidate = key_path.with_suffix("")
+
+        if private_candidate.is_file():
+
+            key_path = private_candidate
+
+        else:
+
+            raise RuntimeError(
+
+                f"Serveo ssh_key must point to the private key, not the public .pub file: {key_path}"
+
+            )
+
+    return key_path
+
+
 def build_serveo_tunnel_command(config: dict) -> list[str]:
 
     if not shutil.which("ssh"):
@@ -1912,7 +1979,7 @@ def build_serveo_tunnel_command(config: dict) -> list[str]:
 
     port = int(config.get("port", 8765))
 
-    hostname = str(config.get("serveo_hostname", "")).strip().lower()
+    hostname = normalize_serveo_hostname(config.get("serveo_hostname", ""))
 
     command = [
 
@@ -1940,7 +2007,7 @@ def build_serveo_tunnel_command(config: dict) -> list[str]:
 
     if hostname:
 
-        key_path = Path(str(config.get("ssh_key", ""))).expanduser().resolve()
+        key_path = serveo_private_key_path(config)
 
         if not key_path.is_file():
 
