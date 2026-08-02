@@ -54,3 +54,8 @@
 - New versions store per-mode connection memory in `connection-profiles.json`, separate from legacy `config.json` for old-version compatibility.
 - Setup asks whether to keep the configured connection mode, then whether to reuse saved settings for that mode.
 - Workflow profiles now record the selected `connectionType`.
+
+## Startup health hardening
+
+- If a tunnel announces a public URL but `/health` is not reachable yet, launcher now publishes the connection and keeps the tunnel running instead of exiting.
+- Fatal errors remain limited to server/tunnel process death or invalid configuration.

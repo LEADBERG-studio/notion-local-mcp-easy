@@ -2793,11 +2793,13 @@ def run() -> int:
                 )
         else:
             tunnel, lines, current_url = start_and_resolve_tunnel(config)
-            if not public_health_ok(current_url, config["token"], process=tunnel):
-                raise tunnel_error(
-                    f"Public health check failed: {current_url}/health did not answer"
-                )
+            healthy = public_health_ok(current_url, config["token"], process=tunnel)
             publish_connection(config, current_url, server.pid, tunnel.pid)
+            if not healthy:
+                print(
+                    f"WARNING: {current_url}/health is not answering yet; "
+                    "the tunnel is up, so keeping it running. Public health will be retried after reconnects."
+                )
 
         while True:
             if server.poll() is not None:
