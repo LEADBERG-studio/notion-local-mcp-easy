@@ -117,9 +117,9 @@ def _config() -> dict[str, Any]:
         "request_timeout_seconds": int(os.environ.get("IDE_GATEWAY_TIMEOUT", "300")),
         "extra_models": _first_env("IDE_GATEWAY_EXTRA_MODELS", "OPENAI_MODELS", "MODELS", "AVAILABLE_MODELS", "ACCIO_MODELS", "SANDBOX_MODELS", "ANTHROPIC_MODELS"),
     }
-    # Override with state file values if present. sandbox_bootstrap.py writes the
-    # detected internal egress into state first, so daemonized children keep the
-    # right endpoint/key even if the parent tool environment disappears.
+    # Override with persisted state when present. The sandbox installer stores
+    # internal egress before detaching, so resident children keep the right
+    # endpoint/key even after the parent tool environment disappears.
     if STATE:
         if STATE.get("upstream_base_url"):
             cfg["upstream_base_url"] = STATE["upstream_base_url"]

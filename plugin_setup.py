@@ -217,8 +217,9 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     config["gateway_mode"] = gw_mode
 
     if gw_mode == "sandbox":
-        print("Sandbox mode (по умолчанию): LLM-шлюз в sandbox + keyless Tunnellio TCP bridge.")
-        print("SSH-ключи больше не нужны: туннель поднимает встроенный Tunnellio client через bridge --run --watch.")
+        print("Sandbox mode (по умолчанию): self-contained LLM-шлюз в sandbox + keyless Tunnellio TCP bridge.")
+        print("После перезапуска MCP напишите модели: 'подними мост'. Она сама установит resident server и туннель одной командой.")
+        print("SSH-ключи, cloud API token и локальный Windows-процесс для туннеля не нужны.")
         domain_type = prompt_choice("Тип домена", ["ephemeral", "custom"], "ephemeral")
         if domain_type == "custom":
             hostname = prompt_text("Имя домена (e.g. my-sandbox)", "")
