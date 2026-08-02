@@ -1,3 +1,11 @@
+## 2.2.0 - 2026-08-02
+
+- Split the queue/poll IDE mode out of `ide_gateway` into a standalone `ide_bridge` plugin.
+- `ide_gateway` is now focused on sandbox/external direct serving; sandbox remains the keyless Tunnellio TCP bridge path.
+- Added separate IDE Bridge defaults: port `8797`, model alias `ide-bridge`, token prefix `ideb_`, runtime `temp/ide_bridge_runtime`, and `ide_bridge_*` tools.
+- Added `ide_bridge_bridge_prompt` with the run_program poll loop prompt; the two plugins can be enabled together as separate IDE providers.
+- Updated setup flow, docs, and tests for the split.
+
 ## 2.1.0 - 2026-08-02
 
 - `ide_gateway` sandbox mode now boots with one command via `sandbox_bootstrap.py`: captures sandbox-local LLM endpoint/key, starts `sandbox_server.py`, and launches the public tunnel.

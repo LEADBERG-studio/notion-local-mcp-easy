@@ -1,4 +1,4 @@
-﻿[lines 0–132 of 132 | next offset 132]
+[lines 0–132 of 132 | next offset 132]
 <!doctype html>
 <html lang="ru">
 <head>
@@ -75,16 +75,17 @@
           <tr><td>SQLite</td><td><code>plugins\sqlite</code></td><td>Локальная SQLite DB внутри workspace.</td></tr>
           <tr><td>PostgreSQL</td><td><code>plugins\postgres</code></td><td>Подключение к PostgreSQL через установленный <code>psql</code>.</td></tr>
           <tr><td>OpenAI-compatible provider</td><td><code>plugins\openai_compat</code></td><td>AI provider или subagent через OpenAI-compatible chat completions API.</td></tr>
-          <tr><td>IDE Gateway</td><td><code>plugins\ide_gateway</code></td><td>Полный OpenAI-compatible мост между IDE и активной MCP-моделью (long-poll bridge).</td></tr>
+          <tr><td>IDE Gateway</td><td><code>plugins\ide_gateway</code></td><td>Sandbox/direct OpenAI-compatible шлюз через keyless Tunnellio TCP bridge.</td></tr>
+          <tr><td>IDE Bridge</td><td><code>plugins\ide_bridge</code></td><td>Отдельный queue/poll мост: модель сама опрашивает очередь через <code>bridge_step.py</code>.</td></tr>
         </tbody>
       </table>
 
       <h2>Как включить плагин</h2>
       <ol class="steps">
         <li><strong>Запустите MCP хотя бы один раз через <code>START.bat</code>.</strong><br>Так launcher создаст активный workflow profile для выбранной рабочей области.</li>
-        <li><strong>Откройте папку нужного плагина.</strong><br>Например: <code>plugins\ide_gateway</code>, <code>plugins\sqlite</code>, <code>plugins\postgres</code> или <code>plugins\openai_compat</code>.</li>
+        <li><strong>Откройте папку нужного плагина.</strong><br>Например: <code>plugins\ide_gateway</code>, <code>plugins\ide_bridge</code>, <code>plugins\sqlite</code>, <code>plugins\postgres</code> или <code>plugins\openai_compat</code>.</li>
         <li><strong>Запустите <code>SETUP.bat</code>.</strong><br>Setup спросит, включать плагин для <code>current</code> рабочей области или <code>global</code> для всех областей.</li>
-        <li><strong>Ответьте на вопросы настройки.</strong><br>Для DB/AI plugins setup собирает connection/provider config. Для <code>ide_gateway</code> обычно достаточно дефолтов.</li>
+        <li><strong>Ответьте на вопросы настройки.</strong><br>Для DB/AI plugins setup собирает connection/provider config. Для <code>ide_gateway</code> и <code>ide_bridge</code> обычно достаточно дефолтов.</li>
         <li><strong>Перезапустите MCP.</strong><br>Registry tools строится на старте, поэтому после enable/disable нужен restart.</li>
         <li><strong>Проверьте диагностику.</strong><br>В агенте можно вызвать <code>list_plugins</code> или <code>plugin_status</code>, чтобы увидеть loaded/not_attached/effective mode.</li>
       </ol>

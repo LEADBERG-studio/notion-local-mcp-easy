@@ -198,8 +198,8 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     # Gateway mode: sandbox (default, resident egress) | bridge | external
     gw_mode = prompt_choice(
         "Gateway mode",
-        ["sandbox", "bridge", "external"],
-        str(config.get("gateway_mode", "sandbox")) or "sandbox")
+        ["sandbox", "external"],
+        str(config.get("gateway_mode", "sandbox")) if str(config.get("gateway_mode", "sandbox")) in {"sandbox", "external"} else "sandbox")
     config["gateway_mode"] = gw_mode
 
     if gw_mode == "sandbox":
@@ -234,11 +234,6 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
         umodel = prompt_text("Upstream model id",
                              str(config.get("upstream_model", "")))
         config["upstream_model"] = umodel
-    else:
-        print("Bridge mode: the model runs bridge_step.py poll loop via run_program.")
-        config["upstream_base_url"] = ""
-        config["upstream_api_key"] = ""
-        config["upstream_model"] = ""
 
     setup_mode = prompt_choice("Endpoint defaults", ["default", "custom"], "default")
     if setup_mode == "default":
@@ -260,6 +255,34 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     config["disabled_tools"] = disabled
     return config
 
+
+def collect_ide_bridge_config(existing: dict[str, Any]) -> dict[str, Any]:
+    print("IDE Bridge setup: queue/poll OpenAI-compatible bridge for IDE to active MCP model.")
+    config = dict(existing)
+    api_key = str(config.get("default_api_key", "")).strip()
+    if not api_key:
+        api_key = "ideb_" + secrets.token_urlsafe(32)
+        config["default_api_key"] = api_key
+        print("Generated local IDE Bridge API key and saved it to the plugin-local config.")
+    else:
+        print(f"Keeping existing local IDE Bridge API key: {api_key[:20]}...")
+        if prompt_bool("Regenerate API key?", False):
+            api_key = "ideb_" + secrets.token_urlsafe(32)
+            config["default_api_key"] = api_key
+            print(f"New API key generated: {api_key[:20]}...")
+
+    config["gateway_mode"] = "bridge"
+    config["autostart"] = prompt_bool("Enable bridge endpoint autostart (preferred port 8797)?", True)
+    if config["autostart"]:
+        port = prompt_text("Preferred port (default 8797)", str(config.get("default_port", 8797)))
+        try:
+            config["default_port"] = int(port)
+        except ValueError:
+            config["default_port"] = 8797
+    config.setdefault("default_model_id", "ide-bridge")
+    config.setdefault("port_range", [8797, 8999])
+    return config
+
 def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
     base = existing.get("config") if isinstance(existing.get("config"), dict) else {}
     if plugin_id == "sqlite":
@@ -270,6 +293,8 @@ def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
         return collect_openai_compat_config(base)
     if plugin_id == "ide_gateway":
         return collect_ide_gateway_config(base)
+    if plugin_id == "ide_bridge":
+        return collect_ide_bridge_config(base)
     raw = prompt_text("Config JSON", json.dumps(base, ensure_ascii=False))
     parsed = json.loads(raw or "{}")
     if not isinstance(parsed, dict):

@@ -18,8 +18,9 @@ from unittest import mock
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
-from plugins.ide_gateway.queue import enqueue_request, request_path, _read_json
-from plugins.ide_gateway.state import normalize_config
+from plugins.ide_bridge.queue import enqueue_request, request_path, _read_json
+from plugins.ide_bridge.state import normalize_config as normalize_bridge_config
+from plugins.ide_gateway.state import normalize_config as normalize_gateway_config
 import plugin_setup
 
 
@@ -33,7 +34,7 @@ def _start_worker(runtime: Path, port: int, token: str) -> subprocess.Popen:
     state_path = runtime / "endpoints" / "default.json"
     state_path.write_text(json.dumps({
         "name": "default", "status": "starting", "host": "127.0.0.1", "port": port,
-        "base_url": f"http://127.0.0.1:{port}/v1", "model_id": "ide-gateway",
+        "base_url": f"http://127.0.0.1:{port}/v1", "model_id": "ide-bridge",
         "token": token, "pid": None, "started_at": "2026-01-01T00:00:00",
         "request_timeout_seconds": 30, "max_request_bytes": 1024 * 1024,
         "max_response_bytes": 1024 * 1024, "max_pending_requests": 8,
@@ -41,7 +42,7 @@ def _start_worker(runtime: Path, port: int, token: str) -> subprocess.Popen:
         "disabled_tools": "", "log_path": str(runtime / "logs" / "default.log"),
     }), encoding="utf-8")
     return subprocess.Popen(
-        [sys.executable, str(PROJECT / "plugins" / "ide_gateway" / "worker.py"), "--state", str(state_path)],
+        [sys.executable, str(PROJECT / "plugins" / "ide_bridge" / "worker.py"), "--state", str(state_path)],
         cwd=str(PROJECT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
 
@@ -58,15 +59,15 @@ def _wait_healthy(port: int, timeout: float = 10) -> bool:
     return False
 
 
-class IdeGatewayBridgeTests(unittest.TestCase):
+class IdeBridgeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.workspace = Path(self.tmp.name)
-        self.runtime = self.workspace / "temp" / "ide_gateway_runtime"
+        self.runtime = self.workspace / "temp" / "ide_bridge_runtime"
         for d in ["endpoints", "queues/default", "logs", "pids", "registry"]:
             (self.runtime / d).mkdir(parents=True, exist_ok=True)
         self.port = free_port()
-        self.token = "ideg_bridge-test-token-1234567890"
+        self.token = "ideb_bridge-test-token-1234567890"
         self.proc = _start_worker(self.runtime, self.port, self.token)
         if not _wait_healthy(self.port):
             out = self.proc.stdout.read().decode(errors="replace") if self.proc.stdout else ""
@@ -87,7 +88,7 @@ class IdeGatewayBridgeTests(unittest.TestCase):
                  messages=None) -> str:
         return enqueue_request(
             self.runtime, "default",
-            {"kind": kind, "path": path, "model": "ide-gateway",
+            {"kind": kind, "path": path, "model": "ide-bridge",
              "messages": messages or [{"role": "user", "content": prompt}],
              "prompt": prompt, "stream": stream},
             timeout_seconds=30, max_pending=8,
@@ -105,7 +106,7 @@ class IdeGatewayBridgeTests(unittest.TestCase):
 
     def _model_claim_and_complete(self, timeout: int = 5) -> dict:
         """Simulate the model holding a long-lived wait_request then completing."""
-        from plugins.ide_gateway.queue import claim_next_request, complete_request
+        from plugins.ide_bridge.queue import claim_next_request, complete_request
         req = claim_next_request(self.runtime, "default", timeout, request_timeout=30)
         if req is None:
             self.fail("model did not receive a request (claim timed out)")
@@ -117,7 +118,7 @@ class IdeGatewayBridgeTests(unittest.TestCase):
     def test_chat_non_stream_bridge(self):
         result = {}
         def client():
-            payload = json.dumps({"model": "ide-gateway",
+            payload = json.dumps({"model": "ide-bridge",
                                   "messages": [{"role": "user", "content": "hi"}]}).encode()
             req = urllib.request.Request(
                 f"http://127.0.0.1:{self.port}/v1/chat/completions", data=payload,
@@ -144,7 +145,7 @@ class IdeGatewayBridgeTests(unittest.TestCase):
     def test_chat_stream_bridge(self):
         result = {}
         def client():
-            payload = json.dumps({"model": "ide-gateway", "stream": True,
+            payload = json.dumps({"model": "ide-bridge", "stream": True,
                                   "messages": [{"role": "user", "content": "hi"}]}).encode()
             req = urllib.request.Request(
                 f"http://127.0.0.1:{self.port}/v1/chat/completions", data=payload,
@@ -177,7 +178,7 @@ class IdeGatewayBridgeTests(unittest.TestCase):
     def test_bridge_prompt_sandbox_mode(self):
         from plugins.ide_gateway.plugin import invoke
         ctx = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
-        cfg = normalize_config({}, ctx)  # default = sandbox
+        cfg = normalize_gateway_config({}, ctx)  # default = sandbox
         result = invoke("ide_gateway_bridge_prompt", {"name": "default", "include_secret": True},
                         {**ctx, "pluginConfig": cfg})
         self.assertTrue(result["ok"])
@@ -185,12 +186,12 @@ class IdeGatewayBridgeTests(unittest.TestCase):
         self.assertIn("sandbox_server.py", result["system_prompt"])
         self.assertIn("sandbox_tunnel.py", result["system_prompt"])
 
-    # 4. bridge_prompt tool returns loop instruction with prompt_type routing
-    def test_bridge_prompt_returns_loop_instruction(self):
-        from plugins.ide_gateway.plugin import invoke
+    # 4. ide_bridge prompt returns loop instruction with prompt_type routing
+    def test_ide_bridge_prompt_returns_loop_instruction(self):
+        from plugins.ide_bridge.plugin import invoke
         ctx = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
-        cfg = normalize_config({"gateway_mode": "bridge"}, ctx)
-        result = invoke("ide_gateway_bridge_prompt", {"name": "default", "include_secret": True},
+        cfg = normalize_bridge_config({}, ctx)
+        result = invoke("ide_bridge_bridge_prompt", {"name": "default", "include_secret": True},
                         {**ctx, "pluginConfig": cfg})
         self.assertTrue(result["ok"])
         self.assertEqual(result["gateway_mode"], "bridge")
@@ -203,34 +204,41 @@ class IdeGatewayBridgeTests(unittest.TestCase):
         self.assertIn("Do not write chat", result["system_prompt"])
         self.assertIn("bridge_script", result)
 
+    def test_ide_bridge_defaults_are_separate_from_gateway(self):
+        with mock.patch("builtins.input", return_value=""):
+            config = plugin_setup.collect_ide_bridge_config({})
+        self.assertEqual(config["default_port"], 8797)
+        self.assertEqual(config["gateway_mode"], "bridge")
+        self.assertTrue(config["default_api_key"].startswith("ideb_"))
+
     # 5. classify_prompt: chat vs memory_extraction vs other
     def test_classify_prompt_chat(self):
-        from plugins.ide_gateway.bridge_step import classify_prompt
+        from plugins.ide_bridge.bridge_step import classify_prompt
         r = classify_prompt("System: be nice\n\nUser: What is 2+2?", None)
         self.assertEqual(r["prompt_type"], "chat")
         self.assertEqual(r["user_message"], "What is 2+2?")
 
     def test_classify_prompt_memory_extraction(self):
-        from plugins.ide_gateway.bridge_step import classify_prompt
+        from plugins.ide_bridge.bridge_step import classify_prompt
         r = classify_prompt("", [{"role": "user", "content": "SubmitMemoryPlan: sync"}])
         self.assertEqual(r["prompt_type"], "memory_extraction")
 
     def test_classify_prompt_from_messages(self):
-        from plugins.ide_gateway.bridge_step import classify_prompt
+        from plugins.ide_bridge.bridge_step import classify_prompt
         r = classify_prompt("", [{"role": "system", "content": "x"},
                                    {"role": "user", "content": "hello world"}])
         self.assertEqual(r["prompt_type"], "chat")
         self.assertEqual(r["user_message"], "hello world")
 
     def test_classify_prompt_tail(self):
-        from plugins.ide_gateway.bridge_step import classify_prompt
+        from plugins.ide_bridge.bridge_step import classify_prompt
         r = classify_prompt("x" * 5000, None)
         self.assertEqual(len(r["prompt_tail"]), 3000)
 
     # 5. no api keys leak in endpoint logs
     def test_no_api_keys_leak_in_logs(self):
         def client():
-            payload = json.dumps({"model": "ide-gateway",
+            payload = json.dumps({"model": "ide-bridge",
                                   "messages": [{"role": "user", "content": "x"}]}).encode()
             req = urllib.request.Request(
                 f"http://127.0.0.1:{self.port}/v1/chat/completions", data=payload, method="POST",

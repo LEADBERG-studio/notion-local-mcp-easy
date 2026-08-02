@@ -117,6 +117,20 @@ docs/ru/index.html
 
 Диагностика: `ide_gateway_status`, `ide_gateway_show_config(include_secret=true)`, `ide_gateway_get_logs`.
 
+## IDE Bridge — отдельный poll/queue мост
+
+Начиная с 2.2.0 старый режим с очередью вынесен из `ide_gateway` в отдельный плагин `ide_bridge`. У него свои настройки, tools, runtime, локальный endpoint и ключ, поэтому его можно завести в IDE отдельным OpenAI-compatible provider рядом с `ide_gateway`.
+
+По умолчанию:
+
+- `base_url = http://127.0.0.1:8797/v1`;
+- `api_key` начинается с `ideb_`;
+- `model = ide-bridge`;
+- runtime лежит в `temp/ide_bridge_runtime`;
+- prompt берётся через `ide_bridge_bridge_prompt`.
+
+Используйте `ide_gateway` для sandbox TCP bridge, а `ide_bridge` для режима, где модель сама опрашивает очередь через `bridge_step.py poll`.
+
 
 
 

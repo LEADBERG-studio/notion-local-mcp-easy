@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IDE Bridge · Notion Local MCP Easy</title>
+  <meta name="description" content="IDE Bridge: отдельный queue/poll мост для IDE">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="index.html"><span class="brand-mark">MCP</span><span><strong>Notion Local MCP Easy</strong><small>документация для начинающих · v2.2.0</small></span></a><button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button></header>
+  <div class="shell">
+    <aside class="sidebar"><nav class="nav-main">
+<a class="nav-link" href="index.html">Старт</a>
+<a class="nav-link" href="plugins.html">Плагины</a>
+<a class="nav-link" href="ide-gateway.html">IDE Gateway</a>
+<a class="nav-link active" href="ide-bridge.html">IDE Bridge</a>
+<a class="nav-link" href="troubleshooting.html">Ошибки</a>
+</nav><div class="sidebar-note"><strong>Главное правило</strong><p>Не публикуйте IDE keys и runtime state.</p></div></aside>
+    <main class="content">
+      <h1>IDE Bridge — отдельный poll/queue мост</h1>
+      <p class="lead"><code>ide_bridge</code> — это отдельный плагин для старого режима, где IDE-запросы кладутся в очередь, а активная модель сама опрашивает её через <code>bridge_step.py poll</code>.</p>
+
+      <div class="callout info"><strong>Когда выбирать:</strong> используйте <code>ide_bridge</code>, если хотите, чтобы именно модель в MCP-чате обрабатывала IDE-запросы своими tools. Для прямого sandbox-сервера через Tunnellio TCP bridge используйте <a href="ide-gateway.html">IDE Gateway</a>.</div>
+
+      <h2>Отличия от IDE Gateway</h2>
+      <table><thead><tr><th>Плагин</th><th>Как работает</th><th>Default URL</th><th>Ключ</th></tr></thead><tbody>
+        <tr><td><code>ide_gateway</code></td><td>Sandbox server + keyless Tunnellio TCP bridge</td><td><code>https://&lt;host&gt;.tunnellio.site/v1</code></td><td><code>ideg_...</code></td></tr>
+        <tr><td><code>ide_bridge</code></td><td>Локальный worker + file queue + poll loop модели</td><td><code>http://127.0.0.1:8797/v1</code></td><td><code>ideb_...</code></td></tr>
+      </tbody></table>
+
+      <h2>Быстрый старт</h2>
+      <ol class="steps">
+        <li>Откройте <code>plugins\ide_bridge</code> и запустите <code>SETUP.bat</code>.</li>
+        <li>Выберите <code>current</code>, <code>full_access</code>, оставьте default port <code>8797</code>.</li>
+        <li>Перезапустите MCP, чтобы endpoint поднялся.</li>
+        <li>Вызовите <code>ide_bridge_show_config</code> с <code>include_secret=true</code> и скопируйте настройки в IDE.</li>
+        <li>Вызовите <code>ide_bridge_bridge_prompt</code> и используйте его как системный prompt для модели.</li>
+        <li>Модель запускает короткий loop: <code>bridge_step.py poll --timeout 3</code>, обрабатывает запрос, затем <code>complete</code>.</li>
+      </ol>
+
+      <h2>Настройки IDE</h2>
+      <table><thead><tr><th>Поле</th><th>Значение</th></tr></thead><tbody>
+        <tr><td>Base URL</td><td><code>http://127.0.0.1:8797/v1</code></td></tr>
+        <tr><td>API key</td><td><code>ideb_...</code> из <code>ide_bridge_show_config</code></td></tr>
+        <tr><td>Model</td><td><code>ide-bridge</code></td></tr>
+      </tbody></table>
+
+      <h2>Tools</h2>
+      <ul>
+        <li><code>ide_bridge_start</code>, <code>ide_bridge_stop</code>, <code>ide_bridge_status</code></li>
+        <li><code>ide_bridge_show_config</code>, <code>ide_bridge_get_logs</code>, <code>ide_bridge_rotate_token</code></li>
+        <li><code>ide_bridge_bridge_prompt</code></li>
+        <li><code>ide_bridge_wait_request</code>, <code>ide_bridge_send_response</code>, <code>ide_bridge_fail_request</code></li>
+      </ul>
+
+      <div class="callout warning"><strong>Важно:</strong> этот режим живёт, пока модель крутит poll loop. Не используйте его как долгий MCP tool-call: prompt специально заставляет делать короткие <code>run_program</code> итерации.</div>
+    </main>
+  </div>
+</body>
+</html>

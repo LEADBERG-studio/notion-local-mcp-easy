@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 2.1.0
+# Notion Local MCP Easy 2.2.0
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -87,6 +87,20 @@ Quick flow:
 5. Configure your IDE as OpenAI-compatible using `base_url`, `api_key`, and `model` from `ide_gateway_show_config`.
 
 Diagnostics: `ide_gateway_status`, `ide_gateway_get_logs`, `ide_gateway_show_config`.
+
+## IDE Bridge plugin — separate queue/poll bridge
+
+`ide_bridge` is the old queue/poll bridge split out of `ide_gateway`. It has its own plugin id, tools, runtime directory, local proxy, token prefix, and default port. Use it when you want the active MCP model to serve IDE requests by repeatedly running `bridge_step.py poll` and completing queue items.
+
+Defaults:
+
+- local base URL: `http://127.0.0.1:8797/v1`;
+- token prefix: `ideb_...`;
+- model alias: `ide-bridge`;
+- runtime: `temp/ide_bridge_runtime`;
+- tools: `ide_bridge_start`, `ide_bridge_show_config`, `ide_bridge_bridge_prompt`, `ide_bridge_wait_request`, `ide_bridge_send_response`, `ide_bridge_fail_request`.
+
+`ide_gateway` and `ide_bridge` can be enabled together and configured as two separate OpenAI-compatible providers in the IDE.
 
 
 ## Safety model

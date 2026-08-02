@@ -49,6 +49,7 @@
 <a class="nav-link" href="notion.html">Подключение клиента</a>
 <a class="nav-link" href="plugins.html">Плагины</a>
 <a class="nav-link active" href="ide-gateway.html">IDE Gateway</a>
+<a class="nav-link" href="ide-bridge.html">IDE Bridge</a>
 <a class="nav-link" href="profiles.html">Профили</a>
 <a class="nav-link" href="operations.html">Эксплуатация</a>
 <a class="nav-link" href="troubleshooting.html">Ошибки</a>
@@ -75,6 +76,10 @@
   → sandbox_server.py в песочнице модели
   → внутренний LLM endpoint/key этой же песочницы
   → ответ возвращается в IDE</code></pre>
+
+      <div class="callout info">
+        <strong>Разделение:</strong> старый poll/queue режим вынесен в отдельный <a href="ide-bridge.html">IDE Bridge</a> (<code>ide_bridge</code>) со своим портом 8797 и ключом <code>ideb_...</code>. Здесь описан только sandbox TCP bridge.
+      </div>
 
       <div class="callout info">
         <strong>Главная идея:</strong> команда «подними мост» запускает <code>sandbox_bootstrap.py</code>. Он сохраняет внутренние endpoint/key песочницы в state, поднимает сервер daemon-процессом и запускает Tunnellio bridge в watch-режиме. MCP tool-call может закончиться, а сервер и туннель продолжают жить.

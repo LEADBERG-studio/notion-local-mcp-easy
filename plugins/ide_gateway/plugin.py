@@ -14,12 +14,6 @@ from plugins.ide_gateway.state import (
     endpoint_status,
     bridge_prompt,
 )
-from plugins.ide_gateway.queue import (
-    wait_request,
-    send_response,
-    fail_request,
-)
-
 
 def validate_config(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     return normalize_config(config, context)
@@ -125,15 +119,6 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
 
     if tool_name == "ide_gateway_show_config":
         return show_config(arguments, context, config)
-
-    if tool_name == "ide_gateway_wait_request":
-        return wait_request(arguments, context, config)
-
-    if tool_name == "ide_gateway_send_response":
-        return send_response(arguments, context, config)
-
-    if tool_name == "ide_gateway_fail_request":
-        return fail_request(arguments, context, config)
 
     if tool_name == "ide_gateway_get_logs":
         return read_logs(arguments, context, config)
