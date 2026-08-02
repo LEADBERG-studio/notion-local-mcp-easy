@@ -42,3 +42,9 @@
 - Serveo stable hostname accepts accidental full URLs and normalizes them to the reserved label.
 - Serveo `.pub` key paths are rejected or auto-corrected to the private key.
 - Tunnel retry is limited to real remote-port-busy relay errors; config errors fail immediately with a clear message.
+
+## Production config guard
+
+- Every launcher config write creates `config.backup.<timestamp>.<reason>.json` first.
+- Writes outside explicit setup refuse to change sensitive fields such as `token`, `tunnel_backend`, `serveo_hostname`, `ssh_key`, `public_url`, and Tunnellio credentials.
+- This prevents profile/menu/self-heal code from silently changing production tunnel settings.

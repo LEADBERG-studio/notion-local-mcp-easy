@@ -411,6 +411,52 @@ def save_json(path: Path, value: dict) -> None:
 
 
 
+
+CONFIG_SENSITIVE_FIELDS = {
+    "token", "tunnel_backend", "tunnel_mode_preference", "serveo_hostname", "ssh_key",
+    "public_url", "tunnel_host", "tunnel_ssh_port", "tunnel_domain",
+    "tunnellio_token", "tunnellio_domain", "tunnellio_key", "tunnellio_base_url",
+    "tunnellio_path", "tunnellio_state_dir", "tunnellio_runtime_name",
+}
+
+
+def backup_config_file(reason: str) -> Path | None:
+    if not CONFIG_FILE.is_file():
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_reason = re.sub(r"[^A-Za-z0-9_.-]+", "-", reason.strip()).strip("-") or "write"
+    backup = CONFIG_FILE.with_name(f"config.backup.{stamp}.{safe_reason}.json")
+    try:
+        shutil.copy2(CONFIG_FILE, backup)
+        return backup
+    except OSError:
+        return None
+
+
+def _changed_sensitive_fields(old: dict, new: dict) -> list[str]:
+    changed: list[str] = []
+    for key in sorted(CONFIG_SENSITIVE_FIELDS):
+        old_has = key in old and str(old.get(key, "")).strip() != ""
+        new_has = key in new and str(new.get(key, "")).strip() != ""
+        if old_has and (not new_has or old.get(key) != new.get(key)):
+            changed.append(key)
+    return changed
+
+
+def save_config(config: dict, *, reason: str, allow_sensitive_change: bool = False) -> None:
+    current = load_json(CONFIG_FILE)
+    changed_sensitive = _changed_sensitive_fields(current, config) if current else []
+    if changed_sensitive and not allow_sensitive_change:
+        fields = ", ".join(changed_sensitive)
+        raise RuntimeError(
+            f"Refusing to rewrite production config sensitive fields ({fields}) outside explicit setup. "
+            f"Run SETUP.bat for intentional tunnel/token changes."
+        )
+    backup = backup_config_file(reason)
+    save_json(CONFIG_FILE, config)
+    if backup:
+        print(f"Config backup saved: {backup}")
+
 def generate_legacy_token() -> str:
     return "bridge-secret-token-" + secrets.token_urlsafe(18)
 
@@ -443,7 +489,7 @@ def heal_legacy_config(config: dict, *, persist: bool = True) -> dict:
     # Do not infer tunnel_backend here. Guessing Tunnellio because tunnellio.exe
     # exists rewrites shared config and breaks existing Serveo installations.
     if changed and persist:
-        save_json(CONFIG_FILE, config)
+        save_config(config, reason="self-heal")
         print(f"Config recovered missing legacy fields in: {CONFIG_FILE}")
     return config
 
@@ -856,7 +902,7 @@ def activate_profile_config(storage: dict, profile: dict, config: dict) -> tuple
 
     updated_config = apply_profile_to_legacy_config(config, profile)
 
-    save_json(CONFIG_FILE, updated_config)
+    save_config(updated_config, reason="profile-activate")
 
     return updated_storage, updated_config
 
@@ -1316,7 +1362,7 @@ def setup(force: bool = False) -> dict:
             "uv",
         ],
     }
-    save_json(CONFIG_FILE, config)
+    save_config(config, reason="setup", allow_sensitive_change=True)
     saved_slot, added_to_connections = remember_workspace_path(workspace, preferred_slot=1)
     storage, active_profile = sync_workflow_profiles(config, created_from="setup")
     if active_profile is not None:
@@ -1338,7 +1384,7 @@ def setup(force: bool = False) -> dict:
         import secrets as _secrets
         gw_key = "ideg_" + _secrets.token_urlsafe(32)
         config["ide_gateway_api_key"] = gw_key
-        save_json(CONFIG_FILE, config)
+        save_config(config, reason="ide-gateway-key", allow_sensitive_change=True)
         print(f"IDE Gateway API key generated: {gw_key[:20]}... (stored in config)")
     else:
         config["ide_gateway_api_key"] = gw_key
@@ -1827,7 +1873,7 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
 
         config = apply_profile_to_legacy_config(config, active_profile)
 
-        save_json(CONFIG_FILE, config)
+        save_config(config, reason="launcher-start")
 
     env = os.environ.copy()
 
@@ -2592,7 +2638,7 @@ def ensure_ide_gateway_key(config: dict) -> dict:
     config["ide_gateway_port"] = existing["ide_gateway_port"]
 
     if changed:
-        save_json(CONFIG_FILE, existing)
+        save_config(existing, reason="ide-gateway-key", allow_sensitive_change=True)
     return config
 
 
@@ -2755,7 +2801,7 @@ def tunnel_setup() -> int:
         config["public_url"] = prompt_public_url(config)
     else:
         config["tunnel_backend"] = "serveo"
-    save_json(CONFIG_FILE, config)
+    save_config(config, reason="explicit-config-write", allow_sensitive_change=True)
     print(f"Tunnel settings saved: {CONFIG_FILE}")
     return 0
 
@@ -2834,7 +2880,7 @@ def oauth_setup() -> int:
 
         )
 
-    save_json(CONFIG_FILE, config)
+    save_config(config, reason="explicit-config-write", allow_sensitive_change=True)
 
     print(f"\nAuth mode saved: {mode} ({CONFIG_FILE})")
 

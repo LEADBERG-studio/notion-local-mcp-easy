@@ -176,6 +176,26 @@ class LauncherTests(unittest.TestCase):
                 launcher.start_and_resolve_tunnel({"tunnel_backend": "tunnellio"}, attempts=4)
         sleep.assert_not_called()
 
+
+    def test_save_config_blocks_sensitive_rewrite_outside_setup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_file = root / "config.json"
+            original = {
+                "workspace": "old",
+                "token": "fixed-token",
+                "auth_mode": "legacy",
+                "tunnel_backend": "serveo",
+                "serveo_hostname": "my-notion-mcp",
+            }
+            config_file.write_text(json.dumps(original), encoding="utf-8")
+            with mock.patch.object(launcher, "CONFIG_FILE", config_file):
+                changed = dict(original, tunnel_backend="tunnellio")
+                with self.assertRaisesRegex(RuntimeError, "tunnel_backend"):
+                    launcher.save_config(changed, reason="profile-activate")
+                backups = list(root.glob("config.backup.*.json"))
+        self.assertEqual(backups, [])
+
     def test_setup_saves_first_workspace_to_first_slot(self):
 
         with tempfile.TemporaryDirectory() as directory:
