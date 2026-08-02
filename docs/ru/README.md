@@ -21,4 +21,5 @@ docs/ru/index.html
 
 - `tunnellio.html` — пользовательская настройка Tunnellio: кабинет, публичный URL, API docs, CLI, OAuth и типовые сценарии.
 
-- `ide-provider.html` — подключение IDE как OpenAI-compatible клиента через `ide_provider`.
+- `ide-gateway.html` — основной OpenAI-compatible мост из IDE в песочницу модели: одна команда «подними мост», keyless Tunnellio TCP bridge и резервный промт.
+- `ide-bridge.html` — отдельный совместимый queue/poll мост через `ide_bridge`; не смешивайте его с прямым sandbox-сценарием.
