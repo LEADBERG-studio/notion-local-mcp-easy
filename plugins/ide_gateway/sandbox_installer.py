@@ -87,20 +87,29 @@ def is_alive(pid: Any) -> bool:
 
 
 def stop_pid(pid: Any) -> None:
-    if not is_alive(pid):
+    try:
+        pid = int(pid)
+        if pid <= 0:
+            return
+    except Exception:
         return
-    pid = int(pid)
     if os.name == "nt":
+        # os.kill(pid, 0) is unreliable for detached Windows process groups.
+        # taskkill is idempotent enough here and must run even when the probe
+        # already reports dead, because inherited log handles can remain open.
         with contextlib.suppress(Exception):
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-    else:
-        with contextlib.suppress(Exception):
-            os.kill(pid, signal.SIGTERM)
+        time.sleep(3.0)
+        return
+    if not is_alive(pid):
+        return
+    with contextlib.suppress(Exception):
+        os.kill(pid, signal.SIGTERM)
     deadline = time.time() + 8
     while time.time() < deadline and is_alive(pid):
         time.sleep(0.1)
-    if is_alive(pid) and os.name != "nt":
+    if is_alive(pid):
         with contextlib.suppress(Exception):
             os.kill(pid, signal.SIGKILL)
 
@@ -717,6 +726,9 @@ def stop() -> int:
     state = read_json(STATE)
     stop_pid(state.get("tunnel_pid"))
     stop_pid(state.get("server_pid"))
+    if os.name == "nt":
+        # A dead detached child may still be releasing its inherited log handle.
+        time.sleep(2.0)
     state["stopped_at"] = time.time()
     state["server_pid"] = None
     state["tunnel_pid"] = None
