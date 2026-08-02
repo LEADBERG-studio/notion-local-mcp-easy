@@ -1,5 +1,6 @@
 ## 2.2.0 - 2026-08-02
 
+- Connection profiles: each tunnel mode now keeps its own last-known settings in `connection-profiles.json`; setup asks whether to keep the mode and whether to reuse saved settings.
 - Config safety: every config write now creates a timestamped backup and refuses sensitive production-field rewrites outside explicit setup.
 - CI hotfix: repo-context status messages now use robust display paths, avoiding Windows 8.3 short-path `relative_to()` crashes.
 - CI hotfix: Windows cp1252 stdout no longer crashes on Cyrillic setup messages; safe path tests keep caller path spelling while still checking resolved containment.

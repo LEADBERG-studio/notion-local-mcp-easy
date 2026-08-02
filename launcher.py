@@ -92,6 +92,10 @@ CONNECTION_FILE = CONFIG_DIR / "connection.txt"
 
 CONNECTIONS_FILE = SCRIPT_DIR / "connections.cfg"
 
+
+def connection_profiles_file() -> Path:
+    return CONFIG_FILE.parent / "connection-profiles.json"
+
 SERVER_LOG = CONFIG_DIR / "server.log"
 
 TUNNEL_LOG = CONFIG_DIR / "tunnel.log"
@@ -307,6 +311,113 @@ def default_tunnel_mode(existing: dict | None = None) -> str:
     if backend == "sish":
         return "sish"
     return "serveo_stable" if existing.get("serveo_hostname") else "serveo_temporary"
+
+
+CONNECTION_PROFILE_FIELDS = {
+    "tunnellio": {
+        "tunnel_backend", "tunnel_mode_preference", "tunnellio_path", "tunnellio_state_dir",
+        "tunnellio_runtime_name", "tunnellio_base_url", "tunnellio_token", "tunnellio_domain",
+        "tunnellio_key", "tunnellio_connection_mode", "tunnellio_oauth_client_policy",
+        "tunnellio_use_discovery", "tunnellio_enable_pkce",
+    },
+    "serveo_temporary": {"tunnel_backend", "tunnel_mode_preference"},
+    "serveo_stable": {"tunnel_backend", "tunnel_mode_preference", "serveo_hostname", "ssh_key"},
+    "reverse_proxy": {"tunnel_backend", "tunnel_mode_preference", "public_url"},
+    "sish": {"tunnel_backend", "tunnel_mode_preference", "serveo_hostname", "ssh_key", "tunnel_host", "tunnel_ssh_port", "tunnel_domain"},
+}
+
+
+def normalize_tunnel_mode(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in CONNECTION_PROFILE_FIELDS:
+        return raw
+    backend = normalize_tunnel_backend(raw)
+    if backend == "tunnellio":
+        return "tunnellio"
+    if backend == "custom_proxy":
+        return "reverse_proxy"
+    if backend == "sish":
+        return "sish"
+    return "serveo_stable" if raw in {"serveo_stable", "stable"} else "serveo_temporary"
+
+
+def load_connection_profiles() -> dict:
+    raw = load_json(connection_profiles_file())
+    if not isinstance(raw, dict):
+        raw = {}
+    profiles = raw.get("profiles") if isinstance(raw.get("profiles"), dict) else {}
+    return {"schemaVersion": 1, "profiles": profiles}
+
+
+def save_connection_profiles(storage: dict) -> None:
+    payload = {"schemaVersion": 1, "profiles": storage.get("profiles") or {}}
+    connection_profiles_file().parent.mkdir(parents=True, exist_ok=True)
+    profile_path = connection_profiles_file()
+    temp = profile_path.with_suffix(profile_path.suffix + ".tmp")
+    temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp.replace(profile_path)
+
+
+def connection_profile_for(mode: str) -> dict:
+    mode = normalize_tunnel_mode(mode)
+    storage = load_connection_profiles()
+    profile = storage.get("profiles", {}).get(mode)
+    return profile if isinstance(profile, dict) else {}
+
+
+def apply_connection_profile(config: dict, mode: str) -> dict:
+    profile = connection_profile_for(mode)
+    if not profile:
+        return config
+    result = dict(config)
+    for key in CONNECTION_PROFILE_FIELDS.get(normalize_tunnel_mode(mode), set()):
+        if key in profile:
+            result[key] = profile[key]
+    return result
+
+
+def save_connection_profile(mode: str, config: dict) -> None:
+    mode = normalize_tunnel_mode(mode)
+    storage = load_connection_profiles()
+    profiles = dict(storage.get("profiles") or {})
+    fields = CONNECTION_PROFILE_FIELDS.get(mode, set())
+    snapshot = {key: config.get(key, "") for key in sorted(fields) if key in config}
+    snapshot["tunnel_mode_preference"] = mode
+    snapshot["updatedAt"] = datetime.now().isoformat(timespec="seconds")
+    profiles[mode] = snapshot
+    storage["profiles"] = profiles
+    save_connection_profiles(storage)
+
+
+def selected_mode_from_config(config: dict) -> str:
+    mode = str(config.get("tunnel_mode_preference", "")).strip()
+    if mode:
+        return normalize_tunnel_mode(mode)
+    backend = tunnel_backend(config)
+    if backend == "tunnellio":
+        return "tunnellio"
+    if backend == "custom_proxy":
+        return "reverse_proxy"
+    if backend == "sish":
+        return "sish"
+    return "serveo_stable" if str(config.get("serveo_hostname", "")).strip() else "serveo_temporary"
+
+
+def choose_tunnel_mode_for_setup(existing: dict) -> str:
+    current = selected_mode_from_config(existing) if existing else ""
+    if current and any(str(existing.get(key, "")).strip() for key in CONNECTION_PROFILE_FIELDS.get(current, set())):
+        if yes_no(f"Keep configured connection mode '{current}'?", True):
+            return current
+    return prompt_tunnel_mode(existing)
+
+
+def maybe_apply_saved_connection_settings(existing: dict, mode: str) -> tuple[dict, bool]:
+    profile = connection_profile_for(mode)
+    if not profile:
+        return existing, False
+    if yes_no(f"Use saved settings for connection mode '{mode}'?", True):
+        return apply_connection_profile(existing, mode), True
+    return apply_connection_profile(existing, mode), False
 
 
 def prompt_tunnel_mode(existing: dict) -> str:
@@ -1229,7 +1340,8 @@ def setup(force: bool = False) -> dict:
         "Enable trusted developer mode?", bool(existing.get("allow_commands", False))
     )
 
-    selected_tunnel_mode = prompt_tunnel_mode(existing)
+    selected_tunnel_mode = choose_tunnel_mode_for_setup(existing)
+    existing, use_saved_tunnel_settings = maybe_apply_saved_connection_settings(existing, selected_tunnel_mode)
     if selected_tunnel_mode == "tunnellio":
         selected_tunnel_backend = "tunnellio"
     elif selected_tunnel_mode == "reverse_proxy":
@@ -1238,85 +1350,90 @@ def setup(force: bool = False) -> dict:
         selected_tunnel_backend = "sish"
     else:
         selected_tunnel_backend = "serveo"
-    serveo_hostname = ""
-    ssh_key = ""
-    public_url = ""
+
+    serveo_hostname = str(existing.get("serveo_hostname", "")).strip().lower()
+    ssh_key = str(existing.get("ssh_key", "")).strip()
+    public_url = str(existing.get("public_url", "")).strip() if use_saved_tunnel_settings else ""
     tunnel_host = str(existing.get("tunnel_host", "")).strip()
     tunnel_ssh_port = str(existing.get("tunnel_ssh_port", DEFAULT_SISH_SSH_PORT)).strip() or str(DEFAULT_SISH_SSH_PORT)
     tunnel_domain = str(existing.get("tunnel_domain", "")).strip().lower().strip(".")
+
     if selected_tunnel_mode == "serveo_stable":
         print("\nA reserved Serveo hostname keeps the same Custom MCP URL after restarts.")
-        serveo_hostname = str(existing.get("serveo_hostname", "")).strip().lower()
-        ssh_key = str(existing.get("ssh_key", "")).strip()
-        while not serveo_hostname:
-            current_hostname = serveo_hostname or ""
-            prompt = (
-                f"Reserved hostname (without domain) [{current_hostname}]"
-                if current_hostname
-                else "Reserved hostname (without domain)"
-            )
-            raw_hostname = prompt_input(f"{prompt}: ").strip().lower()
-            serveo_hostname = (raw_hostname or serveo_hostname).removesuffix(
-                ".serveousercontent.com"
-            )
-            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", serveo_hostname):
-                print("Use 3-63 lowercase letters, digits or hyphens.")
-                serveo_hostname = ""
-        default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "serveo_notion_mcp").resolve()
-        key_path = default_key
-        while True:
-            raw_key = prompt_input(f"Serveo private SSH key [{default_key}]: ").strip().strip('"')
-            key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
-            if key_path.is_file():
-                break
-            print(f"Private key not found: {key_path}")
-        ssh_key = str(key_path)
+        if not use_saved_tunnel_settings:
+            while not serveo_hostname:
+                current_hostname = serveo_hostname or ""
+                prompt = (
+                    f"Reserved hostname (without domain) [{current_hostname}]"
+                    if current_hostname
+                    else "Reserved hostname (without domain)"
+                )
+                raw_hostname = prompt_input(f"{prompt}: ").strip().lower()
+                serveo_hostname = (raw_hostname or serveo_hostname).removesuffix(
+                    ".serveousercontent.com"
+                )
+                if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", serveo_hostname):
+                    print("Use 3-63 lowercase letters, digits or hyphens.")
+                    serveo_hostname = ""
+            default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "serveo_notion_mcp").resolve()
+            key_path = default_key
+            while True:
+                raw_key = prompt_input(f"Serveo private SSH key [{default_key}]: ").strip().strip('"')
+                key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
+                if key_path.is_file():
+                    break
+                print(f"Private key not found: {key_path}")
+            ssh_key = str(key_path)
     elif selected_tunnel_mode == "serveo_temporary":
+        serveo_hostname = ""
+        ssh_key = ""
         print("\nServeo temporary mode keeps a random public domain. The URL may change after reconnects.")
     elif selected_tunnel_mode == "reverse_proxy":
         print("\nReverse proxy mode keeps the MCP server on 127.0.0.1 and expects your own proxy/domain in front of it.")
-        public_url = prompt_public_url(existing)
+        if not use_saved_tunnel_settings:
+            public_url = prompt_public_url(existing)
     elif selected_tunnel_mode == "sish":
         print("\nSelf-hosted sish mode opens an SSH reverse tunnel to your own relay.")
-        tunnel_host = str(prompt_input(
-            f"sish SSH endpoint host [{tunnel_host}]" if tunnel_host else "sish SSH endpoint host"
-        )).strip() or tunnel_host
-        if not tunnel_host:
-            raise RuntimeError("sish SSH endpoint host is required.")
-        while True:
-            raw_port = prompt_input(f"sish SSH port [{tunnel_ssh_port}]: ").strip()
-            chosen_port = raw_port or tunnel_ssh_port
-            if str(chosen_port).isdigit():
-                tunnel_ssh_port = str(chosen_port)
-                break
-            print("Use a numeric TCP port.")
-        tunnel_domain = str(prompt_input(
-            f"Public wildcard base domain [{tunnel_domain}]" if tunnel_domain else "Public wildcard base domain"
-        )).strip().lower().strip(".") or tunnel_domain
-        if not tunnel_domain:
-            raise RuntimeError("Public wildcard base domain is required for sish mode.")
-        while True:
-            current_hostname = serveo_hostname or ""
-            prompt = (
-                f"Reserved subdomain label [{current_hostname}]"
-                if current_hostname
-                else "Reserved subdomain label"
-            )
-            raw_hostname = prompt_input(f"{prompt}: ").strip().lower()
-            serveo_hostname = (raw_hostname or serveo_hostname).removesuffix("." + tunnel_domain)
-            if re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", serveo_hostname):
-                break
-            print("Use 3-63 lowercase letters, digits or hyphens.")
-            serveo_hostname = ""
-        default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "sish_local_mcp").resolve()
-        key_path = default_key
-        while True:
-            raw_key = prompt_input(f"sish private SSH key [{default_key}]: ").strip().strip('"')
-            key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
-            if key_path.is_file():
-                break
-            print(f"Private key not found: {key_path}")
-        ssh_key = str(key_path)
+        if not use_saved_tunnel_settings:
+            tunnel_host = str(prompt_input(
+                f"sish SSH endpoint host [{tunnel_host}]" if tunnel_host else "sish SSH endpoint host"
+            )).strip() or tunnel_host
+            if not tunnel_host:
+                raise RuntimeError("sish SSH endpoint host is required.")
+            while True:
+                raw_port = prompt_input(f"sish SSH port [{tunnel_ssh_port}]: ").strip()
+                chosen_port = raw_port or tunnel_ssh_port
+                if str(chosen_port).isdigit():
+                    tunnel_ssh_port = str(chosen_port)
+                    break
+                print("Use a numeric TCP port.")
+            tunnel_domain = str(prompt_input(
+                f"Public wildcard base domain [{tunnel_domain}]" if tunnel_domain else "Public wildcard base domain"
+            )).strip().lower().strip(".") or tunnel_domain
+            if not tunnel_domain:
+                raise RuntimeError("Public wildcard base domain is required for sish mode.")
+            while True:
+                current_hostname = serveo_hostname or ""
+                prompt = (
+                    f"Reserved subdomain label [{current_hostname}]"
+                    if current_hostname
+                    else "Reserved subdomain label"
+                )
+                raw_hostname = prompt_input(f"{prompt}: ").strip().lower()
+                serveo_hostname = (raw_hostname or serveo_hostname).removesuffix("." + tunnel_domain)
+                if re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", serveo_hostname):
+                    break
+                print("Use 3-63 lowercase letters, digits or hyphens.")
+                serveo_hostname = ""
+            default_key = Path(ssh_key).expanduser().resolve() if ssh_key else (Path.home() / ".ssh" / "sish_local_mcp").resolve()
+            key_path = default_key
+            while True:
+                raw_key = prompt_input(f"sish private SSH key [{default_key}]: ").strip().strip('"')
+                key_path = normalize_workspace_path(raw_key) if raw_key else default_key.resolve()
+                if key_path.is_file():
+                    break
+                print(f"Private key not found: {key_path}")
+            ssh_key = str(key_path)
     else:
         print("\nTunnellio mode uses the managed runtime and restores public connection details from the runtime snapshot.")
 
@@ -1362,10 +1479,14 @@ def setup(force: bool = False) -> dict:
             "uv",
         ],
     }
+    save_connection_profile(selected_tunnel_mode, config)
     save_config(config, reason="setup", allow_sensitive_change=True)
     saved_slot, added_to_connections = remember_workspace_path(workspace, preferred_slot=1)
     storage, active_profile = sync_workflow_profiles(config, created_from="setup")
     if active_profile is not None:
+        active_profile["connectionType"] = selected_tunnel_mode
+        active_profile.setdefault("metadata", {})["connectionType"] = selected_tunnel_mode
+        save_profiles(storage, workflow_profiles_file())
         _, config = activate_profile_config(storage, active_profile, config)
     print(f"\nConfiguration saved in: {CONFIG_FILE}")
     if added_to_connections:

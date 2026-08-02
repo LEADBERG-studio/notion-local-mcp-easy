@@ -48,3 +48,9 @@
 - Every launcher config write creates `config.backup.<timestamp>.<reason>.json` first.
 - Writes outside explicit setup refuse to change sensitive fields such as `token`, `tunnel_backend`, `serveo_hostname`, `ssh_key`, `public_url`, and Tunnellio credentials.
 - This prevents profile/menu/self-heal code from silently changing production tunnel settings.
+
+## Connection profiles
+
+- New versions store per-mode connection memory in `connection-profiles.json`, separate from legacy `config.json` for old-version compatibility.
+- Setup asks whether to keep the configured connection mode, then whether to reuse saved settings for that mode.
+- Workflow profiles now record the selected `connectionType`.
