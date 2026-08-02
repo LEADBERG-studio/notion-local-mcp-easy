@@ -165,6 +165,18 @@ class IdeBridgeTests(unittest.TestCase):
         self.assertIn("model answer via bridge", result.get("body", ""))
         self.assertTrue(result["body"].rstrip().endswith("data: [DONE]"))
 
+
+    def test_ide_bridge_models_endpoint_is_self_contained(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/v1/models",
+            method="GET",
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        ids = [item["id"] for item in body["data"]]
+        self.assertIn("ide-bridge", ids)
+
     # 3. setup defaults produce sandbox mode (default)
     def test_setup_defaults_produce_sandbox_mode(self):
         with mock.patch("builtins.input", return_value=""):
