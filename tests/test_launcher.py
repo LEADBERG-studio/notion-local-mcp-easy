@@ -94,6 +94,55 @@ class LauncherTests(unittest.TestCase):
 
 
 
+
+    def test_heal_legacy_config_restores_workspace_token_and_auth_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace-one"
+            workspace.mkdir()
+            config_file = root / "config.json"
+            connections_file = root / "connections.cfg"
+            with (
+                mock.patch.object(launcher, "CONFIG_FILE", config_file),
+                mock.patch.object(launcher, "CONNECTIONS_FILE", connections_file),
+            ):
+                launcher.save_connections_cfg(True, {1: str(workspace.resolve())})
+                healed = launcher.heal_legacy_config({}, persist=True)
+                stored = json.loads(config_file.read_text(encoding="utf-8"))
+
+        self.assertEqual(healed["workspace"], str(workspace.resolve()))
+        self.assertTrue(healed["token"])
+        self.assertEqual(healed["auth_mode"], "legacy")
+        self.assertEqual(stored["workspace"], str(workspace.resolve()))
+
+    def test_start_and_resolve_tunnel_retries_when_relay_port_is_busy(self):
+        class Proc:
+            pid = 12345
+
+        calls = {"count": 0}
+
+        def fake_start(config):
+            return Proc(), queue.Queue()
+
+        def fake_resolve(config, tunnel, lines):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("SSH tunnel exited with code 255")
+            return "https://retry.serveousercontent.com"
+
+        with (
+            mock.patch.object(launcher, "start_tunnel", side_effect=fake_start),
+            mock.patch.object(launcher, "resolve_tunnel_url", side_effect=fake_resolve),
+            mock.patch.object(launcher, "tunnel_log_suggests_remote_port_busy", return_value=True),
+            mock.patch.object(launcher, "stop_previous_tunnel_runtime"),
+            mock.patch.object(launcher, "stop_pid"),
+            mock.patch.object(launcher.time, "sleep"),
+        ):
+            tunnel, lines, url = launcher.start_and_resolve_tunnel({"tunnel_backend": "serveo"}, attempts=2)
+
+        self.assertEqual(url, "https://retry.serveousercontent.com")
+        self.assertEqual(calls["count"], 2)
+
     def test_setup_saves_first_workspace_to_first_slot(self):
 
         with tempfile.TemporaryDirectory() as directory:

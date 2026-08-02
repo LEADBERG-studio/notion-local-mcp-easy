@@ -396,6 +396,85 @@ def save_json(path: Path, value: dict) -> None:
 
 
 
+def generate_legacy_token() -> str:
+    return "bridge-secret-token-" + secrets.token_urlsafe(18)
+
+def _workspace_from_connections_cfg() -> str:
+    try:
+        connections = load_connections_cfg()
+        paths = dict(connections.get("paths") or {})
+        for _, saved_path in sorted(paths.items()):
+            candidate = normalize_workspace_path(saved_path)
+            if candidate.exists():
+                return str(candidate)
+    except Exception:
+        pass
+    return str(SCRIPT_DIR)
+
+def heal_legacy_config(config: dict, *, persist: bool = True) -> dict:
+    if not isinstance(config, dict):
+        config = {}
+    changed = False
+    if not str(config.get("workspace", "")).strip():
+        config["workspace"] = _workspace_from_connections_cfg()
+        changed = True
+    if not str(config.get("token", "")).strip():
+        config["token"] = generate_legacy_token()
+        changed = True
+    auth_mode = normalize_auth_mode(config.get("auth_mode", "legacy"))
+    if config.get("auth_mode") != auth_mode:
+        config["auth_mode"] = auth_mode
+        changed = True
+    if not str(config.get("tunnel_backend", "")).strip():
+        config["tunnel_backend"] = default_tunnel_backend(config)
+        changed = True
+    if changed and persist:
+        save_json(CONFIG_FILE, config)
+        print(f"Config recovered missing legacy fields in: {CONFIG_FILE}")
+    return config
+
+def tunnel_log_suggests_remote_port_busy() -> bool:
+    tail = tunnel_log_tail().lower()
+    return ("remote port forwarding failed" in tail or "forwarding failed" in tail or "listen port 80" in tail)
+
+def stop_previous_tunnel_runtime(config: dict) -> None:
+    runtime = load_json(RUNTIME_FILE)
+    pid = int(runtime.get("tunnel_pid", 0) or 0)
+    match = str(runtime.get("tunnel_match", tunnel_process_match(config)))
+    if pid and pid_matches(pid, match):
+        with contextlib.suppress(Exception):
+            stop_pid(pid, match)
+    if tunnel_backend(config) == "tunnellio":
+        runtime_name = str(runtime.get("tunnellio_runtime_name") or tunnellio_runtime_name(config)).strip()
+        if runtime_name:
+            with contextlib.suppress(Exception):
+                request_tunnellio_stop(config, runtime_name, force=True)
+
+def start_and_resolve_tunnel(config: dict, *, attempts: int = 4) -> tuple[subprocess.Popen, queue.Queue[str], str]:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            delay = min(30, 3 * attempt)
+            print(f"Tunnel start retry {attempt}/{attempts} in {delay}s...")
+            time.sleep(delay)
+        stop_previous_tunnel_runtime(config)
+        tunnel, lines = start_tunnel(config)
+        try:
+            url = resolve_tunnel_url(config, tunnel, lines)
+            return tunnel, lines, url
+        except Exception as exc:
+            last_error = exc
+            with contextlib.suppress(Exception):
+                stop_pid(tunnel.pid, tunnel_process_match(config))
+            if tunnel_log_suggests_remote_port_busy():
+                print("Tunnel remote port is still busy on the relay; cleaning up and retrying.")
+                continue
+            if attempt >= attempts:
+                raise
+    assert last_error is not None
+    raise last_error
+
+
 def yes_no(prompt: str, default: bool) -> bool:
 
     marker = "Y/n" if default else "y/N"
@@ -795,6 +874,7 @@ def choose_workspace_from_connections(config: dict) -> dict:
 
 
 
+    config = heal_legacy_config(config)
     current_workspace = normalize_workspace_path(config["workspace"])
 
     print("\n=== Меню рабочих областей Notion Local MCP Easy ===")
@@ -1062,7 +1142,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
 
 def setup(force: bool = False) -> dict:
     ensure_connections_cfg_exists()
-    existing = load_json(CONFIG_FILE)
+    raw_existing = load_json(CONFIG_FILE)
+    existing = heal_legacy_config(raw_existing, persist=True) if raw_existing else {}
     if existing and not force:
         return choose_workspace_from_connections(existing)
 
@@ -2463,8 +2544,7 @@ def run() -> int:
                     "Make sure your reverse proxy forwards it to the local MCP port."
                 )
         else:
-            tunnel, lines = start_tunnel(config)
-            current_url = resolve_tunnel_url(config, tunnel, lines)
+            tunnel, lines, current_url = start_and_resolve_tunnel(config)
             if not public_health_ok(current_url, config["token"], process=tunnel):
                 raise tunnel_error(
                     f"Public health check failed: {current_url}/health did not answer"
@@ -2483,8 +2563,7 @@ def run() -> int:
                 print("Tunnel disconnected; reconnecting in 3 seconds...")
                 time.sleep(3)
                 previous_url = current_url
-                tunnel, lines = start_tunnel(config)
-                current_url = resolve_tunnel_url(config, tunnel, lines)
+                tunnel, lines, current_url = start_and_resolve_tunnel(config)
                 healthy = public_health_ok(current_url, config["token"], process=tunnel)
                 publish_connection(config, current_url, server.pid, tunnel.pid)
                 if not healthy:

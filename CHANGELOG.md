@@ -1,5 +1,7 @@
 ## 2.2.0 - 2026-08-02
 
+- Hotfix: launcher self-heals shared config missing `workspace`, `token`, `auth_mode`, or `tunnel_backend` instead of crashing old/new builds.
+- Hotfix: built-in tunnel startup now cleans stale runtime and retries when SSH relay reports `remote port forwarding failed for listen port 80`.
 - Split the queue/poll IDE mode out of `ide_gateway` into a standalone `ide_bridge` plugin.
 - `ide_gateway` is now focused on sandbox/external direct serving; sandbox remains the keyless Tunnellio TCP bridge path.
 - Added separate IDE Bridge defaults: port `8797`, model alias `ide-bridge`, token prefix `ideb_`, runtime `temp/ide_bridge_runtime`, and `ide_bridge_*` tools.
