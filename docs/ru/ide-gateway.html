@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -62,7 +62,7 @@
     <main class="content">
       <h1>IDE Gateway — мост между IDE и моделью</h1>
 
-      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает OpenAI-compatible шлюз для IDE. Три режима: <strong>sandbox</strong> (по умолчанию, LLM egress напрямую через Tunnellio), <strong>bridge</strong> (модель крутит poll-цикл), <strong>external</strong> (прямой провайдер).</p>
+      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает OpenAI-compatible шлюз для IDE. По умолчанию используется <strong>sandbox</strong>: модель одной командой запускает сервер в своей песочнице и keyless TCP bridge Tunnellio. Без SSH-ключей и без ручной возни.</p>
 
       <div class="callout info">
         <strong>Зачем это нужно:</strong> инструменты MCP менее надёжны, чем у IDE. Этот плагин позволяет работать в привычном IDE, но с моделью, которая видит ваши файлы и может вызывать MCP-инструменты. Общение IDE ↔ модель идёт напрямую, без сообщений в чате.
@@ -70,32 +70,40 @@
 
       <h2>Как это работает</h2>
       <pre><code>IDE (Cursor, Continue, VS Code, ...)
-  → POST http://127.0.0.1:8787/v1/chat/completions
-  → ide_gateway endpoint (worker)
-  → очередь (file-based queue)
-  → модель вызывает run_program: bridge_step.py poll
-  → bridge_step.py забирает запрос из очереди
-  → модель обрабатывает MCP-инструментами
-  → модель вызывает run_program: bridge_step.py complete
-  → IDE получает ответ
-  → модель снова poll (цикл, без чат-сообщений)</code></pre>
+  → https://&lt;hostname&gt;.tunnellio.site/v1
+  → keyless Tunnellio TCP bridge (--run --watch)
+  → sandbox_server.py в песочнице модели
+  → внутренний LLM endpoint/key этой же песочницы
+  → ответ возвращается в IDE</code></pre>
+
+      <div class="callout info">
+        <strong>Главная идея:</strong> команда «подними мост» запускает <code>sandbox_bootstrap.py</code>. Он сохраняет внутренние endpoint/key песочницы в state, поднимает сервер daemon-процессом и запускает Tunnellio bridge в watch-режиме. MCP tool-call может закончиться, а сервер и туннель продолжают жить.
+      </div>
+
+      <h2>Что остаётся постоянным</h2>
+      <ul>
+        <li><strong>API key для IDE</strong> — локальный <code>ideg_...</code>, хранится в plugin config и обычно не меняется при обновлениях.</li>
+        <li><strong>Base URL</strong> — после первого bootstrap берётся из Tunnellio и показывается через <code>ide_gateway_show_config</code>.</li>
+        <li><strong>Эфемерный hostname</strong> — сохраняется в endpoint state и переиспользуется, пока живёт домен (обычно сутки). Если домен истёк, bootstrap создаст новый и сохранит его.</li>
+        <li><strong>Кастомный hostname</strong> — если выбран в setup, используется постоянно.</li>
+      </ul>
 
       <h2>Быстрый старт</h2>
       <ol class="steps">
-        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>Через <code>SETUP.bat</code> в корне MCP включите trusted mode ответом <code>y</code>.</li>
-        <li><strong>Включите плагин.</strong><br>Откройте <code>plugins\ide_gateway</code> и запустите <code>SETUP.bat</code>. Выберите <code>current</code> scope, <code>full_access</code> mode, defaults.</li>
-        <li><strong>Перезапустите MCP.</strong><br><code>STOP.bat</code> → <code>START.bat</code>. Endpoint поднимется на <code>127.0.0.1:8787</code>.</li>
-        <li><strong>Получите промт-шаблон.</strong><br>Вызовите <code>ide_gateway_bridge_prompt</code> — он вернёт готовую инструкцию для системного промта Notion Agent.</li>
-        <li><strong>Вставьте промт в системный промт.</strong><br>Модель запустит цикл <code>wait_request</code> → мост стоит постоянно.</li>
-        <li><strong>Скопируйте настройки в IDE.</strong><br>Вызовите <code>ide_gateway_show_config</code> (<code>include_secret=true</code>) и скопируйте <code>base_url</code>, <code>api_key</code>, <code>model</code>.</li>
-        <li><strong>Работайте.</strong><br>IDE отправляет запросы — модель обслуживает их напрямую через мост.</li>
+        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>Через <code>SETUP.bat</code> в корне MCP включите trusted mode.</li>
+        <li><strong>Включите плагин.</strong><br>Откройте <code>plugins\ide_gateway</code> и запустите <code>SETUP.bat</code>. Выберите <code>current</code>, <code>full_access</code>, режим <code>sandbox</code>. Для начала берите <code>ephemeral</code> domain.</li>
+        <li><strong>Перезапустите MCP.</strong><br><code>STOP.bat</code> → <code>START.bat</code>. Локальный endpoint поднимется, а public URL появится после bootstrap.</li>
+        <li><strong>Получите prompt.</strong><br>Вызовите <code>ide_gateway_bridge_prompt</code>. В sandbox-режиме он содержит одну bootstrap-команду.</li>
+        <li><strong>Скажите модели: «подними мост».</strong><br>Модель выполняет bootstrap, ждёт JSON и возвращает <code>base_url</code>.</li>
+        <li><strong>Скопируйте настройки в IDE.</strong><br>Вызовите <code>ide_gateway_show_config</code> с <code>include_secret=true</code> и возьмите <code>base_url</code>, <code>api_key</code>, <code>model</code>.</li>
+        <li><strong>Работайте.</strong><br>IDE обращается к public URL, запросы идут в песочницу модели напрямую.</li>
       </ol>
 
       <h2>Настройки IDE</h2>
       <table><thead><tr><th>Поле</th><th>Значение</th></tr></thead><tbody>
-        <tr><td>Base URL</td><td><code>http://127.0.0.1:8787/v1</code></td></tr>
+        <tr><td>Base URL</td><td><code>https://&lt;hostname&gt;.tunnellio.site/v1</code> из bootstrap или <code>ide_gateway_show_config</code></td></tr>
         <tr><td>API key</td><td>Значение <code>api_key</code> из <code>ide_gateway_show_config</code> (начинается с <code>ideg_</code>)</td></tr>
-        <tr><td>Model</td><td>Значение <code>model</code>, обычно <code>ide-gateway</code></td></tr>
+        <tr><td>Model</td><td><code>ide-gateway</code> или реальное имя из <code>/v1/models</code></td></tr>
       </tbody></table>
 
       <h2>Инструменты</h2>
@@ -126,18 +134,18 @@
         <li><code>/v1/moderations</code> (local heuristic)</li>
       </ul>
 
-      <h2>Цикл моста</h2>
+      <h2>Жизненный цикл sandbox-моста</h2>
       <ol class="steps">
-        <li>Модель один раз запускает цикл (через промт-шаблон или вручную).</li>
-        <li>Модель вызывает <code>run_program: python bridge_step.py poll --timeout 30</code> — это блокируется до прихода IDE-запроса (или 30 сек таймаут).</li>
-        <li>IDE отправляет <code>POST /v1/chat/completions</code> → worker кладёт запрос в очередь → <code>poll</code> мгновенно возвращает его модели.</li>
-        <li>Модель обрабатывает запрос своими MCP-инструментами (<code>read_file</code>, <code>run_command</code>, <code>web_search</code> и т.д.).</li>
-        <li>Модель вызывает <code>run_program: python bridge_step.py complete --request-id req_XXX --content "ответ"</code>.</li>
-        <li>IDE получает ответ. Модель снова вызывает <code>poll</code>. Цикл повторяется без сообщений в чате.</li>
+        <li><code>ide_gateway_start</code> создаёт endpoint state и сохраняет локальный IDE token.</li>
+        <li><code>ide_gateway_bridge_prompt</code> отдаёт одну команду для <code>sandbox_bootstrap.py</code>.</li>
+        <li>Bootstrap читает внутренние endpoint/key песочницы из env и пишет их в state.</li>
+        <li><code>sandbox_server.py</code> стартует daemon-процессом и отвечает на OpenAI-compatible API.</li>
+        <li><code>sandbox_tunnel.py</code> запускает <code>tunnellio bridge --run --watch</code>, получает public URL и сохраняет hostname.</li>
+        <li>При следующем запуске hostname переиспользуется. Если эфемерный домен истёк, будет создан новый.</li>
       </ol>
 
       <div class="callout warning">
-        <strong>Важно:</strong> мост держится только пока активная модель в чате запускает <code>bridge_step.py poll</code> в цикле. Если чат закрыт или модель не запустила цикл — запросы из IDE будут висеть в очереди до таймаута. Не вызывайте <code>wait_request</code> как MCP-tool-call — он таймаутит; используйте <code>run_program</code> + <code>bridge_step.py</code>.
+        <strong>Важно:</strong> в sandbox-режиме не нужен long-poll цикл. Если вам нужен старый совместимый путь, выберите режим <code>bridge</code>: там модель крутит <code>bridge_step.py poll</code> короткими вызовами, чтобы не ловить timeout MCP-tool-call.
       </div>
 
       <h2>Диагностика</h2>

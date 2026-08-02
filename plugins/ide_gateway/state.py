@@ -410,6 +410,18 @@ def start_endpoint(arguments: dict[str, Any], context: dict[str, Any], config: d
             pass
     if not token:
         token = generate_token()
+
+    if config.get("gateway_mode") == "sandbox":
+        if existing and not config.get("tunnellio_hostname") and existing.get("tunnellio_hostname"):
+            config = {**config, "tunnellio_hostname": str(existing.get("tunnellio_hostname", "")).strip()}
+        try:
+            from plugins.ide_gateway.backend import ensure_domain
+            config = ensure_domain(config, local_port=port)
+        except Exception:
+            # Do not block local endpoint startup; bridge_prompt will still show
+            # the local URL and sandbox_tunnel.py can report the real failure.
+            pass
+
     now = datetime.datetime.now().isoformat()
     root = runtime_root(context)
     root.mkdir(parents=True, exist_ok=True)
@@ -586,6 +598,8 @@ def show_config(arguments: dict[str, Any], context: dict[str, Any], config: dict
         return {"ok": False, "status": "not_running", "message": f"Endpoint {name} is not running"}
 
     base_url = state["base_url"]
+    if state.get("gateway_mode") == "sandbox" and state.get("tunnellio_public_url"):
+        base_url = str(state["tunnellio_public_url"]).rstrip("/") + "/v1"
     model_id = state["model_id"]
     token = state["token"] if include_secret else "***"
     return {
@@ -726,52 +740,58 @@ def _bridge_prompt_text(base_url: str, model: str, token: str,
 def _sandbox_prompt(base_url: str, model: str, token: str,
                      sandbox_script: str, workspace: str,
                      state: dict[str, Any] | None = None) -> str:
-    tunnel_script = str(Path(__file__).resolve().parent / "sandbox_tunnel.py")
-    # Compute the endpoint state file path (where worker stores its config)
+    bootstrap_script = str(Path(__file__).resolve().parent / "sandbox_bootstrap.py")
+    tunnellio_bin = str(Path(__file__).resolve().parents[2] / "tunnellio.exe")
     state_path = ""
     public_url = ""
+    hostname = ""
+    port = 8787
     if state:
         name = state.get("name", "default")
-        # The state file is at <runtime>/endpoints/<name>.json
         rt = runtime_root({"workspacePath": workspace})
         state_path = str(rt / "endpoints" / f"{name}.json")
-        public_url = state.get("tunnellio_public_url", "")
+        public_url = str(state.get("tunnellio_public_url", "") or "")
+        hostname = str(state.get("tunnellio_hostname", "") or "")
+        port = int(state.get("port") or 8787)
+
+    cmd = "python " + repr(bootstrap_script)
+    if state_path:
+        cmd += " --state " + repr(state_path)
+    else:
+        cmd += f" --port {port}"
+    cmd += " --tunnellio-path " + repr(tunnellio_bin)
+    if hostname:
+        cmd += " --hostname " + repr(hostname)
 
     prompt = (
-        "# Подними мост (sandbox mode)\n"
-        "Нужно запустить 2 процесса:\n"
-        "1. sandbox_server.py — LLM-шлюз\n"
-        "2. sandbox_tunnel.py — туннель к Tunnellio\n\n"
-        "## Шаг 1: запусти sandbox-сервер\n"
-        "   run_program: python " + repr(sandbox_script) + " --port 8787\n"
-        "Сервер поднимется и будет обслуживать запросы через LLM egress.\n\n"
-        "## Шаг 2: запусти туннель\n"
-        "Воркер уже зарезервировал имя домена. Туннель читает hostname из state,\n"
-        "генерирует SSH-ключ в sandbox, создаёт домен с этим hostname и поднимает туннель.\n"
-    )
-    if state_path:
-        prompt += (
-            "   run_program: python " + repr(tunnel_script) + " --state " + repr(state_path) + "\n"
-        )
-    else:
-        prompt += (
-            "   run_program: python " + repr(tunnel_script) + " --local-port 8787\n"
-        )
-    prompt += (
-        "В выводе будет публичный URL.\n\n"
-        "## Проверка\n"
-        "   run_program: curl -s http://127.0.0.1:8787/health\n"
-        "Должно быть: {\"status\": \"alive\", \"mode\": \"sandbox\"}\n\n"
-        "## Подключение IDE\n"
+        "# IDE Gateway sandbox mode: one command\n"
+        "When the user says `подними мост`, run exactly the bootstrap command below and wait for its JSON result. "
+        "Do not ask for confirmation and do not split this into manual steps unless the command fails.\n\n"
+        "## Bootstrap command\n"
+        f"`{cmd}`\n\n"
+        "## What the command does\n"
+        "- Captures this sandbox's internal model endpoint and key from env: OPENAI_BASE_URL/OPENAI_API_KEY, ACCIO_GATEWAY_BASE_URL/ACCIO_GATEWAY_TOKEN, SANDBOX_OPENAI_BASE_URL/SANDBOX_OPENAI_API_KEY, or ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY.\n"
+        "- Writes those internal values into the endpoint state before daemonizing, so the server keeps using the correct sandbox egress after the MCP tool-call exits.\n"
+        "- Starts sandbox_server.py as a resident daemon on 127.0.0.1.\n"
+        "- Starts the tunnel through sandbox_tunnel.py, which uses keyless `tunnellio bridge --run --watch`; no SSH keys, no ssh process, no cloud API token in code.\n"
+        "- Uses detached/session-started processes plus the Tunnellio watch loop so a short-lived tool call or 5-minute MCP timeout does not kill the server/bridge.\n"
+        "- Prints JSON with `ok`, `base_url`, health info, and redacted detected egress.\n\n"
+        "## Success response\n"
+        "If JSON says `ok: true`, tell the user the bridge is up and give them the returned `base_url`.\n\n"
+        "## IDE connection\n"
     )
     if public_url:
-        prompt += f"   base_url: {public_url.rstrip('/')}/v1\n"
+        prompt += f"base_url: {public_url.rstrip('/')}/v1 (or the fresher base_url returned by bootstrap)\n"
     else:
-        prompt += f"   base_url: {base_url}\n"
+        prompt += "base_url: use the `base_url` returned by bootstrap\n"
     prompt += (
-        f"   api_key: {token}\n"
-        f"   model: {model} (или любой из /v1/models)\n\n"
-        "Модель больше ничего не делает — туннель и сервер работают в фоне."
+        f"api_key: {token}\n"
+        f"model: {model} (or any real model returned by /v1/models)\n\n"
+        "## Non-negotiables\n"
+        "- Do not invent public URLs. Use the reserved URL returned by bootstrap/Tunnellio.\n"
+        "- Do not use SSH tunneling. TCP bridge is the canonical path.\n"
+        "- Do not leave fallback model names as the only advertised models if this sandbox exposes real names.\n"
+        "- If the bootstrap fails because the binary path differs, locate `tunnellio`/`tunnellio.exe` in the sandbox or PATH, set TUNNELLIO_BIN or pass --tunnellio-path, then rerun the same bootstrap command.\n"
     )
     return prompt
 

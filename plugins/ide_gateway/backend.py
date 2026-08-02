@@ -223,96 +223,154 @@ def check_domain_status(token: str, domain_id: str) -> dict[str, Any] | None:
 
 
 def ensure_domain(config: dict[str, Any], local_port: int = 8787) -> dict[str, Any]:
-    """Reserve a Tunnellio hostname (check availability) and compute public_url.
+    """Prepare public URL hints for sandbox TCP bridge mode.
 
-    The worker does NOT create the domain — it only reserves the hostname and
-    computes the predictable public_url (https://<hostname>.tunnellio.site).
-    The sandbox creates the actual domain + SSH key + tunnel at runtime.
-
-    Returns the updated config with tunnellio_public_url and tunnellio_hostname.
+    The old implementation reserved a Tunnellio SSH domain and generated SSH
+    keys ahead of time. TCP bridge mode is keyless: the sandbox-side
+    `sandbox_tunnel.py` asks the bundled Tunnellio client to create or attach
+    the bridge at runtime. If a custom hostname is configured we can predict the
+    URL; if not, the bridge will generate an ephemeral hostname and write it back
+    to the endpoint state after launch.
     """
-    token = config.get("tunnellio_token", "") or DEFAULT_TUNNELLIO_TOKEN
-    hostname = config.get("tunnellio_hostname", "")
-
-    # If no hostname configured, generate a random one
+    hostname = str(
+        config.get("tunnellio_custom_hostname")
+        or config.get("tunnellio_hostname")
+        or ""
+    ).strip()
     if not hostname:
         import secrets as _secrets
         hostname = "ide-gateway-" + _secrets.token_hex(4)
-        config["tunnellio_hostname"] = hostname
 
-    # Check availability (does NOT create the domain)
-    check = _tunnellio_post("/domains/check", token, {"hostname": hostname})
-    if check.get("ok") and not check.get("data", {}).get("available"):
-        # Hostname taken — try another
-        import secrets as _secrets
-        hostname = "ide-gateway-" + _secrets.token_hex(4)
-        config["tunnellio_hostname"] = hostname
+    config["tunnellio_hostname"] = hostname
+    config["tunnellio_mode"] = "tcp_bridge"
+    config["tunnellio_domain_id"] = ""
+    config["tunnellio_key_id"] = ""
+    config["tunnellio_private_key"] = ""
+    config["tunnellio_private_key_content"] = ""
+    config["tunnellio_ssh_host"] = ""
+    config["tunnellio_ssh_port"] = ""
+    config["tunnellio_ssh_user"] = ""
+    config["tunnellio_remote_hostname"] = ""
 
-    # Compute predictable public_url for persistent hostname
-    public_url = f"https://{hostname}.tunnellio.site"
-    config["tunnellio_public_url"] = public_url
-    config["tunnellio_mode"] = "persistent"
-    config["upstream_base_url"] = public_url.rstrip("/") + "/v1"
+    if hostname:
+        public_url = f"https://{hostname}.tunnellio.site"
+        config["tunnellio_public_url"] = public_url
+        config["upstream_base_url"] = public_url.rstrip("/") + "/v1"
+    else:
+        config["tunnellio_public_url"] = ""
+        config["upstream_base_url"] = ""
     return config
 
 
 # --------------------------------------------------------------------------- #
 # Model discovery
 # --------------------------------------------------------------------------- #
+def _split_model_names(raw: str) -> list[str]:
+    names: list[str] = []
+    for item in str(raw or "").replace("\n", ",").replace(";", ",").split(","):
+        item = item.strip().strip('"\'')
+        if item and item not in names:
+            names.append(item)
+    return names
+
+
+def _model_env_candidates(config: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for key in (
+        "IDE_GATEWAY_MODEL", "IDE_GATEWAY_EXTRA_MODELS", "OPENAI_MODEL",
+        "OPENAI_MODELS", "MODEL", "MODELS", "DEFAULT_MODEL",
+        "AVAILABLE_MODELS", "ACCIO_MODELS", "SANDBOX_MODELS",
+        "ANTHROPIC_MODEL", "ANTHROPIC_MODELS",
+    ):
+        for name in _split_model_names(os.environ.get(key, "")):
+            if name not in names:
+                names.append(name)
+    for name in _split_model_names(str(config.get("upstream_model", ""))):
+        if name not in names:
+            names.append(name)
+    for name in _split_model_names(str(config.get("extra_models", ""))):
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _candidate_model_urls(base_url: str) -> list[str]:
+    base = base_url.strip().rstrip("/")
+    if not base:
+        return []
+    urls = [base + "/models"]
+    if not base.endswith("/v1"):
+        urls.append(base + "/v1/models")
+    # Some sandbox gateways expose `/api/egress/openai/v1` while the env var
+    # points one level higher. Trying both costs little and prevents stale
+    # fallback model lists.
+    if "/openai" not in base and not base.endswith("/v1"):
+        urls.append(base + "/openai/v1/models")
+    seen: list[str] = []
+    for url in urls:
+        if url not in seen:
+            seen.append(url)
+    return seen
+
+
+def _append_model(models: list[dict[str, Any]], model_id: str, owner: str) -> None:
+    model_id = str(model_id or "").strip()
+    if not model_id or model_id in {m["id"] for m in models}:
+        return
+    models.append({"id": model_id, "object": "model", "created": 0, "owned_by": owner})
+
+
 def discover_models(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Discover available models from environment variables (sandbox egress).
+    """Discover available models from the current sandbox, then fall back safely.
 
-    Sandbox environments expose various env vars depending on the platform:
-    - OPENAI_BASE_URL / OPENAI_API_KEY (standard)
-    - ACCIO_GATEWAY_TOKEN (Xi|Omega sandbox)
-    - ANTHROPIC_BASE_URL (Anthropic egress)
-
-    We try to read /v1/models from the egress; if that fails, return fallback.
+    The important rule: prefer what this sandbox actually exposes. Static names
+    are only a last-resort compatibility net, not the advertised truth.
     """
     config = config or {}
     models: list[dict[str, Any]] = []
 
-    # Try all known egress env vars
+    # Explicit env/config model names win because some sandboxes intentionally
+    # hide `/models` but still provide the active model list via env.
+    for name in _model_env_candidates(config):
+        _append_model(models, name, "sandbox-env")
+
     egress_configs = [
-        # (base_url_env, key_env, key_fallback_envs)
-        ("OPENAI_BASE_URL", "OPENAI_API_KEY", ["ACCIO_GATEWAY_TOKEN"]),
-        ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", ["ACCIO_GATEWAY_TOKEN"]),
+        (str(config.get("upstream_base_url", "")).strip(), str(config.get("upstream_api_key", "")).strip(), "config"),
+        (os.environ.get("OPENAI_BASE_URL", "").strip(), os.environ.get("OPENAI_API_KEY", "").strip() or os.environ.get("ACCIO_GATEWAY_TOKEN", "").strip(), "openai-egress"),
+        (os.environ.get("ANTHROPIC_BASE_URL", "").strip(), os.environ.get("ANTHROPIC_API_KEY", "").strip() or os.environ.get("ACCIO_GATEWAY_TOKEN", "").strip(), "anthropic-egress"),
+        (os.environ.get("ACCIO_GATEWAY_BASE_URL", "").strip(), os.environ.get("ACCIO_GATEWAY_TOKEN", "").strip(), "accio-egress"),
     ]
 
-    for base_env, key_env, fallback_key_envs in egress_configs:
-        base_url = os.environ.get(base_env, "").strip()
+    for base_url, api_key, owner in egress_configs:
         if not base_url:
             continue
-        api_key = os.environ.get(key_env, "").strip()
-        for fb_env in fallback_key_envs:
-            if not api_key:
-                api_key = os.environ.get(fb_env, "").strip()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        for url in _candidate_model_urls(base_url):
+            try:
+                before = len(models)
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode("utf-8") or "{}")
+                raw_models = data.get("data", data.get("models", []))
+                if isinstance(raw_models, dict):
+                    raw_models = raw_models.values()
+                for m in raw_models:
+                    if isinstance(m, dict):
+                        mid = m.get("id") or m.get("name") or m.get("model")
+                        _append_model(models, str(mid or ""), str(m.get("owned_by") or owner))
+                    else:
+                        _append_model(models, str(m), owner)
+                if len(models) > before:
+                    break
+            except Exception:
+                continue
 
-        try:
-            req = urllib.request.Request(
-                base_url.rstrip("/") + "/models",
-                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                for m in data.get("data", []):
-                    if isinstance(m, dict) and m.get("id"):
-                        models.append({"id": m["id"], "object": "model", "created": 0,
-                                        "owned_by": m.get("owned_by", "sandbox")})
-        except Exception:
-            pass
-
-    # If egress didn't return models, use the static fallback
     if not models:
         for name in _DEFAULT_MODELS:
-            models.append({"id": name, "object": "model", "created": 0, "owned_by": "fallback"})
+            _append_model(models, name, "fallback")
 
-    # Merge config-provided models
-    for name in config.get("extra_models", "").split(","):
-        name = name.strip()
-        if name and name not in {m["id"] for m in models}:
-            models.append({"id": name, "object": "model", "created": 0, "owned_by": "config"})
-
+    # Keep the generic alias available without hiding the real sandbox names.
+    _append_model(models, "ide-gateway", "alias")
     return models
 
 

@@ -90,25 +90,33 @@ docs/ru/index.html
 
 ## IDE Gateway — мост между IDE и моделью
 
-Начиная с 1.8.0 в комплект входит плагин `ide_gateway` — полный OpenAI-compatible API-шлюз (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Шлюз поддерживает три режима:
+Начиная с 2.1.0 `ide_gateway` в режиме **sandbox** поднимается одной командой «подними мост»: модель запускает `sandbox_bootstrap.py`, он сохраняет внутренний endpoint/key текущей песочницы, стартует resident `sandbox_server.py` и keyless Tunnellio TCP bridge (`tunnellio bridge --run --watch`). SSH-ключи больше не нужны.
 
-- **sandbox** (по умолчанию) — модель запускает `sandbox_server.py` + `sandbox_tunnel.py` в sandbox Notion Agent. IDE подключается к публичному URL Tunnellio. Прямой доступ к LLM egress, без poll-loop.
-- **bridge** — модель крутит `bridge_step.py poll` цикл через `run_program`. Универсальный, работает на всех платформах.
-- **external** — worker напрямую зовёт OpenAI-compatible провайдера (Ollama, OpenAI).
+Режимы:
 
-Мост работает через `run_program`: модель в чате запускает `bridge_step.py poll` (ждёт запрос от IDE 30 сек), обрабатывает его своими MCP-инструментами, отвечает через `bridge_step.py complete`, и снова `poll`. Никаких ручных «пинков», сообщения в чате не плодятся, не требует долгоживущих MCP-tool-call'ов (которые таймаутят).
+- **sandbox** (по умолчанию) — публичный URL Tunnellio ведёт в sandbox-сервер, а тот напрямую вызывает LLM egress этой же песочницы. Это основной путь для IDE.
+- **bridge** — совместимый fallback: модель крутит `bridge_step.py poll` через `run_program` и отвечает через очередь.
+- **external** — локальный worker напрямую зовёт OpenAI-compatible провайдера.
+
+Что стабильно:
+
+- `api_key` генерируется как `ideg_...` и сохраняется в plugin config, при обычных переустановках не меняется.
+- `base_url` после первого bootstrap берётся из Tunnellio runtime/state и показывается через `ide_gateway_show_config`.
+- Эфемерный hostname повторно используется из state в течение срока жизни домена; если он истёк, bootstrap создаёт новый и сохраняет его.
+- Кастомный hostname из setup используется постоянно.
+- Процессы daemonized/watch, поэтому короткий MCP-вызов или 5-минутный timeout не должны убивать сервер и туннель.
 
 Короткий сценарий:
 
 1. Запустите рабочую область в trusted developer mode.
-2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat` (или `ENABLE.bat`). Выберите `current` scope, `full_access` mode, defaults.
-3. Перезапустите MCP — endpoint поднимется на `127.0.0.1:8787`.
-4. Вызовите `ide_gateway_bridge_prompt` и вставьте промт-шаблон в системный промт Notion Agent (один раз).
-5. Модель запустит цикл `bridge_step.py poll` → мост стоит постоянно.
-6. В IDE добавьте OpenAI-compatible provider: `base_url = http://127.0.0.1:8787/v1`, `api_key` и `model` из `ide_gateway_show_config`.
-7. IDE отправляет запросы — модель обслуживает их напрямую через мост.
+2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat`. Выберите `current`, `full_access`, режим `sandbox`, обычно `ephemeral` domain.
+3. Перезапустите MCP. Endpoint поднимется локально, а `ide_gateway_bridge_prompt` покажет одну bootstrap-команду.
+4. Скажите модели: «подними мост». Она выполнит bootstrap, дождётся JSON и вернёт `base_url`.
+5. В IDE добавьте OpenAI-compatible provider: `base_url` из bootstrap/`ide_gateway_show_config`, `api_key` и `model` из `ide_gateway_show_config`.
+6. Если домен ещё жив, перезапуски используют тот же URL; если истёк, будет выдан новый URL.
 
-Диагностика: `ide_gateway_status` (endpoint + счётчики очереди), `ide_gateway_get_logs`, `ide_gateway_show_config`.
+Диагностика: `ide_gateway_status`, `ide_gateway_show_config(include_secret=true)`, `ide_gateway_get_logs`.
+
 
 
 

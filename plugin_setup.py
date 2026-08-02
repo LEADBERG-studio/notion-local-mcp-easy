@@ -203,18 +203,22 @@ def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     config["gateway_mode"] = gw_mode
 
     if gw_mode == "sandbox":
-        print("Sandbox mode (по умолчанию): LLM-шлюз в sandbox + Tunnellio туннель.")
-        print("Туннель и SSH-ключ создаются в sandbox при запуске модели.")
-        use_own_token = prompt_bool("Использовать свой Tunnellio API token (платный тариф)?", False)
-        if use_own_token:
-            tnl_token = prompt_text("Tunnellio API token", "")
-            config["tunnellio_token"] = tnl_token
-            domain_type = prompt_choice("Тип домена", ["ephemeral", "custom"], "ephemeral")
-            if domain_type == "custom":
-                hostname = prompt_text("Имя постоянного домена (e.g. my-sandbox)", "")
-                config["tunnellio_hostname"] = hostname
+        print("Sandbox mode (по умолчанию): LLM-шлюз в sandbox + keyless Tunnellio TCP bridge.")
+        print("SSH-ключи больше не нужны: туннель поднимает встроенный Tunnellio client через bridge --run --watch.")
+        domain_type = prompt_choice("Тип домена", ["ephemeral", "custom"], "ephemeral")
+        if domain_type == "custom":
+            hostname = prompt_text("Имя домена (e.g. my-sandbox)", "")
+            config["tunnellio_hostname"] = hostname
+            config["tunnellio_custom_hostname"] = hostname
         else:
-            print("Будет создан временный домен (жизнь 1 сутки, бесплатный).")
+            config["tunnellio_hostname"] = ""
+            config["tunnellio_custom_hostname"] = ""
+            print("Будет создан keyless TCP bridge с эфемерным доменом.")
+        config["tunnellio_mode"] = "tcp_bridge"
+        config["tunnellio_domain_id"] = ""
+        config["tunnellio_key_id"] = ""
+        config["tunnellio_private_key"] = ""
+        config["tunnellio_private_key_content"] = ""
         config["upstream_base_url"] = ""
         config["upstream_api_key"] = ""
         config["upstream_model"] = ""

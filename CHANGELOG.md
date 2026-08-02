@@ -1,3 +1,12 @@
+## 2.1.0 - 2026-08-02
+
+- `ide_gateway` sandbox mode now boots with one command via `sandbox_bootstrap.py`: captures sandbox-local LLM endpoint/key, starts `sandbox_server.py`, and launches the public tunnel.
+- Replaced sandbox SSH reverse tunnel with keyless Tunnellio TCP bridge (`tunnellio bridge --run --watch`); no SSH keys and no embedded cloud API token path.
+- IDE connection settings are more stable: `ideg_...` API key persists, public URL is written back to endpoint state, cached ephemeral hostnames are reused while alive, and custom hostnames stay fixed.
+- Added stronger sandbox model discovery from env vars and `/models`, preferring real sandbox model names over fallback aliases.
+- Updated Russian beginner docs plus README/README.en for the new one-command sandbox flow.
+- Tests: `python tests/test_ide_gateway_bridge.py` → 12 tests OK.
+
 ## 2.0.1 - 2026-07-29
 
 - Fixed `provision_sandbox_domain()`: API возвращает `data.key.id` (а не `data.id`), `id` — число.

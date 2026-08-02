@@ -86,22 +86,40 @@ def _load_state(path: str) -> dict[str, Any]:
         return json.load(f)
 
 
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _config() -> dict[str, Any]:
-    # Start from env vars (sandbox auto-discovery)
-    # Check multiple env var names for compatibility across platforms
-    openai_base = os.environ.get("OPENAI_BASE_URL", "")
-    api_key = (
-        os.environ.get("OPENAI_API_KEY", "")
-        or os.environ.get("ACCIO_GATEWAY_TOKEN", "")
+    # Start from sandbox-local egress env vars. These are the internal endpoint
+    # and key that belong to this exact sandbox, so they must be captured before
+    # any public tunnel/base_url values are involved.
+    openai_base = _first_env(
+        "OPENAI_BASE_URL",
+        "ACCIO_GATEWAY_BASE_URL",
+        "SANDBOX_OPENAI_BASE_URL",
+        "ANTHROPIC_BASE_URL",
+    )
+    api_key = _first_env(
+        "OPENAI_API_KEY",
+        "ACCIO_GATEWAY_TOKEN",
+        "SANDBOX_OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
     )
     cfg = {
         "upstream_base_url": openai_base,
         "upstream_api_key": api_key,
-        "upstream_model": os.environ.get("IDE_GATEWAY_MODEL", ""),
+        "upstream_model": _first_env("IDE_GATEWAY_MODEL", "OPENAI_MODEL", "MODEL", "DEFAULT_MODEL", "ANTHROPIC_MODEL"),
         "request_timeout_seconds": int(os.environ.get("IDE_GATEWAY_TIMEOUT", "300")),
-        "extra_models": os.environ.get("IDE_GATEWAY_EXTRA_MODELS", ""),
+        "extra_models": _first_env("IDE_GATEWAY_EXTRA_MODELS", "OPENAI_MODELS", "MODELS", "AVAILABLE_MODELS", "ACCIO_MODELS", "SANDBOX_MODELS", "ANTHROPIC_MODELS"),
     }
-    # Override with state file values if present (from start_endpoint)
+    # Override with state file values if present. sandbox_bootstrap.py writes the
+    # detected internal egress into state first, so daemonized children keep the
+    # right endpoint/key even if the parent tool environment disappears.
     if STATE:
         if STATE.get("upstream_base_url"):
             cfg["upstream_base_url"] = STATE["upstream_base_url"]
@@ -118,6 +136,15 @@ def _config() -> dict[str, Any]:
 
 def _openai_error(message: str, code: str, status: int = 400) -> dict[str, Any]:
     return {"error": {"message": message, "type": "ide_gateway_error", "code": code}, "_status": status}
+
+
+def _expected_token() -> str:
+    return str(
+        (STATE.get("token") if STATE else "")
+        or os.environ.get("IDE_GATEWAY_API_KEY", "")
+        or os.environ.get("IDE_GATEWAY_TOKEN", "")
+        or ""
+    ).strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -163,12 +190,27 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("payload too large")
         return self.rfile.read(length) if length else b""
 
+    def _authorized(self) -> bool:
+        expected = _expected_token()
+        if not expected:
+            return True
+        header = self.headers.get("Authorization", "")
+        return header == f"Bearer {expected}"
+
+    def _require_auth(self) -> bool:
+        if self._authorized():
+            return True
+        self._send_json(401, _openai_error("Unauthorized", "unauthorized", 401))
+        return False
+
     # --- GET routes ---
     def do_GET(self):  # noqa: N802
         path = urlsplit(self.path).path
         if path == "/health":
             self._send_json(200, {"status": "alive", "mode": "sandbox",
                                  "models": len(discover_models(_config()))})
+            return
+        if not self._require_auth():
             return
         if path in ("/v1/models", "/models"):
             models = discover_models(_config())
@@ -182,6 +224,8 @@ class Handler(BaseHTTPRequestHandler):
     # --- POST routes ---
     def do_POST(self):  # noqa: N802
         path = urlsplit(self.path).path
+        if not self._require_auth():
+            return
         try:
             if path in ("/v1/chat/completions", "/chat/completions"):
                 self._handle_chat()
@@ -367,8 +411,14 @@ def main() -> None:
                 # Parent: print and exit immediately
                 print(f"Sandbox server started as daemon (PID {pid}).", file=sys.stderr)
                 return
-            # Child: become session leader, detach from parent
+            # Child: become session leader and close inherited run_program pipes
+            # so the MCP/sandbox request can finish while the server stays up.
             os.setsid()
+            devnull_r = open(os.devnull, "r")
+            devnull_w = open(os.devnull, "a")
+            sys.stdin = devnull_r
+            sys.stdout = devnull_w
+            sys.stderr = devnull_w
         except (AttributeError, OSError):
             pass  # fork not available — run inline
 

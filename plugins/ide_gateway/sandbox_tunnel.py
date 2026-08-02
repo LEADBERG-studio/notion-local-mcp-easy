@@ -1,305 +1,265 @@
-"""Tunnellio tunnel for sandbox — creates a persistent domain with a
-hostname reserved by the worker.
+"""Keyless Tunnellio TCP bridge for sandbox mode.
 
-The worker (on Windows) reserves the hostname and computes the public_url.
-The sandbox reads the hostname, generates an SSH key, creates the domain
-with that hostname, registers the key, and starts the SSH reverse tunnel.
+This helper replaces the old SSH reverse tunnel path. It starts the bundled
+Tunnellio client in `bridge` mode, which provisions a keyless TCP bridge,
+supervises the connection, and writes runtime status/config snapshots.
 
 Usage:
-  python sandbox_tunnel.py --state <state.json>
+  python sandbox_tunnel.py --state state.json
   python sandbox_tunnel.py --local-port 8787 --hostname my-sandbox
 
-The state.json contains tunnellio_hostname (reserved by the worker).
-If --hostname is passed, it overrides the state value.
-
 Environment variables:
-  TUNNELLIO_TOKEN  — Tunnellio API token (default: built-in free token)
-  TUNNELLIO_DOMAIN — persistent hostname (overrides state)
-  LOCAL_PORT       — local port (default: 8787)
+  TUNNELLIO_BIN       path to tunnellio executable (optional)
+  TUNNELLIO_DOMAIN    hostname override (optional)
+  LOCAL_PORT          local port (default: 8787)
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
-import tempfile
 import time
-import urllib.request
-import urllib.error
 from pathlib import Path
 from typing import Any
 
-API_BASE = "https://api.tunnellio.ru"
-DEFAULT_TUNNELLIO_TOKEN = "tnl_OK1mxYApPxqTFhRi5K5EDtimMosumaC_"
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_STATE_DIR = Path(os.environ.get("TMPDIR") or os.environ.get("TEMP") or "/tmp") / "ide_gateway_tunnellio"
 
 
-def _api_post(path: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
-    url = API_BASE + "/v1" + path
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST", headers={
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    })
+def _load_json(path: Path) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        try:
-            error_body = json.loads(exc.read().decode("utf-8") or "{}")
-        except Exception:
-            error_body = {}
-        return {"ok": False, "error": {
-            "code": str(exc.code),
-            "message": str(exc),
-            "details": error_body,
-        }}
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
 
 
-def _find_existing_key(token: str, fingerprint: str = "") -> str | None:
-    resp = _api_post("/keys/list", token, {})
-    if not resp.get("ok"):
-        return None
-    for k in resp.get("data", {}).get("keys", []):
-        if k.get("status") == "active" and (not fingerprint or k.get("fingerprint") == fingerprint):
-            return str(k["id"])
-    return None
+def _save_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _hostname_from_public_url(public_url: str) -> str:
+    public_url = str(public_url or "").strip()
+    if not public_url:
+        return ""
+    try:
+        from urllib.parse import urlsplit
+        host = urlsplit(public_url if "://" in public_url else "https://" + public_url).hostname or ""
+    except Exception:
+        host = public_url.split("/", 1)[0]
+    suffix = ".tunnellio.site"
+    if host.endswith(suffix):
+        return host[:-len(suffix)]
+    return host.split(":", 1)[0]
+
+
+def _slug(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value.strip().lower())
+    cleaned = "-".join(part for part in cleaned.split("-") if part)
+    return (cleaned or f"ide-gateway-{int(time.time())}")[:80]
+
+
+def _candidate_bins(explicit: str = "") -> list[str]:
+    candidates: list[str] = []
+    for raw in (explicit, os.environ.get("TUNNELLIO_BIN", "")):
+        raw = str(raw or "").strip().strip('"')
+        if raw:
+            candidates.append(raw)
+    candidates.extend([
+        str(_REPO_ROOT / "tunnellio.exe"),
+        str(_REPO_ROOT / "tunnellio"),
+        "tunnellio",
+        "tunnellio.exe",
+    ])
+    return candidates
+
+
+def _resolve_tunnellio_bin(explicit: str = "") -> str:
+    for item in _candidate_bins(explicit):
+        path = Path(item).expanduser()
+        if path.is_file():
+            return str(path)
+        found = shutil.which(item)
+        if found:
+            return found
+    raise RuntimeError(
+        "Tunnellio client not found. Set TUNNELLIO_BIN or pass --tunnellio-path. "
+        "The client must support the `bridge` command."
+    )
+
+
+def _start_detached(command: list[str], log_path: Path) -> subprocess.Popen:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log = log_path.open("ab")
+    kwargs: dict[str, Any] = {
+        "stdout": log,
+        "stderr": subprocess.STDOUT,
+        "stdin": subprocess.DEVNULL,
+        "cwd": str(Path.cwd()),
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+    else:
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(command, **kwargs)
+
+
+def _read_status(status_path: Path, runtime_config_path: Path) -> dict[str, Any]:
+    status = _load_json(status_path)
+    config = _load_json(runtime_config_path)
+    public_url = (
+        status.get("publicUrl")
+        or config.get("runtime", {}).get("publicUrl")
+        or config.get("transport", {}).get("publicUrl")
+        or config.get("connection", {}).get("connectionProfile", {}).get("publicUrl")
+        or config.get("connectionProfile", {}).get("publicUrl")
+        or ""
+    )
+    return {"status": status, "config": config, "public_url": str(public_url or "")}
 
 
 def main() -> int:
-    import argparse
-    parser = argparse.ArgumentParser(description="Tunnellio sandbox tunnel")
-    parser.add_argument("--state", default="", help="Path to endpoint state JSON (reads hostname)")
+    parser = argparse.ArgumentParser(description="Tunnellio keyless TCP bridge for sandbox")
+    parser.add_argument("--state", default="", help="Endpoint state JSON produced by ide_gateway_start")
     parser.add_argument("--local-port", type=int, default=int(os.environ.get("LOCAL_PORT", "8787")))
-    parser.add_argument("--tunnellio-token", default=os.environ.get("TUNNELLIO_TOKEN", ""))
-    parser.add_argument("--hostname", default=os.environ.get("TUNNELLIO_DOMAIN", ""),
-                        help="Override hostname (otherwise read from state)")
-    parser.add_argument("--ssh-key", default="", help="Reuse existing key file")
+    parser.add_argument("--hostname", default=os.environ.get("TUNNELLIO_DOMAIN", ""), help="Optional public hostname")
+    parser.add_argument("--runtime-name", default="", help="Stable local runtime name")
+    parser.add_argument("--tunnellio-path", default="", help="Path to tunnellio executable")
+    parser.add_argument("--state-dir", default=os.environ.get("TUNNELLIO_STATE_DIR", ""))
+    parser.add_argument("--health-path", default="/health")
+    parser.add_argument("--wait-seconds", type=int, default=20)
     args = parser.parse_args()
 
-    token = args.tunnellio_token or DEFAULT_TUNNELLIO_TOKEN
-    hostname = args.hostname.strip()
-    local_port = args.local_port
+    state_path = Path(args.state).expanduser() if args.state else None
+    state = _load_json(state_path) if state_path else {}
 
-    # Read hostname from state file if not passed explicitly
-    if not hostname and args.state:
+    local_port = int(state.get("port") or args.local_port or 8787)
+    hostname_source = "explicit" if args.hostname else ""
+    hostname = (args.hostname or state.get("tunnellio_hostname") or "").strip()
+    if not hostname and state.get("tunnellio_public_url"):
+        hostname = _hostname_from_public_url(str(state.get("tunnellio_public_url", "")))
+        hostname_source = "cached_public_url" if hostname else hostname_source
+    elif hostname and not hostname_source:
+        hostname_source = "state"
+    runtime_name = _slug(args.runtime_name or state.get("tunnellio_runtime_name") or hostname or "ide-gateway-sandbox")
+    state_dir = Path(args.state_dir).expanduser() if args.state_dir else _DEFAULT_STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    status_path = state_dir / f"{runtime_name}.json"
+    stop_path = state_dir / f"{runtime_name}.stop"
+    runtime_config_path = state_dir / f"{runtime_name}.config.json"
+    log_path = state_dir / f"{runtime_name}.log"
+
+    try:
+        tunnellio_bin = _resolve_tunnellio_bin(args.tunnellio_path)
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        return 1
+
+    if stop_path.exists():
         try:
-            with open(args.state, "r", encoding="utf-8-sig") as f:
-                state = json.load(f)
-            hostname = str(state.get("tunnellio_hostname", "")).strip()
-            if not local_port and state.get("port"):
-                local_port = int(state["port"])
-        except Exception as exc:
-            print(f"Warning: could not read state file: {exc}", file=sys.stderr)
+            stop_path.unlink()
+        except OSError:
+            pass
 
-    if not hostname:
-        # No hostname — use ephemeral (random, different each time)
-        print("No hostname configured — using ephemeral mode.", file=sys.stderr)
-    else:
-        print(f"Using hostname: {hostname}", file=sys.stderr)
+    def build_command(domain: str) -> list[str]:
+        cmd = [
+            tunnellio_bin,
+            "--state-dir", str(state_dir),
+            "bridge",
+            "--output", "json",
+            "--local-host", "127.0.0.1",
+            "--local-port", str(local_port),
+            "--name", runtime_name,
+            "--runtime-name", runtime_name,
+            "--run",
+            "--watch",
+            "--health-path", args.health_path,
+            "--health-interval", "10",
+            "--health-timeout", "5",
+            "--health-failures", "3",
+            "--restart-delay", "3",
+            "--status-file", str(status_path),
+            "--stop-file", str(stop_path),
+            "--log-file", str(log_path),
+        ]
+        if domain:
+            cmd.extend(["--domain", domain])
+        return cmd
 
-    # --- Step 1: Generate SSH keypair (in the sandbox!) ---
-    key_dir = Path(tempfile.mkdtemp(prefix="tunnel_"))
-    key_path = Path(args.ssh_key) if args.ssh_key else key_dir / "key"
+    def launch_and_wait(domain: str) -> tuple[subprocess.Popen, str, dict[str, Any]]:
+        proc = _start_detached(build_command(domain), log_path)
+        public = f"https://{domain}.tunnellio.site" if domain else ""
+        snap: dict[str, Any] = {}
+        deadline = time.time() + max(1, args.wait_seconds)
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                break
+            data = _read_status(status_path, runtime_config_path)
+            if data["public_url"]:
+                public = data["public_url"]
+                snap = data
+                break
+            time.sleep(0.5)
+        return proc, public, snap
 
-    if not key_path.is_file():
-        print(f"Generating SSH keypair at {key_path}...", file=sys.stderr)
-        subprocess.run(
-            ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", "", "-q"],
-            check=True, capture_output=True,
-        )
-        key_path.chmod(0o600)
+    proc, public_url, snapshot = launch_and_wait(hostname)
+    if proc.poll() is not None and hostname and hostname_source == "cached_public_url":
+        # A cached 1-day ephemeral hostname may have expired. Fall back to a new
+        # ephemeral bridge instead of making the user reconfigure manually.
+        hostname = ""
+        runtime_name = _slug(args.runtime_name or state.get("tunnellio_runtime_name") or "ide-gateway-sandbox")
+        status_path = state_dir / f"{runtime_name}.json"
+        stop_path = state_dir / f"{runtime_name}.stop"
+        runtime_config_path = state_dir / f"{runtime_name}.config.json"
+        log_path = state_dir / f"{runtime_name}.log"
+        proc, public_url, snapshot = launch_and_wait(hostname)
 
-    public_key = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
+    if state_path:
+        updated = dict(state)
+        if public_url:
+            updated["tunnellio_public_url"] = public_url
+            updated["tunnellio_hostname"] = _hostname_from_public_url(public_url)
+            updated["upstream_base_url"] = public_url.rstrip("/") + "/v1"
+        updated["tunnellio_mode"] = "tcp_bridge"
+        updated["tunnellio_runtime_name"] = runtime_name
+        updated["tunnellio_state_dir"] = str(state_dir)
+        updated["tunnellio_status_file"] = str(status_path)
+        updated["tunnellio_log_file"] = str(log_path)
+        _save_json(state_path, updated)
 
-    # Get fingerprint
-    fp_result = subprocess.run(
-        ["ssh-keygen", "-lf", str(key_path)],
-        capture_output=True, text=True,
-    )
-    fingerprint = ""
-    if fp_result.returncode == 0:
-        parts = fp_result.stdout.strip().split()
-        if len(parts) >= 2:
-            fingerprint = parts[1]
-
-    # --- Step 2: Find or register key ---
-    key_id = _find_existing_key(token, fingerprint)
-    if not key_id:
-        print("Registering SSH key with Tunnellio...", file=sys.stderr)
-        resp = _api_post("/keys", token, {
-            "name": f"ide-gateway-{hostname or 'ephemeral'}",
-            "publicKey": public_key,
-            "requestedLifetimeDays": 365 if hostname else 1,
-        })
-        if not resp.get("ok"):
-            if resp.get("error", {}).get("code") == "409":
-                key_id = _find_existing_key(token)
-                if not key_id:
-                    print(json.dumps({"ok": False, "error": "Key 409 and no existing key"}))
-                    return 1
-            else:
-                print(json.dumps({"ok": False, "error": f"Key failed: {resp.get('error', {})}"}))
-                return 1
-        else:
-            key_id = str(resp["data"]["key"]["id"])
-    print(f"Key ID: {key_id}", file=sys.stderr)
-
-    key_id_val = int(key_id) if str(key_id).isdigit() else key_id
-
-    # --- Step 3: Create persistent domain (with hostname from worker) ---
-    if hostname:
-        # Check if domain already exists
-        check = _api_post("/domains/check", token, {"hostname": hostname})
-        available = check.get("ok") and check.get("data", {}).get("available", False)
-
-        if available:
-            # Create persistent domain with this hostname
-            print(f"Creating persistent domain '{hostname}'...", file=sys.stderr)
-            resp = _api_post("/domains", token, {
-                "hostname": hostname,
-                "keyId": key_id_val,
-                "localPort": local_port,
-                "note": "ide-gateway-sandbox",
-                "requestedLifetimeDays": 365,
-                "authMode": "legacy",
-                "stableUrlRequired": True,
-                "connectionMode": "direct",
-            })
-            if not resp.get("ok"):
-                print(json.dumps({"ok": False, "error": f"Domain creation failed: {resp.get('error', {})}"}))
-                return 1
-            domain_id = resp["data"]["domain"]["id"]
-        else:
-            # Domain already exists — find it
-            print(f"Domain '{hostname}' already exists, finding it...", file=sys.stderr)
-            domains_resp = _api_post("/domains/list", token, {})
-            domain_id = None
-            for d in domains_resp.get("data", {}).get("domains", []):
-                if d.get("hostname") == hostname:
-                    domain_id = d.get("id")
-                    break
-            if not domain_id:
-                print(json.dumps({"ok": False, "error": f"Domain '{hostname}' not found"}))
-                return 1
-
-        # Get connection profile
-        resp = _api_post("/domains/connection-profile", token, {
-            "domainId": domain_id,
-            "localHost": "127.0.0.1",
-            "localPort": local_port,
-        })
-    else:
-        # Ephemeral
-        print("Creating ephemeral session...", file=sys.stderr)
-        resp = _api_post("/sessions/ephemeral", token, {
-            "keyId": key_id_val,
-            "localHost": "127.0.0.1",
-            "localPort": local_port,
-            "note": "ide-gateway-sandbox",
-        })
-
-    if not resp.get("ok"):
-        print(json.dumps({"ok": False, "error": f"Session/domain failed: {resp.get('error', {})}"}))
+    if proc.poll() is not None:
+        tail = ""
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+        except OSError:
+            pass
+        print(json.dumps({
+            "ok": False,
+            "mode": "tcp_bridge",
+            "runtime_name": runtime_name,
+            "exit_code": proc.returncode,
+            "log_tail": tail,
+        }, ensure_ascii=False))
         return 1
-
-    data = resp["data"]
-    profile = data.get("connectionProfile", {})
-    session = data.get("session", {})
-    domain = data.get("domain", {})
-
-    public_url = session.get("publicUrl") or domain.get("publicUrl") or profile.get("publicUrl", "")
-    ssh_host = profile.get("sshHost", "tunnellio.site")
-    ssh_port = str(profile.get("sshPort", 2222))
-    ssh_user = profile.get("sshUser", "tunnel")
-    remote_hostname = profile.get("remoteHostname", "")
-
-    if not public_url or not remote_hostname:
-        print(json.dumps({"ok": False, "error": "Missing public_url or remote_hostname", "data": data}))
-        return 1
-
-    # --- Step 4: Start SSH reverse tunnel (detached, survives parent kill) ---
-    ssh_cmd = [
-        "ssh",
-        "-i", str(key_path),
-        "-p", ssh_port,
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "ServerAliveInterval=30",
-        "-o", "ServerAliveCountMax=3",
-        "-o", "ExitOnForwardFailure=yes",
-        "-N",  # no remote command, just tunnel
-        "-R", f"{remote_hostname}:80:127.0.0.1:{local_port}",
-        f"{ssh_user}@{ssh_host}",
-    ]
 
     print(json.dumps({
         "ok": True,
+        "mode": "tcp_bridge",
         "public_url": public_url,
-        "ssh_host": ssh_host,
-        "ssh_port": ssh_port,
-        "remote_hostname": remote_hostname,
-        "key_path": str(key_path),
-        "mode": "persistent" if hostname else "ephemeral",
-    }))
-
-    print(f"\nSSH tunnel: {' '.join(ssh_cmd)}", file=sys.stderr)
-    print(f"Public URL: {public_url}", file=sys.stderr)
-    print("Tunnel running in background. Detached from parent process.", file=sys.stderr)
-
-    # Wait a moment after key registration to avoid Permission denied race condition
-    print("Waiting 3s for key propagation...", file=sys.stderr)
-    time.sleep(3)
-
-    # Start SSH as a detached daemon that survives parent process kill.
-    # On Linux: use setsid + nohup. The SSH process becomes a session leader
-    # and is not killed when the parent (run_program) exits or is killed by
-    # the platform's 5-minute timeout.
-    try:
-        # Fork ourselves first — the child becomes a daemon
-        import signal as _signal
-        try:
-            pid = os.fork()
-        except (AttributeError, OSError):
-            pid = -1  # Windows or fork failed — fall through to Popen
-
-        if pid > 0:
-            # Parent: print and exit immediately (run_program returns)
-            print(f"SSH tunnel daemon started (PID {pid}).", file=sys.stderr)
-            return 0
-        elif pid == 0 or pid == -1:
-            # Child (Linux) or direct Popen (Windows/fallback)
-            if pid == 0:
-                # Linux child: become session leader
-                os.setsid()
-                # Redirect stdio to devnull
-                sys.stdout = open(os.devnull, "w")
-                sys.stderr = open(os.devnull, "w")
-                # Execute ssh directly (replaces process)
-                os.execvp(ssh_cmd[0], ssh_cmd)
-                # If execvp fails:
-                sys.exit(1)
-            else:
-                # Windows fallback: Popen with DETACHED_PROCESS
-                flags = 0
-                if os.name == "nt":
-                    flags = 0x00000008  # DETACHED_PROCESS
-                proc = subprocess.Popen(
-                    ssh_cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    creationflags=flags,
-                    start_new_session=True if os.name != "nt" else False,
-                )
-                print(f"SSH tunnel started (PID {proc.pid}, detached).", file=sys.stderr)
-                # Don't wait — return immediately so run_program doesn't block
-                return 0
-    except Exception as exc:
-        print(f"Warning: detached mode failed ({exc}), running inline.", file=sys.stderr)
-        proc = subprocess.Popen(ssh_cmd, stdout=sys.stderr, stderr=sys.stderr)
-        proc.wait()
-        return proc.returncode
+        "base_url": public_url.rstrip("/") + "/v1" if public_url else "",
+        "runtime_name": runtime_name,
+        "pid": proc.pid,
+        "status_file": str(status_path),
+        "runtime_config_file": str(runtime_config_path),
+        "log_file": str(log_path),
+        "snapshot": snapshot,
+    }, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":

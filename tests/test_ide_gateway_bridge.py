@@ -251,6 +251,14 @@ class IdeGatewayBridgeTests(unittest.TestCase):
             text = log_path.read_text(encoding="utf-8", errors="replace")
             self.assertNotIn(self.token, text)
 
+    def test_sandbox_tunnel_extracts_hostname_from_public_url(self):
+        from plugins.ide_gateway.sandbox_tunnel import _hostname_from_public_url
+        self.assertEqual(_hostname_from_public_url("https://tmp-abc.tunnellio.site/v1"), "tmp-abc")
+
+    def test_sandbox_bootstrap_extracts_hostname_from_public_url(self):
+        from plugins.ide_gateway.sandbox_bootstrap import _hostname_from_public_url
+        self.assertEqual(_hostname_from_public_url("https://my-bridge.tunnellio.site"), "my-bridge")
+
 
 if __name__ == "__main__":
     unittest.main()

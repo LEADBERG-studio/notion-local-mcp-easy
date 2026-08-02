@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from plugins.ide_gateway.state import (
@@ -58,11 +60,29 @@ def startup(context: dict[str, Any]) -> dict[str, Any]:
         result["autostart"] = "skipped (full_access required)"
         return result
 
-    # Sandbox mode: reserve Tunnellio hostname (worker needs to know public_url)
+    # Sandbox mode: choose the public hostname before the model enters the sandbox.
+    # If an earlier endpoint state has one, reuse it so the local IDE/proxy sees
+    # a stable URL across restarts. If the 1-day domain expired physically, the
+    # sandbox TCP bridge recreates the same hostname during bootstrap.
     if config.get("gateway_mode") == "sandbox":
         try:
             from plugins.ide_gateway.backend import ensure_domain
             local_port = int(config.get("default_port", 8787))
+            if not config.get("tunnellio_hostname"):
+                workspace = Path(str(context.get("workspacePath", ""))).resolve()
+                previous_state = workspace / "temp" / "ide_gateway_runtime" / "endpoints" / "default.json"
+                if previous_state.is_file():
+                    try:
+                        prev = json.loads(previous_state.read_text(encoding="utf-8-sig"))
+                        if prev.get("tunnellio_hostname"):
+                            config["tunnellio_hostname"] = str(prev["tunnellio_hostname"]).strip()
+                        elif prev.get("tunnellio_public_url"):
+                            from urllib.parse import urlsplit
+                            host = urlsplit(str(prev["tunnellio_public_url"])).hostname or ""
+                            suffix = ".tunnellio.site"
+                            config["tunnellio_hostname"] = host[:-len(suffix)] if host.endswith(suffix) else host
+                    except Exception:
+                        pass
             config = ensure_domain(config, local_port=local_port)
             result["tunnel_url"] = config.get("tunnellio_public_url", "")
             result["tunnel_hostname"] = config.get("tunnellio_hostname", "")

@@ -1,7 +1,7 @@
 {
   "id": "ide_gateway",
   "display_name": "IDE Gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "entrypoint": "plugin.py",
   "supported_modes": ["read_only", "full_access"],
   "capabilities": ["ide", "gateway", "openai_compatible", "active_bridge", "files", "media", "tools"],

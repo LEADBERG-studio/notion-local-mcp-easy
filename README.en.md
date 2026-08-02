@@ -60,24 +60,31 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 - `dual`: both legacy token and OAuth on the same `/mcp` endpoint.
 
 
-## IDE Gateway plugin — bridge between IDE and the model
+## IDE Gateway plugin — IDE to sandbox model bridge
 
-Version 1.8.0 adds the `ide_gateway` plugin, a full OpenAI-compatible API gateway (`/v1/chat/completions` stream + non-stream, `/v1/responses` stream + non-stream, `/v1/models`, `/v1/files`, `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, `/v1/moderations`, `/v1/tools`). Three modes:
+`ide_gateway` exposes an OpenAI-compatible `/v1` API for IDEs. In the default **sandbox** mode, the model only needs one command after the user says “start the bridge”: `sandbox_bootstrap.py` captures this sandbox's internal model endpoint/key, starts a resident `sandbox_server.py`, and launches a keyless Tunnellio TCP bridge with `tunnellio bridge --run --watch`. No SSH keys are generated.
 
-- **sandbox** (default) — model launches `sandbox_server.py` + `sandbox_tunnel.py` in Notion Agent sandbox. IDE connects to a Tunnellio public URL. Direct LLM egress access, no poll-loop.
-- **bridge** — model runs `bridge_step.py poll` loop via `run_program`. Universal, works on all platforms.
-- **external** — worker calls OpenAI-compatible provider directly (Ollama, OpenAI).
+Modes:
 
-The bridge works via long-poll: the model in chat starts a `ide_gateway_wait_request` loop once and keeps it open. When the IDE sends a request, it reaches the model instantly; the model processes it with its MCP tools and replies through `ide_gateway_send_response`. No manual pings, no chat noise.
+- **sandbox** (default) — public Tunnellio URL → sandbox server → this sandbox's LLM egress. Best path for IDE usage.
+- **bridge** — compatibility fallback where the model serves a queue with `bridge_step.py poll/complete`.
+- **external** — local worker calls an OpenAI-compatible provider directly.
+
+Stable parts:
+
+- the local `ideg_...` API key is stored in plugin config and survives normal upgrades;
+- `ide_gateway_show_config(include_secret=true)` returns the IDE settings; after bootstrap, `base_url` is the public Tunnellio URL;
+- ephemeral hostnames are cached and reused while the one-day domain is alive; if expired, bootstrap creates and saves a new one;
+- custom hostnames from setup are reused permanently;
+- daemonized processes plus the Tunnellio watch loop keep the server and tunnel alive beyond short MCP tool-call timeouts.
 
 Quick flow:
 
-1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode. Choose `current` scope, `full_access` mode, defaults.
-2. Restart MCP — the endpoint starts on `127.0.0.1:8787`.
-3. Call `ide_gateway_bridge_prompt` and paste the prompt template into the Notion Agent system prompt (one-time).
-4. The model starts the `wait_request` loop — the bridge stays up permanently.
-5. In your IDE, add an OpenAI-compatible provider: `base_url = http://127.0.0.1:8787/v1`, `api_key` and `model` from `ide_gateway_show_config`.
-6. The IDE sends requests — the model serves them directly through the bridge.
+1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode. Choose `current`, `full_access`, `sandbox`, usually `ephemeral`.
+2. Restart MCP.
+3. Call `ide_gateway_bridge_prompt`; it contains the one bootstrap command.
+4. Tell the model: “start the bridge”. It returns the public `base_url`.
+5. Configure your IDE as OpenAI-compatible using `base_url`, `api_key`, and `model` from `ide_gateway_show_config`.
 
 Diagnostics: `ide_gateway_status`, `ide_gateway_get_logs`, `ide_gateway_show_config`.
 
@@ -109,9 +116,3 @@ python -m unittest discover -s tests -v
 - `SERVEO_SETUP.md` — Serveo setup.
 - `SISH_SETUP.md` — self-hosted sish relay setup.
 - `CHANGELOG.md` — release notes.
-
-
-### IDE Gateway defaults note
-
-\n\n### IDE Gateway is a PromptQL bridge\n\n`plugins\\ide_gateway\\ENABLE.bat` configures a local IDE-facing `/v1` endpoint and generated `ideg_...` key. It does **not** ask for a local OpenAI/Ollama upstream: IDE requests are queued for the active PromptQL/Notion agent, and the real model is selected in PromptQL chat/project settings. Until reverse callback automation exists, queued requests are completed through the bridge tools (`ide_gateway_wait_request` / `ide_gateway_send_response`).\n
-Current IDE Gateway note: the local config model is only an IDE-facing alias (`ide-gateway`). The real model is selected by the active PromptQL/Notion chat or project settings; normal setup does not ask for an upstream base URL or upstream model.
