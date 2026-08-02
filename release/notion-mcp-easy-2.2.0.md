@@ -59,3 +59,14 @@
 
 - If a tunnel announces a public URL but `/health` is not reachable yet, launcher now publishes the connection and keeps the tunnel running instead of exiting.
 - Fatal errors remain limited to server/tunnel process death or invalid configuration.
+
+## Production upgrade audit
+
+- Existing flat configs migrate conservatively: Serveo remains Serveo unless Tunnellio was explicitly configured.
+- Missing production tokens restore from the latest backup; no silent token regeneration on upgrade.
+- Startup asks whether to keep the current connection mode. Switching modes reuses the saved per-mode profile or launches explicit setup.
+- Runtime preflight validates workspace, private keys, reverse-proxy URL, trusted command defaults, and Tunnellio credentials before launching processes.
+- Active legacy config is sanitized so inactive mode fields cannot hijack URL/backend selection.
+- `server.log`, `tunnel.log`, and config backups retain at most five files.
+- Tunnellio runtime names include a deterministic install/workspace hash to prevent concurrent-client collisions.
+- CI uses current Node 24 actions, pipefail for tests, and Gemini diagnostics can no longer alter CI status.

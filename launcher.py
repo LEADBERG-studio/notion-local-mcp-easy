@@ -6,6 +6,8 @@ import argparse
 
 import contextlib
 
+import hashlib
+
 import json
 import logging
 
@@ -282,9 +284,11 @@ def tunnellio_runtime_name(config: dict) -> str:
 
         return slugify_runtime_name(raw)
 
-    workspace_name = Path(str(config.get("workspace") or "notion-local-mcp")).name
-
-    return slugify_runtime_name(f"{workspace_name}-mcp")
+    workspace_value = str(config.get("workspace") or "notion-local-mcp")
+    workspace_name = Path(workspace_value).name
+    identity = os.path.normcase(str(Path(workspace_value).expanduser())) + "|" + os.path.normcase(str(SCRIPT_DIR))
+    digest = hashlib.sha1(identity.encode("utf-8", errors="replace")).hexdigest()[:8]
+    return slugify_runtime_name(f"{workspace_name}-mcp-{digest}")
 
 
 
@@ -389,17 +393,57 @@ def save_connection_profile(mode: str, config: dict) -> None:
     save_connection_profiles(storage)
 
 
+def seed_connection_profile_from_legacy(config: dict) -> str:
+    """Import an old flat config once without changing its active settings."""
+    mode = selected_mode_from_config(config)
+    if not connection_profile_for(mode):
+        save_connection_profile(mode, config)
+    return mode
+
+
+def sanitize_active_connection_config(config: dict, mode: str) -> dict:
+    """Keep legacy config compatible but remove fields belonging to inactive modes."""
+    result = dict(config)
+    mode = normalize_tunnel_mode(mode)
+    if mode != "reverse_proxy":
+        result["public_url"] = ""
+    if mode not in {"serveo_stable", "sish"}:
+        result["serveo_hostname"] = ""
+        result["ssh_key"] = ""
+    if mode != "sish":
+        result["tunnel_host"] = ""
+        result["tunnel_domain"] = ""
+    result["tunnel_mode_preference"] = mode
+    result["tunnel_backend"] = {
+        "tunnellio": "tunnellio",
+        "reverse_proxy": "custom_proxy",
+        "sish": "sish",
+    }.get(mode, "serveo")
+    return result
+
+
 def selected_mode_from_config(config: dict) -> str:
     mode = str(config.get("tunnel_mode_preference", "")).strip()
     if mode:
         return normalize_tunnel_mode(mode)
-    backend = tunnel_backend(config)
-    if backend == "tunnellio":
-        return "tunnellio"
-    if backend == "custom_proxy":
+    raw_backend = str(config.get("tunnel_backend", "")).strip().lower()
+    if raw_backend:
+        backend = normalize_tunnel_backend(raw_backend)
+        if backend == "tunnellio":
+            return "tunnellio"
+        if backend == "custom_proxy":
+            return "reverse_proxy"
+        if backend == "sish":
+            return "sish"
+        return "serveo_stable" if str(config.get("serveo_hostname", "")).strip() else "serveo_temporary"
+    # Legacy configs without an explicit backend must be migrated conservatively.
+    # Never infer Tunnellio merely because its binary exists.
+    if str(config.get("public_url", "")).strip():
         return "reverse_proxy"
-    if backend == "sish":
+    if str(config.get("tunnel_host", "")).strip() or str(config.get("tunnel_domain", "")).strip():
         return "sish"
+    if any(str(config.get(key, "")).strip() for key in ("tunnellio_token", "tunnellio_domain", "tunnellio_runtime_name")):
+        return "tunnellio"
     return "serveo_stable" if str(config.get("serveo_hostname", "")).strip() else "serveo_temporary"
 
 
@@ -539,6 +583,7 @@ def backup_config_file(reason: str) -> Path | None:
     backup = CONFIG_FILE.with_name(f"config.backup.{stamp}.{safe_reason}.json")
     try:
         shutil.copy2(CONFIG_FILE, backup)
+        prune_config_backups(limit=5)
         return backup
     except OSError:
         return None
@@ -556,6 +601,8 @@ def _changed_sensitive_fields(old: dict, new: dict) -> list[str]:
 
 def save_config(config: dict, *, reason: str, allow_sensitive_change: bool = False) -> None:
     current = load_json(CONFIG_FILE)
+    if current == config:
+        return
     changed_sensitive = _changed_sensitive_fields(current, config) if current else []
     if changed_sensitive and not allow_sensitive_change:
         fields = ", ".join(changed_sensitive)
@@ -583,26 +630,51 @@ def _workspace_from_connections_cfg() -> str:
         pass
     return str(SCRIPT_DIR)
 
+def latest_config_backup() -> dict:
+    candidates = sorted(
+        CONFIG_FILE.parent.glob("config.backup.*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        candidate = load_json(path)
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    return {}
+
+
 def heal_legacy_config(config: dict, *, persist: bool = True) -> dict:
     if not isinstance(config, dict):
         config = {}
     changed = False
+    backup = latest_config_backup()
+    # Restore missing production-sensitive values from the newest backup first.
+    for key in CONFIG_SENSITIVE_FIELDS:
+        if not str(config.get(key, "")).strip() and str(backup.get(key, "")).strip():
+            config[key] = backup[key]
+            changed = True
     if not str(config.get("workspace", "")).strip():
-        config["workspace"] = _workspace_from_connections_cfg()
+        config["workspace"] = str(backup.get("workspace") or _workspace_from_connections_cfg())
         changed = True
     if not str(config.get("token", "")).strip():
-        config["token"] = generate_legacy_token()
-        changed = True
-    auth_mode = normalize_auth_mode(config.get("auth_mode", "legacy"))
+        raise RuntimeError(
+            "Existing config has no access token and no usable backup. "
+            "Run SETUP.bat explicitly; launcher will not silently issue a new production token."
+        )
+    auth_mode = normalize_auth_mode(config.get("auth_mode", backup.get("auth_mode", "legacy")))
     if config.get("auth_mode") != auth_mode:
         config["auth_mode"] = auth_mode
         changed = True
-    # Do not infer tunnel_backend here. Guessing Tunnellio because tunnellio.exe
-    # exists rewrites shared config and breaks existing Serveo installations.
+    if bool(config.get("allow_commands", False)) and not config.get("allowed_commands"):
+        config["allowed_commands"] = sorted(DEFAULT_ALLOWED_COMMANDS)
+        changed = True
+    # Do not infer tunnel_backend here. Legacy migration is handled separately
+    # and conservatively by selected_mode_from_config().
     if changed and persist:
         save_config(config, reason="self-heal")
-        print(f"Config recovered missing legacy fields in: {CONFIG_FILE}")
+        print(f"Config recovered missing fields in: {CONFIG_FILE}")
     return config
+
 
 def tunnel_log_suggests_remote_port_busy() -> bool:
     tail = tunnel_log_tail().lower()
@@ -1021,6 +1093,38 @@ def activate_profile_config(storage: dict, profile: dict, config: dict) -> tuple
 
 
 
+def apply_connection_choice_for_start(config: dict, profile: dict | None) -> dict:
+    current_mode = seed_connection_profile_from_legacy(config)
+    profile_mode = ""
+    if isinstance(profile, dict):
+        profile_mode = str(
+            profile.get("connectionType")
+            or (profile.get("metadata") or {}).get("connectionType")
+            or ""
+        ).strip()
+    profile_mode = normalize_tunnel_mode(profile_mode) if profile_mode else current_mode
+    print(f"Connection mode: current={current_mode}, workspace={profile_mode}")
+    keep = prompt_input("Keep current connection mode? [Y/n]: ").strip().lower()
+    if keep not in {"n", "no", "н", "нет"}:
+        chosen = current_mode
+    else:
+        chosen = prompt_tunnel_mode(config)
+        saved = connection_profile_for(chosen)
+        if not saved:
+            print(f"Connection mode '{chosen}' is not configured. Starting explicit setup.")
+            return setup(force=True)
+        use_saved = prompt_input(f"Use saved settings for '{chosen}'? [Y/n]: ").strip().lower()
+        if use_saved in {"n", "no", "н", "нет"}:
+            print(f"Reconfiguring connection mode '{chosen}' through explicit setup.")
+            return setup(force=True)
+        config = sanitize_active_connection_config(apply_connection_profile(config, chosen), chosen)
+        save_config(config, reason="connection-mode-start", allow_sensitive_change=True)
+    if isinstance(profile, dict):
+        profile["connectionType"] = chosen
+        profile.setdefault("metadata", {})["connectionType"] = chosen
+    return config
+
+
 def choose_workspace_from_connections(config: dict) -> dict:
 
     slot, added = bootstrap_workspace_in_connections(config)
@@ -1044,6 +1148,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
         if active_profile is not None:
 
             _, config = activate_profile_config(storage, active_profile, config)
+            config = apply_connection_choice_for_start(config, active_profile)
+            save_profiles(storage, workflow_profiles_file())
 
         # Ensure ide_gateway_api_key exists in global config
         config = ensure_ide_gateway_key(config)
@@ -1130,6 +1236,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
                 if active_profile is not None:
 
                     _, config = activate_profile_config(storage, active_profile, config)
+                    config = apply_connection_choice_for_start(config, active_profile)
+                    save_profiles(storage, workflow_profiles_file())
 
                 print(
 
@@ -1152,6 +1260,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
             if active_profile is not None:
 
                 _, config = activate_profile_config(storage, active_profile, config)
+                config = apply_connection_choice_for_start(config, active_profile)
+                save_profiles(storage, workflow_profiles_file())
 
             print(
 
@@ -1302,6 +1412,8 @@ def choose_workspace_from_connections(config: dict) -> dict:
             continue
 
         storage, config = activate_profile_config(storage, profile, config)
+        config = apply_connection_choice_for_start(config, profile)
+        save_profiles(storage, workflow_profiles_file())
 
         print(
 
@@ -1479,6 +1591,7 @@ def setup(force: bool = False) -> dict:
             "uv",
         ],
     }
+    config = sanitize_active_connection_config(config, selected_tunnel_mode)
     save_connection_profile(selected_tunnel_mode, config)
     save_config(config, reason="setup", allow_sensitive_change=True)
     saved_slot, added_to_connections = remember_workspace_path(workspace, preferred_slot=1)
@@ -1948,7 +2061,35 @@ def wait_for_server(
 
 
 
-def make_log_writer(path: Path, max_bytes: int = 1_000_000, backups: int = 3) -> logging.Logger:
+def rotate_log_file(path: Path, keep_files: int = 5) -> None:
+    """Keep at most `keep_files` generations including the active log."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backups = max(0, keep_files - 1)
+    if backups == 0:
+        path.unlink(missing_ok=True)
+        return
+    oldest = path.with_name(path.name + f".{backups}")
+    oldest.unlink(missing_ok=True)
+    for index in range(backups - 1, 0, -1):
+        source = path.with_name(path.name + f".{index}")
+        target = path.with_name(path.name + f".{index + 1}")
+        if source.exists():
+            source.replace(target)
+    if path.exists():
+        path.replace(path.with_name(path.name + ".1"))
+
+
+def prune_config_backups(limit: int = 5) -> None:
+    backups = sorted(
+        CONFIG_FILE.parent.glob("config.backup.*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in backups[max(0, limit):]:
+        stale.unlink(missing_ok=True)
+
+
+def make_log_writer(path: Path, max_bytes: int = 1_000_000, backups: int = 4) -> logging.Logger:
     """Return a rotating file logger dedicated to a launcher log file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(f"local_mcp_easy.log.{path.resolve()}")
@@ -2034,6 +2175,7 @@ def start_server(config: dict) -> tuple[subprocess.Popen, TextIO]:
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+    rotate_log_file(SERVER_LOG, keep_files=5)
     log = SERVER_LOG.open("w", encoding="utf-8")
 
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
@@ -2390,6 +2532,7 @@ def start_tunnel(config: dict) -> tuple[subprocess.Popen, queue.Queue[str]]:
 
     def pump() -> None:
 
+        rotate_log_file(TUNNEL_LOG, keep_files=5)
         with TUNNEL_LOG.open("w", encoding="utf-8") as log:
 
             assert process.stdout is not None
@@ -2732,6 +2875,8 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
 def ensure_ide_gateway_key(config: dict) -> dict:
     """Ensure ide_gateway_api_key and mode exist in the global config.json."""
     existing = load_json(CONFIG_FILE)
+    if not existing:
+        existing = dict(config)
     changed = False
 
     gw_key = str(existing.get("ide_gateway_api_key", "")).strip()
@@ -2763,10 +2908,72 @@ def ensure_ide_gateway_key(config: dict) -> dict:
     return config
 
 
+def tunnellio_credentials_available(config: dict) -> bool:
+    if str(config.get("tunnellio_token", "")).strip():
+        return True
+    if os.environ.get("TUNNELLIO_API_TOKEN", "").strip() or os.environ.get("TUNNELLIO_TOKEN", "").strip():
+        return True
+    candidates = [
+        Path.home() / ".tunnellio" / "config.json",
+        Path.home() / ".tunnellio" / "default-launch.json",
+        tunnellio_state_dir(config) / "config.json",
+        tunnellio_state_dir(config) / "default-launch.json",
+    ]
+    for path in candidates:
+        data = load_json(path)
+        if not isinstance(data, dict):
+            continue
+        values = [data.get("token"), data.get("apiToken"), data.get("api_token")]
+        global_section = data.get("global") if isinstance(data.get("global"), dict) else {}
+        values.extend([global_section.get("token"), global_section.get("apiToken")])
+        if any(str(value or "").strip() for value in values):
+            return True
+    return False
+
+
+def validate_runtime_config(config: dict) -> dict:
+    result = dict(config)
+    workspace = Path(str(result.get("workspace", ""))).expanduser()
+    if not workspace.is_dir():
+        raise RuntimeError(f"Configured workspace does not exist: {workspace}")
+    if not str(result.get("token", "")).strip():
+        raise RuntimeError("Access token is missing. Run SETUP.bat explicitly.")
+    if bool(result.get("allow_commands", False)) and not result.get("allowed_commands"):
+        result["allowed_commands"] = sorted(DEFAULT_ALLOWED_COMMANDS)
+    mode = selected_mode_from_config(result)
+    result = sanitize_active_connection_config(result, mode)
+    if mode == "serveo_stable":
+        result["serveo_hostname"] = normalize_serveo_hostname(result.get("serveo_hostname", ""))
+        key_path = serveo_private_key_path(result)
+        if not key_path.is_file():
+            raise RuntimeError(f"Serveo private SSH key not found: {key_path}")
+        result["ssh_key"] = str(key_path)
+    elif mode == "reverse_proxy":
+        result["public_url"] = validate_public_base_url(str(result.get("public_url", "")))
+    elif mode == "sish":
+        if not str(result.get("tunnel_host", "")).strip():
+            raise RuntimeError("sish tunnel host is missing. Run TUNNEL_SETUP.bat.")
+        if not str(result.get("tunnel_domain", "")).strip():
+            raise RuntimeError("sish public domain is missing. Run TUNNEL_SETUP.bat.")
+        key_path = Path(str(result.get("ssh_key", ""))).expanduser()
+        if not key_path.is_file():
+            raise RuntimeError(f"sish private key not found: {key_path}")
+    elif mode == "tunnellio":
+        if not tunnellio_executable_path(result).is_file():
+            raise RuntimeError("Tunnellio client is missing. Choose another tunnel mode or restore tunnellio.exe.")
+        if not tunnellio_credentials_available(result):
+            raise RuntimeError(
+                "Tunnellio API token is missing. Restore its saved connection profile "
+                "or choose another tunnel mode in SETUP.bat."
+            )
+    return result
+
+
 def run() -> int:
     config = setup()
     # Ensure ide_gateway_api_key exists in global config (survives upgrades)
     config = ensure_ide_gateway_key(config)
+    config = validate_runtime_config(config)
     runtime = load_json(RUNTIME_FILE)
     old_server = int(runtime.get("server_pid", 0) or 0)
     if pid_matches(old_server, str(runtime.get("server_match", "server.py"))):
@@ -2924,7 +3131,15 @@ def tunnel_setup() -> int:
         config["public_url"] = prompt_public_url(config)
     else:
         config["tunnel_backend"] = "serveo"
+    mode = selected_mode_from_config(config)
+    config = sanitize_active_connection_config(config, mode)
+    save_connection_profile(mode, config)
     save_config(config, reason="explicit-config-write", allow_sensitive_change=True)
+    storage, active_profile = sync_workflow_profiles(config, created_from="tunnel_setup")
+    if active_profile is not None:
+        active_profile["connectionType"] = mode
+        active_profile.setdefault("metadata", {})["connectionType"] = mode
+        save_profiles(storage, workflow_profiles_file())
     print(f"Tunnel settings saved: {CONFIG_FILE}")
     return 0
 

@@ -101,6 +101,13 @@ class LauncherTests(unittest.TestCase):
             workspace = root / "workspace-one"
             workspace.mkdir()
             config_file = root / "config.json"
+            backup = root / "config.backup.20260101-000000.test.json"
+            backup.write_text(json.dumps({
+                "workspace": str(workspace.resolve()),
+                "token": "fixed-token",
+                "auth_mode": "legacy",
+                "tunnel_backend": "serveo",
+            }), encoding="utf-8")
             connections_file = root / "connections.cfg"
             with (
                 mock.patch.object(launcher, "CONFIG_FILE", config_file),
@@ -111,9 +118,9 @@ class LauncherTests(unittest.TestCase):
                 stored = json.loads(config_file.read_text(encoding="utf-8"))
 
         self.assertEqual(healed["workspace"], str(workspace.resolve()))
-        self.assertTrue(healed["token"])
+        self.assertEqual(healed["token"], "fixed-token")
         self.assertEqual(healed["auth_mode"], "legacy")
-        self.assertEqual(stored["workspace"], str(workspace.resolve()))
+        self.assertEqual(stored["tunnel_backend"], "serveo")
 
     def test_start_and_resolve_tunnel_retries_when_relay_port_is_busy(self):
         class Proc:
@@ -195,6 +202,78 @@ class LauncherTests(unittest.TestCase):
                     launcher.save_config(changed, reason="profile-activate")
                 backups = list(root.glob("config.backup.*.json"))
         self.assertEqual(backups, [])
+
+
+    def test_legacy_config_without_backend_migrates_to_serveo_temporary(self):
+        self.assertEqual(
+            launcher.selected_mode_from_config({"workspace": "x", "token": "t"}),
+            "serveo_temporary",
+        )
+
+    def test_connection_profiles_keep_modes_independent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_file = root / "config.json"
+            with mock.patch.object(launcher, "CONFIG_FILE", config_file):
+                launcher.save_connection_profile("serveo_stable", {
+                    "tunnel_backend": "serveo",
+                    "tunnel_mode_preference": "serveo_stable",
+                    "serveo_hostname": "stable-one",
+                    "ssh_key": "key-one",
+                })
+                launcher.save_connection_profile("reverse_proxy", {
+                    "tunnel_backend": "custom_proxy",
+                    "tunnel_mode_preference": "reverse_proxy",
+                    "public_url": "https://mcp.example.com",
+                })
+                serveo = launcher.connection_profile_for("serveo_stable")
+                reverse = launcher.connection_profile_for("reverse_proxy")
+        self.assertEqual(serveo["serveo_hostname"], "stable-one")
+        self.assertNotIn("public_url", serveo)
+        self.assertEqual(reverse["public_url"], "https://mcp.example.com")
+        self.assertNotIn("serveo_hostname", reverse)
+
+    def test_sanitize_active_mode_clears_inactive_connection_fields(self):
+        source = {
+            "public_url": "https://old.example.com",
+            "serveo_hostname": "old-host",
+            "ssh_key": "old-key",
+            "tunnel_host": "old-relay",
+            "tunnel_domain": "old.example",
+        }
+        result = launcher.sanitize_active_connection_config(source, "serveo_temporary")
+        self.assertEqual(result["tunnel_backend"], "serveo")
+        self.assertEqual(result["serveo_hostname"], "")
+        self.assertEqual(result["public_url"], "")
+        self.assertEqual(result["tunnel_host"], "")
+
+    def test_config_backups_are_limited_to_five(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_file = root / "config.json"
+            config_file.write_text(json.dumps({"workspace": "x", "token": "t"}), encoding="utf-8")
+            with mock.patch.object(launcher, "CONFIG_FILE", config_file):
+                for index in range(8):
+                    config = {"workspace": f"x-{index}", "token": "t"}
+                    launcher.save_config(config, reason=f"test-{index}")
+                backups = list(root.glob("config.backup.*.json"))
+        self.assertLessEqual(len(backups), 5)
+
+    def test_rotate_log_file_keeps_five_files_total(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "server.log"
+            for index in range(8):
+                log.write_text(str(index), encoding="utf-8")
+                launcher.rotate_log_file(log, keep_files=5)
+            files = [item for item in log.parent.iterdir() if item.name.startswith("server.log")]
+        self.assertLessEqual(len(files), 5)
+
+
+    def test_tunnellio_runtime_names_do_not_collide_for_same_workspace_basename(self):
+        one = launcher.tunnellio_runtime_name({"workspace": "C:/one/project"})
+        two = launcher.tunnellio_runtime_name({"workspace": "C:/two/project"})
+        self.assertNotEqual(one, two)
+        self.assertTrue(one.startswith("project-mcp-"))
 
     def test_setup_saves_first_workspace_to_first_slot(self):
 
@@ -1145,6 +1224,8 @@ class LauncherTests(unittest.TestCase):
                 mock.patch.object(launcher, "CONNECTION_FILE", connection_file),
 
                 mock.patch("launcher.setup", return_value=config),
+
+                mock.patch("launcher.validate_runtime_config", side_effect=lambda value: value),
 
                 mock.patch("launcher.load_json", return_value={}),
 

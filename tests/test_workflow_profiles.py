@@ -17,6 +17,7 @@ from profiles import (
     default_storage,
     detach_plugin_record,
     load_profiles,
+    normalize_profile,
     save_profiles,
     sync_profiles_with_slots,
 )
@@ -130,6 +131,19 @@ class ProfileStorageTests(unittest.TestCase):
         self.assertTrue(updated["allow_commands"])
         self.assertEqual(updated["token"], "fixed-token")
 
+
+
+    def test_connection_type_survives_profile_normalization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = build_profile(
+                profile_id="p1", path_slot=1, workspace_path=directory,
+                access_mode="trusted", created_from="test",
+                metadata={"connectionType": "serveo_stable"},
+            )
+            profile["connectionType"] = "serveo_stable"
+            normalized = normalize_profile(profile, fallback_access_mode="file_only")
+        self.assertEqual(normalized["connectionType"], "serveo_stable")
+        self.assertEqual(normalized["metadata"]["connectionType"], "serveo_stable")
 
 class PluginManagerTests(unittest.TestCase):
     def _write_storage(self, workspace: Path, profiles_file: Path, *, access_mode: str, plugins=None, global_plugins=None):

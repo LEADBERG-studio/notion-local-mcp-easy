@@ -19,10 +19,10 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -46,13 +46,17 @@ jobs:
         # Используем специальный скрипт запуска, чтобы перенаправить логи тестов в файл failure_context.txt
         shell: bash
         run: |
+          set -o pipefail
           python -m unittest discover -s tests -v 2>&1 | tee failure_context.txt
 
       - name: Analyze Errors with Gemini
-        # Выполняется только если тесты (или компиляция) завершились неудачей
+        # Diagnostic only: Gemini availability/encoding must never alter CI result.
         if: failure()
+        continue-on-error: true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
         shell: python
         run: |
           import os

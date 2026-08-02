@@ -108,6 +108,7 @@ def build_profile(
             "notes": "",
         },
         "plugins": plugins or {},
+        "connectionType": str((metadata or {}).get("connectionType", "") or ""),
     }
     if metadata:
         profile["metadata"].update(metadata)
@@ -137,6 +138,10 @@ def normalize_profile(profile: dict[str, Any], *, fallback_access_mode: str) -> 
     normalized["metadata"]["lastSelectedAt"] = str(metadata.get("lastSelectedAt", ""))
     normalized["metadata"]["lastKnownGood"] = bool(metadata.get("lastKnownGood", True))
     normalized["metadata"]["notes"] = str(metadata.get("notes", ""))
+    connection_type = str(profile.get("connectionType") or metadata.get("connectionType") or "").strip()
+    normalized["connectionType"] = connection_type
+    if connection_type:
+        normalized["metadata"]["connectionType"] = connection_type
     return normalized
 
 

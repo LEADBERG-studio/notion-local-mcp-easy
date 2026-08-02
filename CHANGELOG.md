@@ -1,5 +1,9 @@
 ## 2.2.0 - 2026-08-02
 
+- Production upgrade audit: legacy flat configs are imported conservatively; missing tokens restore from backups or require explicit setup, never silent rotation.
+- Startup now confirms whether to keep the active connection mode; switching can reuse per-mode settings or enter explicit setup.
+- Runtime preflight validates workspace, keys, URLs, trusted command defaults, and Tunnellio credentials before processes start.
+- Server/tunnel logs and config backups are capped at the latest 5 files; Tunnellio runtime names include a path hash to avoid collisions.
 - Startup health hardening: a public `/health` miss after the tunnel URL is known is now a warning, not a fatal launcher stop.
 - Connection profiles: each tunnel mode now keeps its own last-known settings in `connection-profiles.json`; setup asks whether to keep the mode and whether to reuse saved settings.
 - Config safety: every config write now creates a timestamped backup and refuses sensitive production-field rewrites outside explicit setup.
