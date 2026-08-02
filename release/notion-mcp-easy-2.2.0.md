@@ -21,3 +21,7 @@
 - Launcher больше не падает, если общий `%LOCALAPPDATA%\NotionMcpEasy\config.json` потерял `workspace`, `token`, `auth_mode` или `tunnel_backend`: поля восстанавливаются автоматически.
 - При `SSH tunnel exited with code 255` / `remote port forwarding failed for listen port 80` launcher чистит старый runtime и делает retry с backoff, вместо мгновенного падения.
 - Добавлены regression tests для обоих сценариев.
+
+## CI hotfix
+
+- Added `.gitattributes` with `VERSION text eol=crlf`, so GitHub Actions on Linux checks out `VERSION` with CRLF and the byte-exact version test passes.

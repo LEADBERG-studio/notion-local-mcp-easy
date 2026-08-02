@@ -1,5 +1,6 @@
 ## 2.2.0 - 2026-08-02
 
+- CI hotfix: added `.gitattributes` rule `VERSION text eol=crlf` so Linux checkout preserves byte-exact VERSION CRLF invariant.
 - Hotfix: launcher self-heals shared config missing `workspace`, `token`, `auth_mode`, or `tunnel_backend` instead of crashing old/new builds.
 - Hotfix: built-in tunnel startup now cleans stale runtime and retries when SSH relay reports `remote port forwarding failed for listen port 80`.
 - Split the queue/poll IDE mode out of `ide_gateway` into a standalone `ide_bridge` plugin.

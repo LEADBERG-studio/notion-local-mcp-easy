@@ -1,0 +1,2 @@
+# Keep VERSION byte-exact for release/version invariant tests.
+VERSION text eol=crlf
