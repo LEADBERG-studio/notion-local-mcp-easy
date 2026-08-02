@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.0.1</small>
+        <small>документация для начинающих · v2.3.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -61,109 +61,77 @@
       </div>
     </aside>
     <main class="content">
-      <h1>IDE Gateway — мост между IDE и моделью</h1>
+      <h1>IDE Gateway: мост между IDE и моделью</h1>
+      <p class="lead"><code>ide_gateway</code> даёт IDE OpenAI-compatible API, но сам сервер живёт в песочнице модели. После однократной настройки обычная команда ровно одна: <strong>«подними мост»</strong>.</p>
 
-      <p class="lead"><code>ide_gateway</code> — это плагин, который поднимает OpenAI-compatible шлюз для IDE. По умолчанию используется <strong>sandbox</strong>: модель одной командой запускает сервер в своей песочнице и keyless TCP bridge Tunnellio. Без SSH-ключей и без ручной возни.</p>
+      <div class="callout info"><strong>Коротко:</strong> модель сама получает installer-промт, находит внутренний endpoint, key и точные модели своей песочницы, запускает одну команду и возвращает готовые настройки IDE. Пользователь не должен искать внутренние ключи.</div>
 
-      <div class="callout info">
-        <strong>Зачем это нужно:</strong> инструменты MCP менее надёжны, чем у IDE. Этот плагин позволяет работать в привычном IDE, но с моделью, которая видит ваши файлы и может вызывать MCP-инструменты. Общение IDE ↔ модель идёт напрямую, без сообщений в чате.
-      </div>
+      <h2>Схема без магии</h2>
+      <pre><code>IDE → https://&lt;hostname&gt;.tunnellio.site/v1
+    → keyless Tunnellio TCP bridge
+    → resident server в песочнице модели
+    → внутренний LLM egress этой же песочницы</code></pre>
+      <p>SSH-туннеля здесь нет: не нужны SSH-ключи, регистрация public key или облачный API token в sandbox-клиенте.</p>
 
-      <h2>Как это работает</h2>
-      <pre><code>IDE (Cursor, Continue, VS Code, ...)
-  → https://&lt;hostname&gt;.tunnellio.site/v1
-  → keyless Tunnellio TCP bridge (--run --watch)
-  → sandbox_server.py в песочнице модели
-  → внутренний LLM endpoint/key этой же песочницы
-  → ответ возвращается в IDE</code></pre>
-
-      <div class="callout info">
-        <strong>Разделение:</strong> старый poll/queue режим вынесен в отдельный <a href="ide-bridge.html">IDE Bridge</a> (<code>ide_bridge</code>) со своим портом 8797 и ключом <code>ideb_...</code>. Здесь описан только sandbox TCP bridge.
-      </div>
-
-      <div class="callout info">
-        <strong>Главная идея:</strong> команда «подними мост» запускает <code>sandbox_bootstrap.py</code>. Он сохраняет внутренние endpoint/key песочницы в state, поднимает сервер daemon-процессом и запускает Tunnellio bridge в watch-режиме. MCP tool-call может закончиться, а сервер и туннель продолжают жить.
-      </div>
-
-      <h2>Что остаётся постоянным</h2>
-      <ul>
-        <li><strong>API key для IDE</strong> — локальный <code>ideg_...</code>, хранится в plugin config и обычно не меняется при обновлениях.</li>
-        <li><strong>Base URL</strong> — после первого bootstrap берётся из Tunnellio и показывается через <code>ide_gateway_show_config</code>.</li>
-        <li><strong>Эфемерный hostname</strong> — сохраняется в endpoint state и переиспользуется, пока живёт домен (обычно сутки). Если домен истёк, bootstrap создаст новый и сохранит его.</li>
-        <li><strong>Кастомный hostname</strong> — если выбран в setup, используется постоянно.</li>
-      </ul>
-
-      <h2>Быстрый старт</h2>
+      <h2>Настройка для чайников</h2>
       <ol class="steps">
-        <li><strong>Запустите рабочую область в trusted developer mode.</strong><br>Через <code>SETUP.bat</code> в корне MCP включите trusted mode.</li>
-        <li><strong>Включите плагин.</strong><br>Откройте <code>plugins\ide_gateway</code> и запустите <code>SETUP.bat</code>. Выберите <code>current</code>, <code>full_access</code>, режим <code>sandbox</code>. Для начала берите <code>ephemeral</code> domain.</li>
-        <li><strong>Перезапустите MCP.</strong><br><code>STOP.bat</code> → <code>START.bat</code>. Локальный endpoint поднимется, а public URL появится после bootstrap.</li>
-        <li><strong>Получите prompt.</strong><br>Вызовите <code>ide_gateway_bridge_prompt</code>. В sandbox-режиме он содержит одну bootstrap-команду.</li>
-        <li><strong>Скажите модели: «подними мост».</strong><br>Модель выполняет bootstrap, ждёт JSON и возвращает <code>base_url</code>.</li>
-        <li><strong>Скопируйте настройки в IDE.</strong><br>Вызовите <code>ide_gateway_show_config</code> с <code>include_secret=true</code> и возьмите <code>base_url</code>, <code>api_key</code>, <code>model</code>.</li>
-        <li><strong>Работайте.</strong><br>IDE обращается к public URL, запросы идут в песочницу модели напрямую.</li>
+        <li><strong>Включите trusted developer mode.</strong><br>В корне проекта запустите <code>SETUP.bat</code> для нужной рабочей области.</li>
+        <li><strong>Настройте плагин.</strong><br>Запустите <code>plugins\ide_gateway\SETUP.bat</code>. Выберите <code>current</code>, <code>full_access</code>, <code>sandbox</code>, для первой проверки <code>ephemeral</code>.</li>
+        <li><strong>Перезапустите MCP.</strong><br><code>STOP.bat</code>, затем <code>START.bat</code>.</li>
+        <li><strong>Напишите модели «подними мост».</strong><br>Она должна вызвать <code>ide_gateway_bridge_prompt</code> и выполнить полученную команду в собственной Linux-песочнице, не через Windows MCP host.</li>
+        <li><strong>Скопируйте три значения.</strong><br>Публичный <code>base_url</code>, ключ <code>ideg_...</code> и точный model ID.</li>
+        <li><strong>Добавьте OpenAI-compatible provider в IDE.</strong><br>Сохраните эти три значения и отправьте короткий тестовый запрос.</li>
       </ol>
 
-      <h2>Настройки IDE</h2>
+      <h2>Что вставлять в IDE</h2>
       <table><thead><tr><th>Поле</th><th>Значение</th></tr></thead><tbody>
-        <tr><td>Base URL</td><td><code>https://&lt;hostname&gt;.tunnellio.site/v1</code> из bootstrap или <code>ide_gateway_show_config</code></td></tr>
-        <tr><td>API key</td><td>Значение <code>api_key</code> из <code>ide_gateway_show_config</code> (начинается с <code>ideg_</code>)</td></tr>
-        <tr><td>Model</td><td><code>ide-gateway</code> или реальное имя из <code>/v1/models</code></td></tr>
+        <tr><td>Base URL</td><td><code>https://&lt;hostname&gt;.tunnellio.site/v1</code></td></tr>
+        <tr><td>API key</td><td><code>ideg_...</code> из итогового ответа модели</td></tr>
+        <tr><td>Model</td><td>точный ID, возвращённый публичным <code>/v1/models</code></td></tr>
       </tbody></table>
+      <div class="callout warn"><strong>Не путайте URL:</strong> внутренний endpoint песочницы никогда не вставляется в IDE и не публикуется в чате. IDE использует только public Tunnellio URL.</div>
 
-      <h2>Инструменты</h2>
-      <table><thead><tr><th>Инструмент</th><th>Режим</th><th>Назначение</th></tr></thead><tbody>
-        <tr><td><code>ide_gateway_start</code></td><td><code>full_access</code></td><td>Запустить локальный endpoint.</td></tr>
-        <tr><td><code>ide_gateway_stop</code></td><td><code>full_access</code></td><td>Остановить endpoint и очистить очередь.</td></tr>
-        <tr><td><code>ide_gateway_status</code></td><td><code>read_only</code></td><td>Посмотреть статус endpoint и счётчики очереди.</td></tr>
-        <tr><td><code>ide_gateway_show_config</code></td><td><code>read_only</code></td><td>Показать настройки для IDE (с <code>include_secret=true</code> отдаёт ключ).</td></tr>
-        <tr><td><code>ide_gateway_bridge_prompt</code></td><td><code>read_only</code></td><td>Готовый промт-шаблон для системного промта Notion Agent.</td></tr>
-        <tr><td><code>ide_gateway_wait_request</code></td><td><code>read_only</code></td><td>Дождаться запроса от IDE (long-poll, модель держит открытым).</td></tr>
-        <tr><td><code>ide_gateway_send_response</code></td><td><code>read_only</code></td><td>Отправить ответ IDE.</td></tr>
-        <tr><td><code>ide_gateway_fail_request</code></td><td><code>read_only</code></td><td>Завершить запрос ошибкой.</td></tr>
-        <tr><td><code>ide_gateway_get_logs</code></td><td><code>read_only</code></td><td>Прочитать redacted logs.</td></tr>
-        <tr><td><code>ide_gateway_rotate_token</code></td><td><code>full_access</code></td><td>Сменить локальный API token.</td></tr>
-      </tbody></table>
-
-      <h2>Поддерживаемые эндпоинты</h2>
-      <ul>
-        <li><code>/v1/chat/completions</code> (stream + non-stream)</li>
-        <li><code>/v1/responses</code> (stream + non-stream, background, cancel, input_items)</li>
-        <li><code>/v1/completions</code> (legacy)</li>
-        <li><code>/v1/models</code></li>
-        <li><code>/v1/tools</code> + forced <code>tool_choice</code></li>
-        <li><code>/v1/files</code> (upload, list, get, content, delete)</li>
-        <li><code>/v1/images/generations</code>, <code>/v1/images/edits</code></li>
-        <li><code>/v1/audio/speech</code>, <code>/v1/audio/transcriptions</code>, <code>/v1/audio/translations</code></li>
-        <li><code>/v1/embeddings</code> (local fallback)</li>
-        <li><code>/v1/moderations</code> (local heuristic)</li>
+      <h2>Что делает installer</h2>
+      <ul class="checklist">
+        <li>пишет защищённый config в <code>~/.ide_gateway</code>, не печатая внутренние секреты;</li>
+        <li>поднимает detached OpenAI-compatible server и TCP bridge, не привязанные к короткому tool-call;</li>
+        <li>работает с OpenAI- и Anthropic-style upstream;</li>
+        <li>показывает реальные model IDs песочницы;</li>
+        <li>переподключает bridge и повторно использует живой hostname;</li>
+        <li>оставляет только пять последних логов;</li>
+        <li>не убивает процессы из-за временного 404/502/504 при propagation.</li>
       </ul>
 
-      <h2>Жизненный цикл sandbox-моста</h2>
-      <ol class="steps">
-        <li><code>ide_gateway_start</code> создаёт endpoint state и сохраняет локальный IDE token.</li>
-        <li><code>ide_gateway_bridge_prompt</code> отдаёт одну команду для <code>sandbox_bootstrap.py</code>.</li>
-        <li>Bootstrap читает внутренние endpoint/key песочницы из env и пишет их в state.</li>
-        <li><code>sandbox_server.py</code> стартует daemon-процессом и отвечает на OpenAI-compatible API.</li>
-        <li><code>sandbox_tunnel.py</code> запускает <code>tunnellio bridge --run --watch</code>, получает public URL и сохраняет hostname.</li>
-        <li>При следующем запуске hostname переиспользуется. Если эфемерный домен истёк, будет создан новый.</li>
-      </ol>
+      <h2>Резервный промт</h2>
+      <p>Если модель не поняла короткую команду, полезла в Windows-пути или просит у вас внутренний key, откройте отдельный файл <a href="../ru/IDE_GATEWAY_FALLBACK_PROMPT.md"><code>docs/ru/IDE_GATEWAY_FALLBACK_PROMPT.md</code></a> и скопируйте промт целиком.</p>
+      <pre><code>Подними IDE Gateway в СВОЕЙ модельной песочнице.
+Вызови ide_gateway_bridge_prompt с include_secret=true.
+Не используй Local MCP/run_program или Windows-пути.
+Не печатай внутренний endpoint/key.
+Проверь status, public /health и /v1/models.</code></pre>
 
-      <div class="callout warning">
-        <strong>Важно:</strong> в sandbox-режиме не нужен long-poll цикл. Если вам нужен старый совместимый путь, выберите режим <code>bridge</code>: там модель крутит <code>bridge_step.py poll</code> короткими вызовами, чтобы не ловить timeout MCP-tool-call.
-      </div>
+      <h2>Проверка и ремонт</h2>
+      <pre><code>python3 ~/.ide_gateway/sandbox_installer.py status
+python3 ~/.ide_gateway/sandbox_installer.py repair
+python3 ~/.ide_gateway/sandbox_installer.py stop</code></pre>
+      <p><code>install</code> и <code>repair</code> идемпотентны. Не запускайте несколько install одновременно. <code>stop</code> нужен только для намеренного выключения.</p>
 
-      <h2>Диагностика</h2>
-      <ul>
-        <li><code>ide_gateway_status</code> — статус endpoint + счётчики очереди (pending/claimed/completed/failed/expired).</li>
-        <li><code>ide_gateway_show_config</code> — готовые настройки для IDE.</li>
-        <li><code>ide_gateway_get_logs</code> — последние записи (секреты замаскированы).</li>
-        <li>Endpoint state и очереди живут в gitignored <code>temp/ide_gateway_runtime/</code>.</li>
-      </ul>
+      <h2>Типовые проблемы</h2>
+      <table><thead><tr><th>Симптом</th><th>Что делать</th></tr></thead><tbody>
+        <tr><td>Public URL даёт 404/502/504</td><td>Проверьте <code>status</code>. Если server и bridge живы, подождите propagation и повторите запрос, не перезапуская всё.</td></tr>
+        <tr><td>Модель просит внутренний API key</td><td>Это ошибка сценария. Используйте резервный промт: модель должна получить key из собственной runtime-среды.</td></tr>
+        <tr><td>В <code>/v1/models</code> alias вместо реальных моделей</td><td>Запустите <code>repair</code> с точными model IDs песочницы; не выдумывайте имена.</td></tr>
+        <tr><td>Процесс умер после tool-call</td><td>Убедитесь, что используется installer 2.3.0, затем <code>repair</code>. Он запускает detached resident-процессы.</td></tr>
+        <tr><td>Hostname истёк</td><td><code>repair</code> создаст новый ephemeral route. Обновите Base URL в IDE.</td></tr>
+      </tbody></table>
 
-      <footer class="page-footer">
-        <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
-      </footer>
+      <h2>Не путайте с IDE Bridge</h2>
+      <p><a href="ide-bridge.html"><code>ide_bridge</code></a> является отдельным queue/poll fallback с портом 8797 и ключом <code>ideb_...</code>. Он не нужен для нормального прямого sandbox TCP bridge.</p>
+
+      <h2>Полная документация</h2>
+      <p>Расширенное руководство: <code>docs/ru/IDE_GATEWAY_SANDBOX.md</code>. Английская версия: <code>docs/IDE_GATEWAY_SANDBOX.md</code>.</p>
+
+      <footer class="page-footer"><p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p></footer>
     </main>
   </div>
 </body>

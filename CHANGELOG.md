@@ -1,5 +1,14 @@
-## 2.2.0 - 2026-08-02
+## 2.3.0 - 2026-08-03
 
+- `ide_gateway_bridge_prompt` now embeds a self-contained installer that the model runs with one command inside its own sandbox after `подними мост` / `start the bridge`.
+- The installer stores the sandbox's internal endpoint/key in protected local state, advertises exact discovered model IDs, proxies OpenAI- and Anthropic-style upstreams, and never exposes internal credentials in the final report.
+- Replaced the sandbox SSH path with the keyless native Tunnellio TCP bridge protocol. No SSH key generation, public-key registration, or cloud API token is required in the sandbox.
+- Resident server and bridge processes are detached from the initiating tool call, reconnect automatically, reuse a live route, retain only five logs, and survive public edge propagation delays without being killed.
+- Added idempotent `install`, `status`, `repair`, and `stop` operations plus local/public health and `/v1/models` verification.
+- Added dedicated canonical and fallback tunnel prompts, a full beginner walkthrough, security rules, troubleshooting, recovery commands, and synchronized Russian/English documentation.
+- Live verification passed through a real `*.tunnellio.site` route: exact models were listed and a chat completion preserved the requested model ID.
+
+## 2.2.0 - 2026-08-02
 - Production upgrade audit: legacy flat configs are imported conservatively; missing tokens restore from backups or require explicit setup, never silent rotation.
 - Startup now confirms whether to keep the active connection mode; switching can reuse per-mode settings or enter explicit setup.
 - Runtime preflight validates workspace, keys, URLs, trusted command defaults, and Tunnellio credentials before processes start.

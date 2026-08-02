@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 2.2.0
+# Notion Local MCP Easy 2.3.0
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -60,47 +60,40 @@ Trusted developer mode enables allow-listed Python, Git, and Node commands with 
 - `dual`: both legacy token and OAuth on the same `/mcp` endpoint.
 
 
-## IDE Gateway plugin — IDE to sandbox model bridge
+## IDE Gateway plugin: IDE to model sandbox bridge
 
-`ide_gateway` exposes an OpenAI-compatible `/v1` API for IDEs. In the default **sandbox** mode, the model only needs one command after the user says “start the bridge”: `sandbox_bootstrap.py` captures this sandbox's internal model endpoint/key, starts a resident `sandbox_server.py`, and launches a keyless Tunnellio TCP bridge with `tunnellio bridge --run --watch`. No SSH keys are generated.
+Version 2.3.0 makes the normal flow literal: after one-time setup, tell the model **“start the bridge”**. It calls `ide_gateway_bridge_prompt`, resolves its own sandbox's internal endpoint, key, API style, and exact model IDs, then runs one generated command in its own sandbox shell.
 
-Modes:
+```text
+IDE -> https://<hostname>.tunnellio.site/v1
+    -> keyless Tunnellio TCP bridge
+    -> resident OpenAI-compatible server in the model sandbox
+    -> that sandbox's internal LLM egress
+```
 
-- **sandbox** (default) — public Tunnellio URL → sandbox server → this sandbox's LLM egress. Best path for IDE usage.
-- **bridge** — compatibility fallback where the model serves a queue with `bridge_step.py poll/complete`.
-- **external** — local worker calls an OpenAI-compatible provider directly.
-
-Stable parts:
-
-- the local `ideg_...` API key is stored in plugin config and survives normal upgrades;
-- `ide_gateway_show_config(include_secret=true)` returns the IDE settings; after bootstrap, `base_url` is the public Tunnellio URL;
-- ephemeral hostnames are cached and reused while the one-day domain is alive; if expired, bootstrap creates and saves a new one;
-- custom hostnames from setup are reused permanently;
-- daemonized processes plus the Tunnellio watch loop keep the server and tunnel alive beyond short MCP tool-call timeouts.
+There is no sandbox SSH tunnel. The self-contained installer protects internal credentials, detaches the resident processes from the initiating tool call, reconnects automatically, reuses a live route, and treats temporary public 404/502/504 responses as propagation rather than a reason to kill healthy processes.
 
 Quick flow:
 
-1. Run `plugins\ide_gateway\SETUP.bat` in trusted developer mode. Choose `current`, `full_access`, `sandbox`, usually `ephemeral`.
-2. Restart MCP.
-3. Call `ide_gateway_bridge_prompt`; it contains the one bootstrap command.
-4. Tell the model: “start the bridge”. It returns the public `base_url`.
-5. Configure your IDE as OpenAI-compatible using `base_url`, `api_key`, and `model` from `ide_gateway_show_config`.
+1. Enable trusted developer mode for the workspace.
+2. Run `plugins\ide_gateway\SETUP.bat`: choose `current`, `full_access`, `sandbox`, and usually `ephemeral` for the first run.
+3. Restart MCP.
+4. Tell the model: **“start the bridge”**. No internal credentials should be requested from the user.
+5. Configure an OpenAI-compatible IDE provider with the returned public `base_url`, `ideg_...` key, and an exact model ID from `/v1/models`.
 
-Diagnostics: `ide_gateway_status`, `ide_gateway_get_logs`, `ide_gateway_show_config`.
+If the short command is misunderstood, use the dedicated fallback prompt in [`docs/IDE_GATEWAY_FALLBACK_PROMPT.md`](docs/IDE_GATEWAY_FALLBACK_PROMPT.md). Full operations and security guidance: [`docs/IDE_GATEWAY_SANDBOX.md`](docs/IDE_GATEWAY_SANDBOX.md).
 
-## IDE Bridge plugin — separate queue/poll bridge
+Sandbox recovery commands:
 
-`ide_bridge` is the old queue/poll bridge split out of `ide_gateway`. It has its own plugin id, tools, runtime directory, local proxy, token prefix, and default port. Use it when you want the active MCP model to serve IDE requests by repeatedly running `bridge_step.py poll` and completing queue items.
+```bash
+python3 ~/.ide_gateway/sandbox_installer.py status
+python3 ~/.ide_gateway/sandbox_installer.py repair
+python3 ~/.ide_gateway/sandbox_installer.py stop
+```
 
-Defaults:
+## IDE Bridge plugin: separate queue/poll bridge
 
-- local base URL: `http://127.0.0.1:8797/v1`;
-- token prefix: `ideb_...`;
-- model alias: `ide-bridge`;
-- runtime: `temp/ide_bridge_runtime`;
-- tools: `ide_bridge_start`, `ide_bridge_show_config`, `ide_bridge_bridge_prompt`, `ide_bridge_wait_request`, `ide_bridge_send_response`, `ide_bridge_fail_request`.
-
-`ide_gateway` and `ide_bridge` can be enabled together and configured as two separate OpenAI-compatible providers in the IDE.
+`ide_bridge` is the compatibility queue/poll path. It has separate tools, runtime state, local URL `http://127.0.0.1:8797/v1`, `ideb_...` token, and `ide-bridge` model alias. Use `ide_gateway` for the direct sandbox TCP bridge and `ide_bridge` only when the active model must poll and complete queued IDE requests.
 
 
 ## Safety model

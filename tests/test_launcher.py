@@ -155,7 +155,10 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(calls["count"], 2)
 
     def test_heal_legacy_config_does_not_guess_tunnel_backend(self):
-        healed = launcher.heal_legacy_config({"workspace": "x", "token": "t", "auth_mode": "legacy"}, persist=False)
+        with tempfile.TemporaryDirectory() as directory:
+            config_file = Path(directory) / "config.json"
+            with mock.patch.object(launcher, "CONFIG_FILE", config_file):
+                healed = launcher.heal_legacy_config({"workspace": "x", "token": "t", "auth_mode": "legacy"}, persist=False)
         self.assertNotIn("tunnel_backend", healed)
 
     def test_normalize_serveo_hostname_accepts_full_url_but_returns_label(self):

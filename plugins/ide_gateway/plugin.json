@@ -210,7 +210,9 @@
             "type": "string"
           },
           "include_secret": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": true,
+            "description": "Include the IDE-facing ideg_ token required by the generated install command. Set false only for redacted display."
           }
         }
       },

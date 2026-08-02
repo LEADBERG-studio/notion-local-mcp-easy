@@ -15,7 +15,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.0.1</small>
+        <small>документация для начинающих · v2.3.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -85,7 +85,7 @@
         <li><strong>Запустите MCP хотя бы один раз через <code>START.bat</code>.</strong><br>Так launcher создаст активный workflow profile для выбранной рабочей области.</li>
         <li><strong>Откройте папку нужного плагина.</strong><br>Например: <code>plugins\ide_gateway</code>, <code>plugins\ide_bridge</code>, <code>plugins\sqlite</code>, <code>plugins\postgres</code> или <code>plugins\openai_compat</code>.</li>
         <li><strong>Запустите <code>SETUP.bat</code>.</strong><br>Setup спросит, включать плагин для <code>current</code> рабочей области или <code>global</code> для всех областей.</li>
-        <li><strong>Ответьте на вопросы настройки.</strong><br>Для DB/AI plugins setup собирает connection/provider config. Для <code>ide_gateway</code> и <code>ide_bridge</code> обычно достаточно дефолтов.</li>
+        <li><strong>Ответьте на вопросы настройки.</strong><br>Для DB/AI plugins setup собирает connection/provider config. Для <code>ide_gateway</code> выбирайте sandbox и обычно ephemeral; <code>ide_bridge</code> настраивается отдельно и не является режимом gateway.</li>
         <li><strong>Перезапустите MCP.</strong><br>Registry tools строится на старте, поэтому после enable/disable нужен restart.</li>
         <li><strong>Проверьте диагностику.</strong><br>В агенте можно вызвать <code>list_plugins</code> или <code>plugin_status</code>, чтобы увидеть loaded/not_attached/effective mode.</li>
       </ol>
@@ -133,7 +133,7 @@ API key env var: LOCAL_AI_API_KEY
 Default model: local-model</code></pre>
 
       <h2>IDE Gateway plugin</h2>
-      <p>Запустите <code>plugins\ide_gateway\SETUP.bat</code>. Обычно выбирайте <code>current</code> и <code>full_access</code>, а затем оставляйте defaults. Подробная инструкция: <a href="ide-gateway.html">IDE Gateway</a>.</p>
+      <p>Запустите <code>plugins\ide_gateway\SETUP.bat</code>, выберите <code>current</code>, <code>full_access</code>, <code>sandbox</code> и обычно <code>ephemeral</code>. После restart скажите модели «подними мост». Подробная инструкция и резервный промт: <a href="ide-gateway.html">IDE Gateway</a>. Для queue/poll сценария отдельно настройте <a href="ide-bridge.html">IDE Bridge</a>.</p>
 
       <h2>Как выключить</h2>
       <ol class="steps">

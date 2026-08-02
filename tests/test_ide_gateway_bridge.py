@@ -4,6 +4,7 @@ IDE sends a request, the claim returns it to the model, which completes the
 queue entry; the worker then streams the answer back to the IDE.
 """
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -195,8 +196,21 @@ class IdeBridgeTests(unittest.TestCase):
                         {**ctx, "pluginConfig": cfg})
         self.assertTrue(result["ok"])
         self.assertEqual(result["gateway_mode"], "sandbox")
-        self.assertIn("sandbox_server.py", result["system_prompt"])
-        self.assertIn("sandbox_tunnel.py", result["system_prompt"])
+        self.assertIn(".ide_gateway_bootstrap.py install", result["system_prompt"])
+        self.assertIn("Do NOT run the command through Local MCP", result["system_prompt"])
+        self.assertIn("<INTERNAL_LLM_BASE_URL>", result["system_prompt"])
+        self.assertNotIn("IDE api_key: ***", result["system_prompt"])
+
+    def test_bridge_prompt_includes_configured_ide_key_by_default(self):
+        from plugins.ide_gateway.plugin import invoke
+        ctx = {"workspacePath": str(self.workspace), "effectiveMode": "full_access"}
+        cfg = normalize_gateway_config({"default_api_key": "ideg_default-secret-token-1234567890"}, ctx)
+        result = invoke("ide_gateway_bridge_prompt", {"name": "default"},
+                        {**ctx, "pluginConfig": cfg})
+        self.assertIn("ideg_default-secret-token-1234567890", result["system_prompt"])
+        redacted = invoke("ide_gateway_bridge_prompt", {"name": "default", "include_secret": False},
+                          {**ctx, "pluginConfig": cfg})
+        self.assertIn("IDE api_key: ***", redacted["system_prompt"])
 
     # 4. ide_bridge prompt returns loop instruction with prompt_type routing
     def test_ide_bridge_prompt_returns_loop_instruction(self):
@@ -278,6 +292,64 @@ class IdeBridgeTests(unittest.TestCase):
     def test_sandbox_bootstrap_extracts_hostname_from_public_url(self):
         from plugins.ide_gateway.sandbox_bootstrap import _hostname_from_public_url
         self.assertEqual(_hostname_from_public_url("https://my-bridge.tunnellio.site"), "my-bridge")
+
+    def test_sandbox_installer_smoke_without_tunnel(self):
+        import socket
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        class Upstream(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                raw = json.dumps({"data": [{"id": "sandbox-model"}]}).encode(); self.send_response(200); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
+        sock = socket.socket(); sock.bind(("127.0.0.1", 0)); upstream_port = sock.getsockname()[1]; sock.close()
+        server = ThreadingHTTPServer(("127.0.0.1", upstream_port), Upstream); threading.Thread(target=server.serve_forever, daemon=True).start()
+        gateway_port = free_port()
+        installer = PROJECT / "plugins" / "ide_gateway" / "sandbox_installer.py"
+        with tempfile.TemporaryDirectory() as home:
+            env = {**os.environ, "HOME": home, "USERPROFILE": home}
+            proc = subprocess.run([sys.executable, str(installer), "install", "--upstream-base-url", f"http://127.0.0.1:{upstream_port}", "--models", "sandbox-model", "--ide-api-key", "ideg_test_key_123456789", "--hostname", "unit-test", "--port", str(gateway_port), "--skip-tunnel"], capture_output=True, text=True, env=env, timeout=40)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            body = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{gateway_port}/health", timeout=5).read())
+            self.assertTrue(body["ok"]); self.assertIn("sandbox-model", body["models"])
+            stop = subprocess.run([sys.executable, str(installer), "stop"], capture_output=True, text=True, env=env, timeout=20)
+            self.assertEqual(stop.returncode, 0, stop.stdout + stop.stderr)
+            time.sleep(0.5)
+        server.shutdown()
+
+    def test_sandbox_installer_native_bridge_handshake(self):
+        import importlib.util
+        import socket
+        installer_path = PROJECT / "plugins" / "ide_gateway" / "sandbox_installer.py"
+        spec = importlib.util.spec_from_file_location("sandbox_installer_test", installer_path)
+        module = importlib.util.module_from_spec(spec); assert spec and spec.loader; spec.loader.exec_module(module)
+        listener = socket.socket(); listener.bind(("127.0.0.1", 0)); listener.listen(1)
+        host, control_port = listener.getsockname()
+        received = {}
+        def control_server():
+            conn, _ = listener.accept()
+            received.update(module.recv_frame(conn, 5) or {})
+            module.send_frame(conn, {"type": "hello", "port": 51000})
+            time.sleep(2); conn.close(); listener.close()
+        threading.Thread(target=control_server, daemon=True).start()
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready.json"
+            threading.Thread(target=module.bridge, args=(host, control_port, "demo-app", 9, "", "", str(ready)), daemon=True).start()
+            deadline = time.time() + 5
+            while time.time() < deadline and not ready.exists(): time.sleep(0.05)
+            self.assertTrue(ready.exists())
+            self.assertEqual(received, {"type": "hello", "hostname": "demo-app"})
+
+    def test_sandbox_installer_reuses_unexpired_bridge_profile(self):
+        import importlib.util
+        installer_path = PROJECT / "plugins" / "ide_gateway" / "sandbox_installer.py"
+        spec = importlib.util.spec_from_file_location("sandbox_installer_cache_test", installer_path)
+        module = importlib.util.module_from_spec(spec); assert spec and spec.loader; spec.loader.exec_module(module)
+        future = "2999-01-01T00:00:00+00:00"
+        self.assertTrue(module.cached_bridge_valid({
+            "hostname": "demo", "public_url": "https://demo.tunnellio.site",
+            "bridge_host": "tunnellio.site", "control_port": 7835,
+            "domain_expires_at": future,
+        }, "demo"))
+        self.assertFalse(module.cached_bridge_valid({"hostname": "other"}, "demo"))
 
 
 if __name__ == "__main__":

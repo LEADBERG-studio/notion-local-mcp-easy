@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 2.1.0
+# Notion Local MCP Easy 2.3.0
 
 
 
@@ -88,50 +88,54 @@ docs/ru/index.html
 Поверх этого работает универсальная plugin-system: каждый плагин содержит собственные `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat` и `STATUS.bat`. Оператор запускает setup из папки плагина, выбирает `current` или `global` scope, отвечает на вопросы настройки, а helper создаёт локальный `plugin.local.*.json`; при следующем старте MCP plugin runtime читает эти локальные конфиги и регистрирует tools. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, AI/subagent family `openai_compat`, а также `ide_gateway`.
 
 
-## IDE Gateway — мост между IDE и моделью
+## IDE Gateway: мост из IDE в песочницу модели
 
-Начиная с 2.1.0 `ide_gateway` в режиме **sandbox** поднимается одной командой «подними мост»: модель запускает `sandbox_bootstrap.py`, он сохраняет внутренний endpoint/key текущей песочницы, стартует resident `sandbox_server.py` и keyless Tunnellio TCP bridge (`tunnellio bridge --run --watch`). SSH-ключи больше не нужны.
+В 2.3.0 основной сценарий стал буквальным: после однократного setup напишите модели **«подними мост»**. Она вызывает `ide_gateway_bridge_prompt`, подставляет внутренний endpoint, key, тип API и точные model IDs своей песочницы, затем запускает одну сгенерированную команду **в собственном sandbox shell**.
 
-Режимы:
+```text
+IDE -> https://<hostname>.tunnellio.site/v1
+    -> keyless Tunnellio TCP bridge
+    -> resident OpenAI-compatible server в песочнице модели
+    -> внутренний LLM egress этой же песочницы
+```
 
-- **sandbox** (по умолчанию) — публичный URL Tunnellio ведёт в sandbox-сервер, а тот напрямую вызывает LLM egress этой же песочницы. Это основной путь для IDE.
-- **bridge** — совместимый fallback: модель крутит `bridge_step.py poll` через `run_program` и отвечает через очередь.
-- **external** — локальный worker напрямую зовёт OpenAI-compatible провайдера.
+SSH здесь больше нет. Installer сам сохраняет защищённый config, поднимает detached-процессы, переподключает TCP bridge, переиспользует живой route и не убивает работающие процессы из-за временного 404/502/504 во время propagation.
 
-Что стабильно:
+### Для новичка: пять шагов
 
-- `api_key` генерируется как `ideg_...` и сохраняется в plugin config, при обычных переустановках не меняется.
-- `base_url` после первого bootstrap берётся из Tunnellio runtime/state и показывается через `ide_gateway_show_config`.
-- Эфемерный hostname повторно используется из state в течение срока жизни домена; если он истёк, bootstrap создаёт новый и сохраняет его.
-- Кастомный hostname из setup используется постоянно.
-- Процессы daemonized/watch, поэтому короткий MCP-вызов или 5-минутный timeout не должны убивать сервер и туннель.
+1. В корневом `SETUP.bat` включите trusted developer mode для нужной рабочей области.
+2. Запустите `plugins\ide_gateway\SETUP.bat`: `current`, `full_access`, `sandbox`, для первого запуска `ephemeral`.
+3. Перезапустите MCP: `STOP.bat`, затем `START.bat`.
+4. Напишите модели: **«подними мост»**. Ничего дополнительно вводить не нужно.
+5. В IDE создайте OpenAI-compatible provider и вставьте итоговые `base_url`, `api_key`, `model`.
 
-Короткий сценарий:
+Нормальный итог выглядит так:
 
-1. Запустите рабочую область в trusted developer mode.
-2. Откройте `plugins\ide_gateway` и запустите `SETUP.bat`. Выберите `current`, `full_access`, режим `sandbox`, обычно `ephemeral` domain.
-3. Перезапустите MCP. Endpoint поднимется локально, а `ide_gateway_bridge_prompt` покажет одну bootstrap-команду.
-4. Скажите модели: «подними мост». Она выполнит bootstrap, дождётся JSON и вернёт `base_url`.
-5. В IDE добавьте OpenAI-compatible provider: `base_url` из bootstrap/`ide_gateway_show_config`, `api_key` и `model` из `ide_gateway_show_config`.
-6. Если домен ещё жив, перезапуски используют тот же URL; если истёк, будет выдан новый URL.
+```text
+Base URL: https://<hostname>.tunnellio.site/v1
+API key:  ideg_...
+Model:    точный ID из /v1/models
+```
 
-Диагностика: `ide_gateway_status`, `ide_gateway_show_config(include_secret=true)`, `ide_gateway_get_logs`.
+Не используйте внутренний endpoint песочницы как URL IDE. Он остаётся внутри песочницы и не должен появляться в чате или логах.
 
-## IDE Bridge — отдельный poll/queue мост
+### Если короткая команда не сработала
 
-Начиная с 2.2.0 старый режим с очередью вынесен из `ide_gateway` в отдельный плагин `ide_bridge`. У него свои настройки, tools, runtime, локальный endpoint и ключ, поэтому его можно завести в IDE отдельным OpenAI-compatible provider рядом с `ide_gateway`.
+Скопируйте отдельный резервный промт из [`docs/ru/IDE_GATEWAY_FALLBACK_PROMPT.md`](docs/ru/IDE_GATEWAY_FALLBACK_PROMPT.md). Он жёстко запрещает установку на Windows-хост MCP, требует реальные model IDs и объясняет, как переждать propagation без убийства живых процессов.
 
-По умолчанию:
+Диагностика в песочнице:
 
-- `base_url = http://127.0.0.1:8797/v1`;
-- `api_key` начинается с `ideb_`;
-- `model = ide-bridge`;
-- runtime лежит в `temp/ide_bridge_runtime`;
-- prompt берётся через `ide_bridge_bridge_prompt`.
+```bash
+python3 ~/.ide_gateway/sandbox_installer.py status
+python3 ~/.ide_gateway/sandbox_installer.py repair
+python3 ~/.ide_gateway/sandbox_installer.py stop
+```
 
-Используйте `ide_gateway` для sandbox TCP bridge, а `ide_bridge` для режима, где модель сама опрашивает очередь через `bridge_step.py poll`.
+Полные инструкции: [`docs/ru/IDE_GATEWAY_SANDBOX.md`](docs/ru/IDE_GATEWAY_SANDBOX.md). Старый queue/poll путь не смешивайте с этим сценарием: он вынесен в отдельный `ide_bridge`.
 
+## IDE Bridge: отдельный poll/queue мост
 
+`ide_bridge` сохраняет совместимый queue/poll сценарий. У него свои tools, runtime, локальный endpoint `http://127.0.0.1:8797/v1`, ключ `ideb_...` и model alias `ide-bridge`. Используйте его только когда модель должна сама опрашивать очередь через `bridge_step.py poll`; для прямого sandbox TCP bridge нужен `ide_gateway`.
 
 
 ### Безопасное обновление настроек подключения
@@ -781,6 +785,3 @@ Regex-поиск отключён, чтобы исключить зависан�
 
 
 ### Настройки IDE Gateway по умолчанию
-
-\n\n### IDE Gateway — это мост к PromptQL\n\n`plugins\\ide_gateway\\ENABLE.bat` настраивает локальный `/v1` endpoint для IDE и генерирует ключ `ideg_...`. Он **не** спрашивает локальный OpenAI/Ollama upstream: IDE-запросы кладутся в очередь для активного PromptQL/Notion-агента, а реальная модель выбирается в чате/настройках PromptQL. Пока нет reverse-callback automation, запросы завершаются bridge tools (`ide_gateway_wait_request` / `ide_gateway_send_response`).\n
-Текущая заметка IDE Gateway: модель в локальном config — только alias для IDE (`ide-gateway`). Реальная модель выбирается активным PromptQL/Notion-чатом или настройками проекта; обычный setup не спрашивает upstream base URL или upstream model.
