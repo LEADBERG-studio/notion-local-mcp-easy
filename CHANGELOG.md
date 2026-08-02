@@ -1,5 +1,6 @@
 ## 2.3.0 - 2026-08-03
 
+- `ide_gateway` plugin manifest is bumped to `0.4.0` for the new one-command sandbox installer and native Tunnellio transport.
 - `ide_gateway_bridge_prompt` now embeds a self-contained installer that the model runs with one command inside its own sandbox after `подними мост` / `start the bridge`.
 - The installer stores the sandbox's internal endpoint/key in protected local state, advertises exact discovered model IDs, proxies OpenAI- and Anthropic-style upstreams, and never exposes internal credentials in the final report.
 - Replaced the sandbox SSH path with the keyless native Tunnellio TCP bridge protocol. No SSH key generation, public-key registration, or cloud API token is required in the sandbox.

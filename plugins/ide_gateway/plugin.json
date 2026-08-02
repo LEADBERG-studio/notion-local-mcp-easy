@@ -1,7 +1,7 @@
 {
   "id": "ide_gateway",
   "display_name": "IDE Gateway",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "entrypoint": "plugin.py",
   "supported_modes": [
     "read_only",

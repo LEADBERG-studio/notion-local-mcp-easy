@@ -6,6 +6,7 @@
 
 ## Что вошло
 
+- Версия плагина `ide_gateway` поднята до `0.4.0` для нового installer/transport contract.
 - Нативный keyless Tunnellio TCP bridge вместо нестабильного sandbox SSH-туннеля.
 - Никаких SSH-ключей, регистрации public key или облачного API token в sandbox-клиенте.
 - Защищённое локальное хранение внутреннего endpoint/key без вывода секретов в чат.
