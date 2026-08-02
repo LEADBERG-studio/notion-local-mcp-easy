@@ -23,6 +23,18 @@ server = importlib.reload(_server)
 
 
 class ProcessLimitTests(unittest.TestCase):
+    def setUp(self):
+        # Other suites reload the shared server module with temporary settings.
+        # Restore this suite's explicit environment before every test.
+        global server
+        os.environ["MCP_TOKEN"] = "unit-test-token"
+        os.environ["MCP_BASE_DIR"] = str(PROJECT)
+        os.environ["MCP_ALLOW_COMMANDS"] = "0"
+        os.environ["MCP_AUTH_MODE"] = "legacy"
+        os.environ["MCP_PUBLIC_URL"] = ""
+        os.environ["MCP_SERVEO_HOSTNAME"] = ""
+        server = importlib.reload(_server)
+
     def test_output_is_bounded_and_process_is_stopped(self):
         async def scenario():
             process = await asyncio.create_subprocess_exec(
