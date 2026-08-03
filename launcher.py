@@ -85,7 +85,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.4.5"
+VERSION = "2.4.6"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -1731,17 +1731,29 @@ def legacy_setup(force: bool = False) -> dict:
         print("OAuth owner code (use it to approve new OAuth clients):")
         print(f"    {config['oauth_owner_code']}")
     print("Access token is stored in the config and reused on later launches.\n")
-    # Generate or reuse ide_gateway API key
-    gw_key = str(existing.get("ide_gateway_api_key", "")).strip()
-    if not gw_key:
-        import secrets as _secrets
-        gw_key = "ideg_" + _secrets.token_urlsafe(32)
+    # The IDE Gateway API key is deliberately NOT created here. Generating it
+    # for every install meant a key existed on machines where the gateway
+    # plugin was never enabled, and the start banner then advertised it. The
+    # plugin mints its own token when the config has none, so nothing is lost.
+    # An existing key is preserved: upgrades must not invalidate a working setup.
+    gw_key = str(existing.get("ide_gateway_api_key", "") or "").strip()
+    # A key on its own proves nothing: it may be left over from an older
+    # experiment. Only announce the gateway when something is listening where
+    # the endpoint state says it should be.
+    gw_live = False
+    if gw_key:
+        import socket as _socket
+
+        probe = _socket.socket()
+        probe.settimeout(0.4)
+        try:
+            gw_live = probe.connect_ex((gw_host or "127.0.0.1", gw_port)) == 0
+        except OSError:
+            gw_live = False
+        finally:
+            probe.close()
+    if gw_live:
         config["ide_gateway_api_key"] = gw_key
-        save_config(config, reason="ide-gateway-key", allow_sensitive_change=True)
-        print(f"IDE Gateway API key generated: {gw_key[:20]}... (stored in config)")
-    else:
-        config["ide_gateway_api_key"] = gw_key
-        print(f"IDE Gateway API key reused from config: {gw_key[:20]}...")
     return config
 
 

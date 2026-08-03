@@ -3420,11 +3420,18 @@ if __name__ == "__main__":
 
     _cleanup_temp_files()
     app = mcp.streamable_http_app()
-    # Order matters: middleware added last runs first. The guard must see the
-    # request before anything else so a duplicate never reaches the tool layer,
-    # and gzip must wrap the guard so replayed bodies are compressed too.
-    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
+    # Order matters and it is the reverse of how it reads: Starlette makes the
+    # middleware added LAST the OUTERMOST one. So the guard is registered first
+    # and gzip second, which puts gzip on the outside.
+    #
+    # That is the only correct arrangement. The guard inspects, caches and
+    # replays JSON-RPC bodies, so it has to see them uncompressed; compression
+    # happens once, on the way out, after the guard is done. With the two
+    # swapped, the guard received an already-gzipped body and rebuilt the
+    # response without its content-encoding header, so every response over the
+    # gzip threshold reached the client as unparseable binary.
     app.add_middleware(TransportGuardMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
     if AUTH_MODE == AUTH_MODE_LEGACY:
         app.add_middleware(SecurityMiddleware)
     else:

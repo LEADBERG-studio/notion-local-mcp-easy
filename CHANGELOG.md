@@ -1,3 +1,49 @@
+## 2.4.6 - 2026-08-04
+
+Two defects found while looking at a first clean install on a customer machine.
+The second one was silently corrupting large responses in production.
+
+### Large responses arrived corrupted (critical)
+
+The transport guard was layered OUTSIDE `GZipMiddleware`. Starlette makes the
+middleware added *last* the outermost one, and gzip was added first, so the
+intended order was inverted: the guard received an already-compressed body,
+rebuilt the response, and dropped `content-encoding` while doing so. Clients
+received gzip bytes labelled `application/json`.
+
+Only responses above the 1 KB gzip threshold were affected, so short replies
+always worked and anything substantial failed. That reads like an unstable
+tunnel, which is exactly how it was reported, and it is why the read cache and
+the dedup window appeared to misbehave in 2.4.5.
+
+The comment above the registration already described the correct order. The code
+did the opposite. Fixed, plus `tests/test_transport_gzip_order.py`: three tests
+on what a client actually receives (large response, replayed response, client
+that cannot accept gzip) and two that assert the registration order in
+`server.py` so this cannot silently return.
+
+### The IDE Gateway banner was printed on every start
+
+A clean install with no plugins enabled still printed the gateway block on start,
+complete with a public URL and an API key, for a service that was not running.
+
+Two causes:
+
+- the launcher generated `ide_gateway_api_key` unconditionally while finalising
+  the config, so the key always existed and the banner's `if gw_key:` guard was
+  always true. The key is no longer created here at all: the plugin mints its own
+  token when the config has none. An existing key is preserved so upgrades do not
+  break a working gateway.
+- the public URL came from a stale `temp/ide_gateway_runtime/endpoints/default.json`
+  left behind by an earlier experiment. The banner now requires a live endpoint:
+  something must actually be listening on the host and port the state file names.
+
+A clean install is silent about the gateway until the gateway is used.
+
+### Tests
+
+516 tests pass, both as CI invokes them and with the database clients hidden.
+
 ## 2.4.5 - 2026-08-04
 
 A review pass over everything the 2.4.x line added. Three real bugs, one red CI,
