@@ -116,9 +116,15 @@ def apply_unified_diff(content: str, diff: str) -> tuple[str, int]:
     newline = "\r\n" if "\r\n" in content else "\n"
     trailing_newline = content.endswith(("\n", "\r"))
     lines = content.splitlines()
-    # Apply from the bottom up so earlier offsets stay valid.
-    located = sorted(((_locate(lines, hunk), hunk) for hunk in hunks), reverse=True)
-    for index, hunk in located:
+    # Apply from the bottom up so earlier offsets stay valid. Sort on the index
+    # only: two hunks can resolve to the same line, and comparing Hunk objects
+    # as a tie-breaker raises TypeError.
+    located = sorted(
+        ((_locate(lines, hunk), order, hunk) for order, hunk in enumerate(hunks)),
+        key=lambda item: (item[0], item[1]),
+        reverse=True,
+    )
+    for index, _order, hunk in located:
         lines[index : index + len(hunk.old_lines)] = hunk.new_lines
     result = newline.join(lines)
     if trailing_newline and result:

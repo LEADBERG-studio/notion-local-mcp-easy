@@ -2537,7 +2537,13 @@ async def search_and_replace(
         for item in candidates:
             if len(hits) >= int(max_files):
                 break
-            if any(part in EXCLUDES for part in item.relative_to(BASE_DIR).parts[:-1]):
+            try:
+                relative = item.relative_to(BASE_DIR)
+            except ValueError:
+                # rglob can surface a path outside the workspace through a
+                # symlinked directory. Skip it rather than crash the whole scan.
+                continue
+            if any(part in EXCLUDES for part in relative.parts[:-1]):
                 continue
             try:
                 data = item.read_bytes()

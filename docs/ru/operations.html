@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.4.1</small>
+        <small>документация для начинающих · v2.4.5</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -63,31 +63,66 @@
     <main class="content">
       <h1>Эксплуатация и обслуживание</h1>
 
-<h2>Запуск и остановка</h2>
+<h2>Скрипты</h2>
+<table><thead><tr><th>Скрипт</th><th>Что делает</th><th>Что спрашивает</th></tr></thead><tbody>
+<tr><td><code>START.bat</code></td><td>Запускает сервер и туннель</td><td>Только рабочую папку</td></tr>
+<tr><td><code>SETUP.bat</code></td><td>Настраивает рабочую область</td><td>Папка, режим доступа, профиль подключения</td></tr>
+<tr><td><code>PROFILES.bat</code></td><td>Создаёт и правит профили подключения</td><td>Только то, что нужно выбранному протоколу</td></tr>
+<tr><td><code>DOCTOR.bat</code></td><td>Показывает процессы туннелей и висяки</td><td>Ничего</td></tr>
+<tr><td><code>STOP.bat</code></td><td>Останавливает процессы этого MCP</td><td>Ничего</td></tr>
+<tr><td><code>SHOW_CONNECTION.bat</code></td><td>Показывает параметры подключения</td><td>Ничего</td></tr>
+<tr><td><code>OAUTH_SETUP.bat</code></td><td>Переключает legacy / oauth / dual</td><td>Режим авторизации</td></tr>
+</tbody></table>
+<p>На POSIX те же действия доступны через <code>./start.sh</code>, <code>./setup.sh</code>, <code>./profiles.sh</code>, <code>./stop.sh</code>, <code>./show_connection.sh</code>, <code>./oauth_setup.sh</code>.</p>
+
+<h2>Ежедневный сценарий</h2>
+<ol class="steps">
+  <li><strong>Запустите <code>START.bat</code>.</strong><br>Выберите папку из списка. Если у папки уже есть профиль подключения, больше вопросов не будет.</li>
+  <li><strong>Нужна новая папка?</strong><br>Пункт <code>0</code> в том же списке. Новая папка наследует текущий канал подключения, поэтому повторно настраивать протокол не нужно.</li>
+  <li><strong>Не закрывайте окно.</strong><br>Пока оно открыто, туннель и MCP доступны.</li>
+</ol>
+
+<h2>Если что-то срывается</h2>
+<p>Начните с инструмента <code>transport_health</code>. Он отвечает на главный вопрос: это ошибка инструмента или транспорт сбрасывает нагрузку.</p>
 <ul>
-  <li><code>START.bat</code> / <code>./start.sh</code> — запуск.</li>
-  <li><code>STOP.bat</code> / <code>./stop.sh</code> — остановка.</li>
-  <li><code>SHOW_CONNECTION.bat</code> / <code>./show_connection.sh</code> — показать параметры подключения.</li>
+  <li><code>rejectedOverload</code> больше нуля — сервер намеренно отказывал в приёме. Уменьшите параллелизм или поднимите <code>MCP_MAX_INFLIGHT</code>.</li>
+  <li><code>replayedRetries</code> высокий — клиент переотправляет запросы, которые уже дошли. Транспорт их распознаёт и не выполняет дважды.</li>
+  <li><code>cacheHits</code> растёт — повторные чтения отдаются из памяти, до диска они не доходят.</li>
 </ul>
+<p>Затем <code>DOCTOR.bat</code>: если окно launcher когда-то закрыли принудительно, его дочерний процесс мог остаться жив и держать порт на relay.</p>
 
 <h2>Логи</h2>
 <ul>
   <li><code>%LOCALAPPDATA%\NotionMcpEasy\server.log</code></li>
   <li><code>%LOCALAPPDATA%\NotionMcpEasy\tunnel.log</code></li>
 </ul>
+<p>Смотреть удобнее инструментом <code>tail_file</code>: интересное в логе почти всегда в конце.</p>
 
-<h2>Перед релизом или важным изменением</h2>
+<h2>Что хранится и что переживает обновление</h2>
+<table><thead><tr><th>Файл</th><th>Переживает обновление</th></tr></thead><tbody>
+<tr><td><code>current-connection.json</code> — рабочие области</td><td>да</td></tr>
+<tr><td><code>connection-profiles.v2.json</code> — профили подключения</td><td>да</td></tr>
+<tr><td><code>connections.cfg</code> — зеркало слотов</td><td>да</td></tr>
+<tr><td><code>config.json</code> — генерируемое зеркало активного профиля</td><td>перезаписывается</td></tr>
+<tr><td><code>connections/defaults/*.json</code> — прообразы</td><td>обновляются вместе с продуктом</td></tr>
+</tbody></table>
+
+<h2>Набор проверок при своей доработке</h2>
 <pre><code>python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py
 python -m unittest discover -s tests -v
 git diff --check</code></pre>
+<div class="callout info">
+  <strong>Если правите код:</strong> прогоняйте тесты не только на своей машине. Часть проверок зависит от платформы, и падение на Linux при зелёной Windows это типичный сюрприз. В проекте это уже случалось из-за регистра путей.
+</div>
 
 <h2>Безопасность</h2>
 <ul>
-  <li>Не включайте trusted developer mode для неизвестных клиентов.</li>
-  <li>Не храните токены и secrets в git.</li>
-  <li>Не открывайте сервер наружу без auth.</li>
-  <li>Для OAuth используйте HTTPS public URL.</li>
-  <li>Для Git-команд используйте repo context и подтверждайте изменения привязки.</li>
+  <li>Не включайте trusted developer mode без необходимости.</li>
+  <li>Не коммитьте токены и секреты в git.</li>
+  <li>Не публикуйте прямые ссылки без auth.</li>
+  <li>Для OAuth используйте стабильный HTTPS public URL.</li>
+  <li>Для Git-правок используйте repo context и подтверждайте публикацию изменений.</li>
+  <li>Пароли баз данных задавайте через переменные окружения, а не в конфиге плагина.</li>
 </ul>
       <footer class="page-footer">
         <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>

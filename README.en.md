@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 2.4.1
+# Notion Local MCP Easy 2.4.5
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -74,6 +74,39 @@ Key properties:
 - There is no silent failover between circuits. Switching channels is always an explicit operator action.
 - The legacy `config.json` is still written for backward compatibility, but it is a generated mirror of the active profile. Fields belonging to inactive circuits are always empty.
 - Per-area MCP tokens and OAuth owner codes by default, with an opt-in shared-credentials flag so channels can be swapped without re-authorizing clients.
+
+## Editing tools
+
+| Tool | Why it exists |
+| --- | --- |
+| `read_many_files` | One request for a list of files. A burst of small requests is the traffic shape that breaks a tunnel. |
+| `apply_patch` | Unified diff instead of rewriting a file. A diff costs the change; a rewrite costs the file twice. |
+| `search_and_replace` | Project-wide replacement, previewing by default with a sample line per file. |
+| `tail_file` | The end of a text file, for logs. |
+
+`apply_patch` applies every hunk or none, so a file never lands in a state nobody
+described. Line numbers are hints: the context is searched for nearby, so a
+slightly stale diff still applies.
+
+## Transport stability
+
+The server is almost always reached through a tunnel, which is a single TCP path
+with a proxy at each end.
+
+- **Connections are held open** for 120 seconds. The web server default is 5, and
+  a client reusing its connection could send on a socket the server was closing;
+  the relay answered `502 Bad Gateway`.
+- **Responses are gzipped** above 1 KB. JSON-RPC is text and shrinks by roughly an
+  order of magnitude.
+- **Retries are deduplicated.** A resent request is replayed from a short window
+  instead of executed twice.
+- **Repeated reads are cached** for a few seconds. Any mutation clears that cache,
+  so a read after a write is never stale.
+- **Admission is bounded.** Beyond the limit the server refuses with `Retry-After`
+  rather than queueing work invisibly.
+- **Output is capped** for core tools, plugin tools and database results.
+
+Use the `transport_health` tool to tell a real error apart from load shedding.
 
 ## Tunnel diagnostics
 

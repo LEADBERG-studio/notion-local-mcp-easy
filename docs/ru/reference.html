@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.4.1</small>
+        <small>документация для начинающих · v2.4.5</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -83,6 +83,27 @@
 <tr><td><code>START.bat</code></td><td>Только рабочую область</td></tr>
 <tr><td><code>DOCTOR.bat</code></td><td>Ничего. Показывает процессы туннелей и висяки</td></tr>
 </tbody></table>
+
+<h2>Инструменты: что чем делать</h2>
+<table><thead><tr><th>Задача</th><th>Инструмент</th><th>Почему именно он</th></tr></thead><tbody>
+<tr><td>Прочитать несколько файлов</td><td><code>read_many_files</code></td><td>Один запрос вместо серии. Серия мелких запросов через туннель это как раз то, что валит транспорт.</td></tr>
+<tr><td>Изменить пару строк в файле</td><td><code>apply_patch</code></td><td>Unified diff стоит только изменения, а перезапись файла стоит двух его объёмов.</td></tr>
+<tr><td>Заменить по всему проекту</td><td><code>search_and_replace</code></td><td>По умолчанию только показывает, что изменится. <code>apply=true</code> фиксирует.</td></tr>
+<tr><td>Посмотреть конец лога</td><td><code>tail_file</code></td><td>Интересное в логе почти всегда в конце.</td></tr>
+<tr><td>Понять, почему запросы срываются</td><td><code>transport_health</code></td><td>Показывает лимиты и счётчики: отличает настоящую ошибку от сброса нагрузки.</td></tr>
+<tr><td>Найти висящие туннели</td><td><code>DOCTOR.bat</code></td><td>Помечает живой туннель и висяки от прошлых запусков.</td></tr>
+</tbody></table>
+
+<h2>Настройки транспорта</h2>
+<p>Значения по умолчанию рассчитаны на работу через туннель. Менять их нужно редко.</p>
+<pre><code>MCP_KEEP_ALIVE_SECONDS     держать соединение открытым (120)
+MCP_GZIP_MIN_SIZE          сжимать ответы больше N байт (1024)
+MCP_MAX_INFLIGHT           одновременных запросов (24)
+MCP_DEDUP_TTL_SECONDS      окно защиты от повторов (20)
+MCP_READ_CACHE_TTL_SECONDS кэш повторных чтений (5)
+MCP_LIMIT_CONCURRENCY      предел uvicorn (64)
+MCP_PLUGIN_OUTPUT_CHARS    предел вывода плагина (10000)
+MCP_DB_ROW_LIMIT           строк из базы по умолчанию (200)</code></pre>
 
 <h2>Auth modes</h2>
 <pre><code>legacy  = Authorization=Bearer &lt;token&gt; (Bearer token)

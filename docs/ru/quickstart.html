@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.4.1</small>
+        <small>документация для начинающих · v2.4.5</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -69,7 +69,7 @@
   <li><strong>Выберите профиль подключения</strong><br>Запустите <code>PROFILES.bat</code> и посмотрите список. Два профиля готовы сразу и ничего не спрашивают: <strong>Tunnellio direct TCP bridge</strong> и <strong>Serveo temporary domain</strong>. Для первого запуска берите любой из них.</li>
   <li><strong>Настройте рабочую область</strong><br>Запустите <code>SETUP.bat</code>. Он спросит три вещи: папку, режим доступа и профиль подключения из готовых.</li>
   <li><strong>Оставьте file-only режим</strong><br>Пока вам нужны только файлы, выбирайте <code>file_only</code>. Trusted developer mode включите позже, когда понадобится запуск команд.</li>
-  <li><strong>Запустите <code>START.bat</code></strong><br>Он спросит только рабочую область, если их несколько. Никаких вопросов про туннели, ключи и домены при старте больше нет.</li>
+  <li><strong>Запустите <code>START.bat</code></strong><br>Он покажет список рабочих папок и пункт «добавить папку». Больше при старте ничего не спрашивается: ни туннели, ни ключи, ни домены. Новая папка наследует текущий канал подключения.</li>
   <li><strong>Скопируйте параметры подключения</strong><br>Launcher покажет URL и токен либо OAuth endpoints. Также можно открыть <code>SHOW_CONNECTION.bat</code>.</li>
   <li><strong>Добавьте Custom MCP в клиенте</strong><br>Для legacy/Bearer укажите URL <code>https://.../mcp</code> и Authorization=Bearer &lt;token&gt; (Bearer token). Для OAuth используйте OAuth flow клиента.</li>
 </ol>

@@ -181,6 +181,36 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
             self._entries.pop(key, None)
 
     @staticmethod
+    def _identity(request: Any) -> str:
+        """Session plus a hash of the credential. Never the credential itself."""
+        session = request.headers.get("mcp-session-id", "")
+        credential = "|".join(
+            request.headers.get(name, "")
+            for name in ("authorization", "x-api-key", "x-mcp-token")
+        )
+        digest = hashlib.sha256(credential.encode("utf-8", errors="replace")).hexdigest()[:16]
+        return f"{session}|{digest}"
+
+    @staticmethod
+    def _read_key(request: Any, body: bytes) -> str:
+        """Cache key for a repeated read.
+
+        The JSON-RPC id is deliberately excluded. A real client increments it on
+        every call, so including it meant the read cache could never hit: the
+        first version of this class cached perfectly and served nothing.
+        """
+        canonical = body
+        try:
+            payload = json.loads(body)
+            if isinstance(payload, dict):
+                payload.pop("id", None)
+                canonical = json.dumps(payload, sort_keys=True).encode("utf-8")
+        except (ValueError, TypeError):
+            pass
+        digest = hashlib.sha256(canonical).hexdigest()
+        return f"read|{TransportGuardMiddleware._identity(request)}|{digest}"
+
+    @staticmethod
     def _key(request: Any, body: bytes, rpc_id: str) -> str:
         """Cache key.
 
@@ -189,14 +219,8 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
         performance cache into an authentication bypass. The credential is
         hashed, never stored. Caught by the OAuth suite when this was missing.
         """
-        session = request.headers.get("mcp-session-id", "")
-        credential = "|".join(
-            request.headers.get(name, "")
-            for name in ("authorization", "x-api-key", "x-mcp-token")
-        )
-        identity = hashlib.sha256(credential.encode("utf-8", errors="replace")).hexdigest()[:16]
         digest = hashlib.sha256(body).hexdigest()
-        return f"{session}|{identity}|{rpc_id}|{digest}"
+        return f"rpc|{TransportGuardMiddleware._identity(request)}|{rpc_id}|{digest}"
 
     @staticmethod
     def _replay(entry: _Entry, *, reason: str) -> Response:
@@ -237,13 +261,26 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
         if not body:
             return await call_next(request)
 
-        rpc_id, label, ttl = describe_request(body)
-        dedup_ttl = float(DEDUP_TTL_SECONDS)
-        cache_ttl = max(ttl, dedup_ttl if rpc_id else 0.0)
-        if cache_ttl <= 0:
+        rpc_id, _label, read_ttl = describe_request(body)
+        # Two independent mechanisms, two keys:
+        #  - dedup answers a resent request, so it is keyed on the JSON-RPC id
+        #  - the read cache answers a repeated read, so it must ignore that id
+        if read_ttl > 0:
+            key = self._read_key(request, body)
+            ttl = float(read_ttl)
+            reason = "hit"
+        elif rpc_id and DEDUP_TTL_SECONDS > 0:
+            key = self._key(request, body, rpc_id)
+            ttl = float(DEDUP_TTL_SECONDS)
+            reason = "replay"
+        else:
             return await self._guarded_call(request, call_next)
 
-        key = self._key(request, body, rpc_id)
+        if read_ttl <= 0:
+            # Anything that is not a known read may change state, so every
+            # cached read is dropped before it runs. Without this, an agent that
+            # writes a file and reads it back gets the old content.
+            await self._invalidate_reads()
 
         async with self._lock:
             self._prune()
@@ -251,18 +288,15 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
             if entry is not None and not entry.expired:
                 if entry.ready:
                     entry.hits += 1
-                    reason = "hit" if ttl > 0 else "replay"
-                    if ttl > 0:
+                    if reason == "hit":
                         STATS.cached += 1
                     else:
                         STATS.replayed += 1
                     return self._replay(entry, reason=reason)
-                # An identical request is still running. Wait for its answer
-                # instead of starting the same work a second time.
                 waiter = entry
             else:
                 waiter = None
-                entry = _Entry(created=time.monotonic(), ttl=cache_ttl, event=asyncio.Event())
+                entry = _Entry(created=time.monotonic(), ttl=ttl, event=asyncio.Event())
                 self._entries[key] = entry
 
         if waiter is not None:
@@ -278,8 +312,7 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
             response = await self._guarded_call(request, call_next)
             payload = await _read_response_body(response)
             cacheable = (
-                200 <= response.status_code < 300
-                and len(payload) <= CACHE_MAX_BODY_BYTES
+                200 <= response.status_code < 300 and len(payload) <= CACHE_MAX_BODY_BYTES
             )
             entry.status = response.status_code
             entry.headers = {
@@ -289,9 +322,8 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
             }
             entry.body = payload
             if not cacheable:
-                # Drop it outright. Leaving a zero-ttl entry behind is a trap:
-                # a same-instant retry can still land on it before the clock
-                # moves, and would then be replayed.
+                # Drop it outright. A zero-ttl entry left behind is a trap: a
+                # same-instant retry can land on it before the clock moves.
                 entry.ttl = 0.0
                 async with self._lock:
                     self._entries.pop(key, None)
@@ -307,6 +339,15 @@ class TransportGuardMiddleware(BaseHTTPMiddleware):
         finally:
             if entry.event is not None:
                 entry.event.set()
+
+    async def _invalidate_reads(self) -> None:
+        async with self._lock:
+            for cache_key in [
+                item
+                for item, entry in self._entries.items()
+                if item.startswith("read|") and entry.ready
+            ]:
+                self._entries.pop(cache_key, None)
 
     async def _guarded_call(self, request: Any, call_next: Any) -> Response:
         try:

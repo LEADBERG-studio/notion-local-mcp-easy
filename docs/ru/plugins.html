@@ -15,7 +15,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.4.1</small>
+        <small>документация для начинающих · v2.4.5</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -62,89 +62,60 @@
     <main class="content">
 
       <h1>Плагины</h1>
-      <p>Плагины расширяют MCP-сервер прикладными инструментами. В комплекте есть DB-family плагины, AI/subagent provider и <code>ide_gateway</code> — мост между IDE и моделью.</p>
+      <p>Плагины расширяют MCP-сервер собственными инструментами. В комплекте идут плагины баз данных, плагин удалённой модели (субагент) и <code>ide_gateway</code> с <code>ide_bridge</code> для моста в IDE.</p>
 
       <div class="callout info">
-        <strong>Главное правило:</strong> папка в <code>plugins/</code> только делает плагин обнаруживаемым. Для обычного включения не редактируйте внутренние profile-файлы. Откройте папку нужного плагина и запустите <code>SETUP.bat</code> или <code>ENABLE.bat</code>.
+        <strong>Главное правило:</strong> папка в <code>plugins/</code> сама ничего не включает. Она становится активной только после того, как вы запустили её <code>SETUP.bat</code> или <code>ENABLE.bat</code>, и только для той рабочей области, которую выбрали.
       </div>
 
-      <h2>Что уже есть в комплекте</h2>
+      <h2>Что есть в комплекте</h2>
       <table>
-        <thead><tr><th>Плагин</th><th>Папка</th><th>Для чего</th></tr></thead>
+        <thead><tr><th>Плагин</th><th>Папка</th><th>Что делает</th></tr></thead>
         <tbody>
-          <tr><td>SQLite</td><td><code>plugins\sqlite</code></td><td>Локальная SQLite DB внутри workspace.</td></tr>
-          <tr><td>PostgreSQL</td><td><code>plugins\postgres</code></td><td>Подключение к PostgreSQL через установленный <code>psql</code>.</td></tr>
-          <tr><td>Remote model subagent</td><td><code>plugins\subagent</code></td><td>AI provider или subagent через OpenAI-compatible chat completions API.</td></tr>
-          <tr><td>IDE Gateway</td><td><code>plugins\ide_gateway</code></td><td>Sandbox/direct OpenAI-compatible шлюз через keyless Tunnellio TCP bridge.</td></tr>
-          <tr><td>IDE Bridge</td><td><code>plugins\ide_bridge</code></td><td>Отдельный queue/poll мост: модель сама опрашивает очередь через <code>bridge_step.py</code>.</td></tr>
+          <tr><td>PostgreSQL</td><td><code>plugins\postgres</code></td><td>10 инструментов: версия сервера, схемы, таблицы, описание таблицы с индексами и ограничениями, точный подсчёт строк, выборка строк, read-only запрос, EXPLAIN и отдельный execute. Требует клиент <code>psql</code>.</td></tr>
+          <tr><td>MySQL / MariaDB</td><td><code>plugins\mysql</code></td><td>Те же 10 инструментов для MySQL 8+. Требует клиент <code>mysql</code>.</td></tr>
+          <tr><td>SQLite</td><td><code>plugins\sqlite</code></td><td>Локальные файлы SQLite внутри рабочей области.</td></tr>
+          <tr><td>Субагент</td><td><code>plugins\subagent</code></td><td>Позволяет модели в чате обращаться к другой модели: разовый вопрос или многоходовая сессия. Адрес, ключ и настройки остаются в локальном конфиге и не возвращаются ни одним инструментом.</td></tr>
+          <tr><td>IDE Gateway</td><td><code>plugins\ide_gateway</code></td><td>Sandbox/direct OpenAI-compatible путь через keyless Tunnellio TCP bridge.</td></tr>
+          <tr><td>IDE Bridge</td><td><code>plugins\ide_bridge</code></td><td>Отдельный queue/poll путь: модель сама опрашивает очередь через <code>bridge_step.py</code>.</td></tr>
         </tbody>
       </table>
+
+      <div class="callout warn">
+        <strong>Плагина <code>openai_compat</code> больше нет.</strong> Он дублировал субагента и при этом возвращал модели адрес провайдера и список его моделей. Субагент делает то же самое, ничего не раскрывая. Если у вас остался его локальный конфиг, он просто игнорируется.
+      </div>
+
+      <h2>Базы данных: что защищено по умолчанию</h2>
+      <ul>
+        <li><strong>Только чтение обеспечивает сам сервер БД.</strong> Читающие инструменты подключаются в режиме read-only, поэтому запись отклоняет PostgreSQL или MySQL, даже если она спрятана внутри функции, CTE или процедуры. Разбор текста запроса такого не поймал бы.</li>
+        <li><strong>Изменения только через <code>*_execute</code></strong> и только в режиме доступа <code>trusted</code>.</li>
+        <li><strong>Результат ограничен.</strong> По умолчанию 200 строк и 500 символов на ячейку. Сколько срезано, написано в ответе. Один широкий <code>SELECT</code> это самый простой способ уронить туннель, поэтому предел стоит с самого начала.</li>
+        <li><strong>Пароли только через переменные окружения.</strong> В конфиге лежит имя переменной, а не значение. MySQL получает пароль через приватный файл, а не через командную строку, потому что командная строка видна всем процессам.</li>
+        <li><strong>Начните с <code>*_server_info</code>.</strong> Он покажет версию и скажет, дотягивает ли она до целевой (PostgreSQL 15+, MySQL 8+).</li>
+      </ul>
+
+      <h2>Субагент: зачем он нужен</h2>
+      <p>Отлаживать промт, сравнивать модели, отдавать часть работы. Оператор настраивает адрес и ключ один раз, а модель в чате получает только ответы.</p>
+      <ul>
+        <li><code>subagent_ask</code> — один вопрос без продолжения.</li>
+        <li><code>subagent_start</code>, <code>subagent_say</code>, <code>subagent_end</code> — многоходовая сессия. История хранится на этой стороне в ограниченном скользящем окне.</li>
+        <li><code>subagent_list_models</code> — список моделей, которые отдаёт удалённая сторона. Аргумент <code>model</code> у остальных инструментов переключает модель без перезапуска.</li>
+        <li><code>subagent_list_targets</code> — если настроено несколько целей, например «быстрая» и «умная».</li>
+      </ul>
+      <p>Расход токенов возвращается в ответе, потому что именно он стоит денег. Адрес и ключ не возвращаются никогда, даже если удалённая модель напишет их в тексте: они вырезаются на выходе.</p>
 
       <h2>Как включить плагин</h2>
       <ol class="steps">
-        <li><strong>Запустите MCP хотя бы один раз через <code>START.bat</code>.</strong><br>Так launcher создаст активный workflow profile для выбранной рабочей области.</li>
-        <li><strong>Откройте папку нужного плагина.</strong><br>Например: <code>plugins\ide_gateway</code>, <code>plugins\ide_bridge</code>, <code>plugins\sqlite</code>, <code>plugins\postgres</code> или <code>plugins\subagent</code>.</li>
-        <li><strong>Запустите <code>SETUP.bat</code>.</strong><br>Setup спросит, включать плагин для <code>current</code> рабочей области или <code>global</code> для всех областей.</li>
-        <li><strong>Ответьте на вопросы настройки.</strong><br>Для DB/AI plugins setup собирает connection/provider config. Для <code>ide_gateway</code> выбирайте sandbox и обычно ephemeral; <code>ide_bridge</code> настраивается отдельно и не является режимом gateway.</li>
-        <li><strong>Перезапустите MCP.</strong><br>Registry tools строится на старте, поэтому после enable/disable нужен restart.</li>
-        <li><strong>Проверьте диагностику.</strong><br>В агенте можно вызвать <code>list_plugins</code> или <code>plugin_status</code>, чтобы увидеть loaded/not_attached/effective mode.</li>
+        <li><strong>Запустите MCP хотя бы раз через <code>START.bat</code>.</strong><br>Так launcher создаст активную рабочую область, к которой плагин будет привязан.</li>
+        <li><strong>Откройте папку нужного плагина.</strong><br>Например <code>plugins\postgres</code>, <code>plugins\mysql</code>, <code>plugins\sqlite</code> или <code>plugins\subagent</code>.</li>
+        <li><strong>Запустите <code>SETUP.bat</code>.</strong><br>Он спросит область: <code>current</code> только для текущей папки или <code>global</code> для всех.</li>
+        <li><strong>Ответьте на вопросы.</strong><br>Для баз данных это подключения, для субагента адрес, модель и ключ.</li>
+        <li><strong>Перезапустите MCP.</strong><br>Инструменты плагина регистрируются при старте, поэтому включение и выключение требуют перезапуска.</li>
+        <li><strong>Проверьте <code>list_plugins</code> и <code>plugin_status</code>.</strong><br>Там видно, загрузился плагин или нет, и почему.</li>
       </ol>
 
-      <h2>Файлы в папке каждого плагина</h2>
-      <table>
-        <thead><tr><th>Файл</th><th>Что делает</th></tr></thead>
-        <tbody>
-          <tr><td><code>SETUP.bat</code></td><td>Интерактивно включает плагин: scope, mode, простой выбор default/custom, вопросы настройки, запись локального конфига.</td></tr>
-          <tr><td><code>ENABLE.bat</code></td><td>То же включение через общий helper; удобно для повторной настройки.</td></tr>
-          <tr><td><code>DISABLE.bat</code></td><td>Удаляет локальный конфиг для выбранного scope.</td></tr>
-          <tr><td><code>STATUS.bat</code></td><td>Показывает локальные конфиги плагина для global/current.</td></tr>
-          <tr><td><code>plugin.json</code></td><td>Manifest: id, tools, modes, entrypoint.</td></tr>
-        </tbody>
-      </table>
-
-      <h2>Где хранятся настройки</h2>
-      <p>Setup создаёт локальный config рядом с плагином:</p>
-      <ul>
-        <li><code>plugin.local.global.json</code> — плагин включён глобально;</li>
-        <li><code>plugin.local.current.&lt;profile-id&gt;.json</code> — плагин включён только для текущей рабочей области.</li>
-      </ul>
-      <p>Эти файлы локальные, игнорируются Git/release archive и читаются plugin runtime при старте MCP.</p>
-
-      <h2>SQLite plugin</h2>
-      <p>Запустите <code>plugins\sqlite\SETUP.bat</code>. Setup спросит alias подключения и путь к SQLite-файлу относительно workspace.</p>
-      <pre><code>Connection alias: main
-SQLite file path relative to workspace: data\app.db</code></pre>
-      <p>После restart появятся tools <code>sqlite_list_connections</code>, <code>sqlite_list_tables</code>, <code>sqlite_describe_table</code>, <code>sqlite_query</code> и, в full access, <code>sqlite_execute</code>.</p>
-
-      <h2>PostgreSQL plugin</h2>
-      <p>Запустите <code>plugins\postgres\SETUP.bat</code>. Setup спросит alias, database, host/port/user и имя environment variable для пароля. Сам пароль в plugin config не сохраняется.</p>
-      <pre><code>Connection alias: main
-Database name: app
-Host: localhost
-User: app_user
-Password env var: APP_POSTGRES_PASSWORD</code></pre>
-      <p>Перед запуском MCP задайте переменную окружения с паролем, если она нужна вашему подключению.</p>
-
-      <h2>OpenAI-compatible plugin</h2>
-      <p>Запустите <code>plugins\subagent\SETUP.bat</code>. Setup спросит provider alias, base URL, имя environment variable с API key и модели.</p>
-      <pre><code>Provider alias: local
-Base URL before /chat/completions: http://127.0.0.1:1234/v1
-API key env var: LOCAL_AI_API_KEY
-Default model: local-model</code></pre>
-
-      <h2>IDE Gateway plugin</h2>
-      <p>Запустите <code>plugins\ide_gateway\SETUP.bat</code>, выберите <code>current</code>, <code>full_access</code>, <code>sandbox</code> и обычно <code>ephemeral</code>. После restart скажите модели «подними мост». Подробная инструкция и резервный промт: <a href="ide-gateway.html">IDE Gateway</a>. Для queue/poll сценария отдельно настройте <a href="ide-bridge.html">IDE Bridge</a>.</p>
-
-      <h2>Как выключить</h2>
-      <ol class="steps">
-        <li>Откройте папку плагина.</li>
-        <li>Запустите <code>DISABLE.bat</code>.</li>
-        <li>Выберите <code>current</code> или <code>global</code>.</li>
-        <li>Перезапустите MCP.</li>
-      </ol>
-
-      <div class="callout warn">
-        <strong>Важно:</strong> после любого enable/disable нужен restart MCP. Hot reload registry tools пока не реализован.
+      <div class="callout info">
+        <strong>Плагин не загрузился?</strong> Смотрите <code>plugin_status</code>: там будет причина. Частая история это незаданная переменная окружения с секретом. Плагин при этом не ломает сервер: он честно сообщает, что не настроен.
       </div>
     </main>
   </div>

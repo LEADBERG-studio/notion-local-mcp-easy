@@ -1,3 +1,58 @@
+## 2.4.5 - 2026-08-04
+
+A review pass over everything the 2.4.x line added. Three real bugs, one red CI,
+and the documentation brought back in line with the product.
+
+### CI is green on all four jobs
+
+- `test_the_same_folder_is_never_duplicated` proved that the same folder is not
+  saved twice by upper-casing the path. Case folding is a **Windows** property:
+  on a case-sensitive filesystem an upper-cased path is a genuinely different
+  path, so both Linux jobs failed while both Windows jobs passed. The test now
+  uses spellings that normalise everywhere (a trailing `.`, and a walk through a
+  child and back up), and the case-folding check is a separate Windows-only test.
+- Verified by running the whole suite the way CI invokes it, and again with the
+  database clients hidden the way a Linux runner has none.
+
+### Bugs found by review, each with a regression test
+
+- **`apply_patch` crashed on two hunks anchored at the same line.** Located hunks
+  were sorted as `(index, hunk)` tuples, so a tie made Python compare the
+  dataclass itself and raise `TypeError`. Sorting is now on the index and the
+  original order.
+- **The read cache could never hit.** Its key included the JSON-RPC id, and real
+  clients increment that id on every call, so the cache stored every read and
+  served none of them. Dedup and the read cache now use separate keys: dedup is
+  keyed on the id because that is what identifies a resend, the read cache
+  ignores it.
+- **A read after a write could return stale content.** Nothing invalidated the
+  read cache, so an agent that wrote a file and read it back within the cache
+  window got the old text. This was the dangerous one: silently wrong data is
+  worse than a visible error. Any request that is not a known read now clears
+  the cached reads before it runs.
+- `search_and_replace` no longer aborts a whole scan when `rglob` surfaces a path
+  outside the workspace through a symlinked directory.
+
+### Documentation
+
+- All 17 pages of the Russian doc site are on 2.4.5.
+- `plugins.html` rewritten: MySQL added, the subagent described for what it now
+  is, the removal of `openai_compat` explained, and a section on what the
+  database plugins protect by default.
+- `operations.html` rewritten: a script table, the daily routine, what to do when
+  requests fail, and which files survive an upgrade.
+- `troubleshooting.html` gained the transport section: how to read
+  `transport_health`, and what the keep-alive, compression, dedup and output caps
+  already do for you.
+- `reference.html` gained a "which tool for which job" table and the transport
+  environment variables.
+- `index.html` cards and the quickstart START step match the folder-first flow.
+- README and README.en gained the editing-tools and transport-stability sections.
+
+### Tests
+
+- 511 tests pass, both as CI invokes them and with the database clients hidden.
+
 ## 2.4.4 - 2026-08-04
 
 ### CI is green again

@@ -76,6 +76,16 @@ class ApplyTests(unittest.TestCase):
         with self.assertRaises(PatchError):
             apply_unified_diff(FILE, diff)
 
+    def test_two_hunks_at_the_same_line_do_not_crash(self):
+        """Regression: sorting located hunks compared Hunk objects.
+
+        Two insertions anchored at the same line tie on the sort index, and the
+        tie-breaker tried to order the dataclass itself, raising TypeError.
+        """
+        result, hunks = apply_unified_diff(FILE, "@@ -1,0 +1,1 @@\n+x\n@@ -1,0 +1,1 @@\n+y\n")
+        self.assertEqual(hunks, 2)
+        self.assertTrue(result.startswith("x\ny\nalpha"))
+
     def test_insertion_only(self):
         result, _ = apply_unified_diff(FILE, "@@ -2,1 +2,2 @@\n bravo\n+inserted\n")
         self.assertEqual(result, "alpha\nbravo\ninserted\ncharlie\ndelta\n")

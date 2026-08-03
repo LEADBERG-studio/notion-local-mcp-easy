@@ -8,6 +8,7 @@ Covers the three promises made to the operator:
 """
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -164,6 +165,22 @@ class AreaTests(StoreTestCase):
         self.assertEqual(saved["connectionProfile"], "tunnellio_bridge")
 
     def test_the_same_folder_is_never_duplicated(self):
+        """The same folder spelled differently must resolve to one area.
+
+        Spellings that normalise on every platform: a trailing '.', and a walk
+        through a child and back up. Case folding is deliberately not used here,
+        because it only holds on Windows: on a case-sensitive filesystem an
+        upper-cased path is a genuinely different path, and asserting otherwise
+        turned the Linux CI jobs red while Windows stayed green.
+        """
+        current = store.load_current()
+        store.upsert_area(current, workspace=self.workspace)
+        store.upsert_area(current, workspace=str(self.workspace) + os.sep + ".")
+        store.upsert_area(current, workspace=str(self.workspace / "child" / ".."))
+        self.assertEqual(len(current["areas"]), 1)
+
+    @unittest.skipUnless(os.name == "nt", "path case folding is a Windows property")
+    def test_case_differences_are_folded_on_windows(self):
         current = store.load_current()
         store.upsert_area(current, workspace=self.workspace)
         store.upsert_area(current, workspace=str(self.workspace).upper())

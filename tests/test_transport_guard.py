@@ -128,6 +128,64 @@ class CachingTests(unittest.TestCase):
         self.assertEqual(second.headers["x-mcp-cache"], "hit")
         self.assertIsNone(first.headers.get("x-mcp-cache"))
 
+    def test_a_repeated_read_hits_even_with_a_new_rpc_id(self):
+        """Regression: the read cache used to be keyed on the JSON-RPC id.
+
+        Real clients increment that id on every call, so the cache stored
+        everything and served nothing.
+        """
+        guard = build_guard()
+        calls = []
+
+        async def call_next(request):
+            calls.append(1)
+            return FakeResponse(b'{"ok":true}')
+
+        async def scenario():
+            await guard.dispatch(FakeRequest(body("tools/call", "read_file", rpc_id=1)), call_next)
+            return await guard.dispatch(
+                FakeRequest(body("tools/call", "read_file", rpc_id=99)), call_next
+            )
+
+        second = asyncio.run(scenario())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(second.headers["x-mcp-cache"], "hit")
+
+    def test_a_mutation_invalidates_cached_reads(self):
+        """Regression: an agent could write a file and read back stale content."""
+        guard = build_guard()
+        answers = [b'{"result":"before"}', b'{"result":"written"}', b'{"result":"after"}']
+        calls = []
+
+        async def call_next(request):
+            calls.append(1)
+            return FakeResponse(answers[min(len(calls) - 1, len(answers) - 1)])
+
+        async def scenario():
+            first = await guard.dispatch(
+                FakeRequest(body("tools/call", "read_file", rpc_id=1)), call_next
+            )
+            await guard.dispatch(
+                FakeRequest(body("tools/call", "write_file", rpc_id=2)), call_next
+            )
+            third = await guard.dispatch(
+                FakeRequest(body("tools/call", "read_file", rpc_id=3)), call_next
+            )
+            return first, third
+
+        first, third = asyncio.run(scenario())
+        self.assertEqual(first.body, b'{"result":"before"}')
+        self.assertEqual(third.body, b'{"result":"after"}')
+        self.assertEqual(len(calls), 3)
+
+    def test_reads_by_different_credentials_stay_separate(self):
+        guard = build_guard()
+        payload = body("tools/call", "read_file")
+        self.assertNotEqual(
+            guard._read_key(FakeRequest(payload, token="a"), payload),
+            guard._read_key(FakeRequest(payload, token="b"), payload),
+        )
+
     def test_a_resent_mutation_is_replayed_not_executed_twice(self):
         guard = build_guard()
         payload = body("tools/call", "write_file", rpc_id=7)
