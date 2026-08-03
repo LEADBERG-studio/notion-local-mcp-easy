@@ -197,6 +197,12 @@ def collect_subagent_config(existing: dict[str, Any]) -> dict[str, Any]:
         key = prompt_text("API key", str(existing.get("api_key", "")))
         if key:
             config["api_key"] = key
+    models = prompt_text(
+        "Selectable model ids, comma separated (optional; empty allows any model the remote offers)",
+        ",".join(existing.get("models") or []),
+    )
+    if models:
+        config["models"] = [item.strip() for item in models.split(",") if item.strip()]
     system_prompt = prompt_text("Default system prompt (optional)", str(existing.get("system_prompt", "")))
     if system_prompt:
         config["system_prompt"] = system_prompt
@@ -210,7 +216,7 @@ def collect_subagent_config(existing: dict[str, Any]) -> dict[str, Any]:
         if value:
             config[key] = value
     config["expose_model"] = prompt_bool(
-        "Reveal the remote model id in tool output?", bool(existing.get("expose_model", False))
+        "Reveal the remote model id in tool output?", bool(existing.get("expose_model", True))
     )
     return config
 

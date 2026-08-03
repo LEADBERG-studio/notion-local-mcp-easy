@@ -114,13 +114,16 @@ def _target(config: dict[str, Any], name: str = "", *, require_key: bool = True)
                 f"The subagent key is missing: environment variable {api_key_env} is not "
                 "set on this machine."
             )
+    allowed = [str(item).strip() for item in (chosen.get("models") or []) if str(item).strip()]
     return {
         "target": chosen_name,
         "base_url": base_url,
         "model": model,
+        "default_model": model,
+        "allowed_models": allowed,
         "api_key": api_key,
         "api_key_env": api_key_env,
-        "expose_model": bool(chosen.get("expose_model", False)),
+        "expose_model": bool(chosen.get("expose_model", True)),
         "system_prompt": str(chosen.get("system_prompt", "")).strip(),
         "temperature": chosen.get("temperature"),
         "max_output_tokens": chosen.get("max_output_tokens"),
@@ -130,6 +133,60 @@ def _target(config: dict[str, Any], name: str = "", *, require_key: bool = True)
         "timeout_seconds": _bounded(chosen.get("timeout_seconds"), DEFAULT_TIMEOUT, MAX_TIMEOUT),
         "history_turns": _bounded(chosen.get("history_turns"), DEFAULT_HISTORY_TURNS, 100),
     }
+
+
+def _with_model(target: dict[str, Any], requested: str) -> dict[str, Any]:
+    """Return the target switched to a specific model.
+
+    Switching happens per call, so the operator can compare models without a
+    restart and without touching the config. When the profile lists ``models``,
+    that list is an allow-list: anything outside it is refused by name, which is
+    safe to echo because the operator chose those names.
+    """
+    requested = str(requested or "").strip()
+    if not requested or requested == target["model"]:
+        return target
+    allowed = target.get("allowed_models") or []
+    if allowed and requested not in allowed:
+        raise ValueError(
+            f"Model '{requested}' is not allowed for target '{target['target']}'. "
+            "Allowed: " + ", ".join(allowed)
+        )
+    switched = dict(target)
+    switched["model"] = requested
+    return switched
+
+
+def _list_remote_models(target: dict[str, Any]) -> list[str]:
+    """Ask the remote for its model ids.
+
+    Only ids come back. The endpoint that served them is never returned, so the
+    caller can switch models without learning how to reach them directly.
+    """
+    headers = {"Accept": "application/json"}
+    if target["api_key"]:
+        headers["Authorization"] = f"Bearer {target['api_key']}"
+    request = urllib.request.Request(
+        target["base_url"] + "/models", headers=headers, method="GET"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=min(30, target["timeout_seconds"])) as response:
+            raw = json.loads(response.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise ValueError(
+                "The remote model rejected the configured credentials while listing models."
+            ) from exc
+        raise ValueError(f"The remote endpoint answered HTTP {exc.code} for /models.") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise ValueError(f"Could not reach the remote model list: {exc}") from exc
+    entries = raw.get("data") if isinstance(raw, dict) else raw
+    models: list[str] = []
+    for item in entries or []:
+        name = str(item.get("id", "")).strip() if isinstance(item, dict) else str(item).strip()
+        if name:
+            models.append(name)
+    return sorted(set(models))
 
 
 def _bounded(value: Any, default: int, ceiling: int) -> int:
@@ -328,6 +385,28 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
 
     target = _target(config, str(arguments.get("target", "")).strip())
 
+    if tool_name == "subagent_list_models":
+        allowed = target.get("allowed_models") or []
+        try:
+            discovered = _list_remote_models(target)
+        except ValueError as exc:
+            discovered = []
+            note = str(exc)
+        else:
+            note = ""
+        available = [name for name in discovered if not allowed or name in allowed]
+        if not available:
+            available = allowed or [target["default_model"]]
+        payload = {
+            "target": target["target"],
+            "models": available,
+            "defaultModel": target["default_model"],
+            "hint": "Pass model=<id> to subagent_ask, subagent_start or subagent_say to switch.",
+        }
+        if note:
+            payload["discoveryNote"] = note
+        return payload
+
     if tool_name == "subagent_list_targets":
         return {"targets": sorted(_targets(config)), "activeTarget": target["target"]}
 
@@ -336,17 +415,23 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
         if not prompt:
             raise ValueError("prompt is required")
         system = str(arguments.get("system_prompt", "")).strip() or target["system_prompt"]
+        target = _with_model(target, str(arguments.get("model", "")))
         result = _ask_remote(target, _build_messages(None, system, prompt, 0))
         result["target"] = target["target"]
         return result
 
     if tool_name == "subagent_start":
         system = str(arguments.get("system_prompt", "")).strip()
+        target = _with_model(target, str(arguments.get("model", "")))
         session = _new_session(target, system)
         session["target"] = target["target"]
+        # A session remembers its model, so follow-up turns stay on the same one
+        # unless the caller switches deliberately.
+        session["model"] = target["model"]
         return {
             "session": session["id"],
             "target": target["target"],
+            "model": target["model"] if target["expose_model"] else "<hidden>",
             "note": "Send turns with subagent_say and close it with subagent_end.",
         }
 
@@ -355,6 +440,10 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
         # A session stays with the target it was opened against, so a follow-up
         # cannot silently land on a different model.
         target = _target(config, session.get("target", ""))
+        # The session model wins, unless this turn asks for a different one.
+        target = _with_model(target, str(arguments.get("model", "")) or session.get("model", ""))
+        if str(arguments.get("model", "")).strip():
+            session["model"] = target["model"]
         prompt = str(arguments.get("prompt", "")).strip()
         if not prompt:
             raise ValueError("prompt is required")

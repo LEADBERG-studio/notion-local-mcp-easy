@@ -39,6 +39,14 @@ from mcp.server.transport_security import TransportSecuritySettings
 from plugin_runtime import PluginError, PluginManager
 from starlette.middleware.gzip import GZipMiddleware
 
+from bulk_tools import (
+    ReplaceHit,
+    apply_unified_diff,
+    first_change_preview,
+    render_batch,
+    replace_in_text,
+    tail_lines,
+)
 from transport_guard import TransportGuardMiddleware, stats as transport_stats
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, JSONResponse
@@ -2388,6 +2396,186 @@ async def append_file(path: str, content: str) -> str:
 
     await asyncio.to_thread(_append)
     return f"Appended {len(content):,} characters to {display_path(item)}"
+
+
+@tool(scope=SCOPE_FILES_READ)
+async def read_many_files(paths: str, per_file_chars: int = 4000) -> str:
+    """Read several files in one call. Give a comma or newline separated list.
+
+    Prefer this over repeated read_file calls: every request through a tunnel is
+    another chance to hit a relay hiccup, and a burst of small calls is the
+    traffic shape that breaks transports. The files share one character budget,
+    so the answer stays predictable no matter how many were asked for.
+    """
+    wanted = [item.strip() for item in re.split(r"[,\n]", paths) if item.strip()]
+    if not wanted:
+        raise ValueError("paths is required: pass a comma or newline separated list")
+    if len(wanted) > 40:
+        raise ValueError(f"Too many files at once ({len(wanted)}); ask for 40 or fewer")
+
+    def _read_all() -> str:
+        entries: list[tuple[str, str]] = []
+        for raw in wanted:
+            try:
+                item = _path(raw)
+            except Exception as exc:  # noqa: BLE001 - reported per file, never fatal
+                entries.append((raw, f"(error: {exc})"))
+                continue
+            if not item.exists():
+                entries.append((raw, "(file not found)"))
+                continue
+            if not item.is_file():
+                entries.append((raw, "(not a file)"))
+                continue
+            try:
+                data = item.read_bytes()
+            except OSError as exc:
+                entries.append((raw, f"(unreadable: {exc})"))
+                continue
+            if _is_binary_bytes(data[:8192]):
+                entries.append((raw, f"(binary file, {len(data):,} bytes)"))
+                continue
+            entries.append((str(display_path(item)), data.decode("utf-8", errors="replace")))
+        return render_batch(
+            entries,
+            per_file_chars=max(200, min(int(per_file_chars), CHUNK_CHAR_LIMIT)),
+            total_chars=MAX_OUTPUT_CHARS,
+        )
+
+    return await asyncio.to_thread(_read_all)
+
+
+@tool(scope=SCOPE_FILES_READ)
+async def tail_file(path: str, limit: int = 100) -> str:
+    """Show the last lines of a text file. Made for logs.
+
+    Reading a whole log to see the newest error wastes the budget and the tokens;
+    the interesting part of a log is almost always at the end.
+    """
+    item = _path(path)
+    if not item.is_file():
+        raise ValueError(f"File not found: {item}")
+
+    def _tail() -> str:
+        _text_file(item)
+        data = item.read_bytes()
+        if _is_binary_bytes(data[:8192]):
+            raise ValueError(f"Refusing to tail a binary file: {display_path(item)}")
+        lines, total = tail_lines(data.decode("utf-8", errors="replace"), int(limit))
+        head = f"{display_path(item)}: last {len(lines)} of {total:,} lines"
+        return head + "\n" + "\n".join(lines)
+
+    return await asyncio.to_thread(_tail)
+
+
+@tool(scope=SCOPE_FILES_WRITE)
+async def apply_patch(path: str, diff: str) -> str:
+    """Apply a unified diff to one file.
+
+    Cheaper and safer than rewriting a file to change a few lines: the diff
+    carries only the change, and the context lines prove the file still looks the
+    way the caller thinks it does. Either every hunk applies or none do, so the
+    file never ends up in a state nobody described.
+
+    Line numbers are treated as hints and the context is searched for nearby, so
+    a slightly stale diff still applies.
+    """
+    item = _path(path)
+    _ensure_writable(item)
+    if not item.is_file():
+        raise ValueError(f"File not found: {item}")
+
+    def _patch() -> str:
+        _text_file(item)
+        data = item.read_bytes()
+        if _is_binary_bytes(data):
+            raise ValueError(f"Refusing to patch binary file: {display_path(item)}")
+        original = data.decode("utf-8", errors="replace")
+        updated, hunks = apply_unified_diff(original, diff)
+        if updated == original:
+            return f"No change: the diff is already applied to {display_path(item)}"
+        if len(updated.encode("utf-8")) > MAX_WRITE:
+            raise ValueError(f"Result exceeds {MAX_WRITE:,} bytes")
+        item.write_text(updated, encoding="utf-8", newline="")
+        preview = first_change_preview(original, updated)
+        suffix = f"\nfirst change: {preview}" if preview else ""
+        return f"Applied {hunks} hunk(s) to {display_path(item)}{suffix}"
+
+    return await asyncio.to_thread(_patch)
+
+
+@tool(scope=SCOPE_FILES_WRITE)
+async def search_and_replace(
+    search: str,
+    replace: str,
+    file_glob: str = "*",
+    path: str = ".",
+    regex: bool = False,
+    ignore_case: bool = False,
+    apply: bool = False,
+    max_files: int = 200,
+) -> str:
+    """Replace text across many files. Previews by default.
+
+    ``apply`` is false to begin with on purpose: a project-wide replacement is
+    easy to get wrong and hard to undo, so the first answer shows what would
+    change, with a sample line per file. Run it again with apply=true once the
+    preview looks right.
+    """
+    root = _path(path)
+    if not root.exists():
+        raise ValueError(f"Path not found: {root}")
+
+    def _run() -> str:
+        candidates = (
+            [root]
+            if root.is_file()
+            else [item for item in sorted(root.rglob(file_glob)) if item.is_file()]
+        )
+        hits: list[ReplaceHit] = []
+        scanned = 0
+        for item in candidates:
+            if len(hits) >= int(max_files):
+                break
+            if any(part in EXCLUDES for part in item.relative_to(BASE_DIR).parts[:-1]):
+                continue
+            try:
+                data = item.read_bytes()
+            except OSError:
+                continue
+            if _is_binary_bytes(data[:8192]) or len(data) > MAX_TEXT_FILE:
+                continue
+            scanned += 1
+            original = data.decode("utf-8", errors="replace")
+            updated, count = replace_in_text(
+                original, search, replace, regex=regex, ignore_case=ignore_case
+            )
+            if not count:
+                continue
+            hit = ReplaceHit(
+                path=str(display_path(item)),
+                count=count,
+                preview=first_change_preview(original, updated),
+            )
+            hits.append(hit)
+            if apply:
+                _ensure_writable(item)
+                item.write_text(updated, encoding="utf-8", newline="")
+        if not hits:
+            return f"No matches for {search!r} in {scanned:,} scanned file(s)."
+        total = sum(hit.count for hit in hits)
+        verb = "Replaced" if apply else "Would replace"
+        lines = [f"{verb} {total:,} occurrence(s) in {len(hits)} file(s):"]
+        for hit in hits:
+            lines.append(f"  {hit.path}  ({hit.count})")
+            if hit.preview:
+                lines.append(f"      {hit.preview}")
+        if not apply:
+            lines.append("")
+            lines.append("Nothing was written. Re-run with apply=true to commit this.")
+        return "\n".join(lines)
+
+    return await asyncio.to_thread(_run)
 
 
 @tool(scope=SCOPE_FILES_WRITE)

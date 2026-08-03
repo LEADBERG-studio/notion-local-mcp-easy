@@ -1,7 +1,7 @@
 {
   "id": "subagent",
   "display_name": "Remote model subagent",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "entrypoint": "plugin.py",
   "supported_modes": [
     "read_only",
@@ -64,6 +64,31 @@
       "diagnostic_visibility": "redacted"
     },
     {
+      "name": "subagent_list_models",
+      "title": "List subagent models",
+      "description": "List the model ids the remote endpoint offers, plus the configured default. Use the returned ids with the model argument to switch without restarting. The endpoint and key are never returned.",
+      "capability": "subagent.list_models",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Configured target name. Omit to use the default target."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "subagent.list_models",
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
+      "diagnostic_visibility": "redacted"
+    },
+    {
       "name": "subagent_ask",
       "title": "Ask the remote model",
       "description": "Send one prompt to the configured remote model and return its reply. Use this for a single question with no follow-up.",
@@ -83,6 +108,10 @@
           "target": {
             "type": "string",
             "description": "Configured target name. Omit to use the default target."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id to use for this call. Omit to use the target default. List options with subagent_list_models."
           }
         },
         "required": [
@@ -115,6 +144,10 @@
           "target": {
             "type": "string",
             "description": "Configured target name. Omit to use the default target."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id to use for this call. Omit to use the target default. List options with subagent_list_models."
           }
         }
       },
@@ -143,6 +176,10 @@
           },
           "prompt": {
             "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id to use for this call. Omit to use the target default. List options with subagent_list_models."
           }
         },
         "required": [

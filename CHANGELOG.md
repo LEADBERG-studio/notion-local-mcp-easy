@@ -1,3 +1,54 @@
+## 2.4.4 - 2026-08-04
+
+### CI is green again
+
+- `tests/test_new_plugins.py` called the real `mysql_cli_args`, which resolves the
+  MySQL client on PATH. CI runners have no database clients installed, so the two
+  Linux jobs failed while Windows passed. The test is about argument
+  construction, not about the client being present, so the lookup is mocked.
+  Reproduced locally by running the suite with the DB clients hidden, which is
+  how a platform-specific failure should be found.
+
+### The subagent can switch models
+
+A model list is useful, not a leak: it lets the operator or the prompt switch
+models without a restart. What stays hidden is the endpoint and the key.
+
+- New `subagent_list_models`: asks the remote for its model ids and returns them
+  with the configured default. Only ids come back.
+- `model` argument on `subagent_ask`, `subagent_start` and `subagent_say`. Omit it
+  to use the target default.
+- A session remembers its model, so follow-up turns stay on the same one unless a
+  turn deliberately switches.
+- Optional `models` allow-list per target. When set, anything outside it is
+  refused by name; when unset, any model the remote offers is fair game.
+- The model id is now shown by default, because switching is pointless if you
+  cannot see which model answered. `expose_model=false` still hides it.
+
+### New tools
+
+- **`read_many_files`** reads a list of files in one call. Every request through
+  a tunnel is another chance to hit a relay hiccup, and a burst of small reads is
+  exactly the traffic that breaks transports. The files share one character
+  budget, so the answer stays predictable no matter how many were asked for.
+- **`apply_patch`** applies a unified diff to one file. Rewriting a file to change
+  three lines costs the whole file twice; a diff costs the change. Either every
+  hunk applies or none do, so a file never lands in a state nobody described.
+  Line numbers are hints and the context is searched for nearby, so a slightly
+  stale diff still applies.
+- **`search_and_replace`** replaces across many files and **previews by default**.
+  A project-wide replacement is easy to get wrong and hard to undo, so the first
+  answer shows what would change with a sample line per file; `apply=true`
+  commits it.
+- **`tail_file`** shows the end of a text file. The interesting part of a log is
+  almost always at the end, and reading the whole thing wastes budget and tokens.
+
+### Tests
+
+- Added `tests/test_bulk_tools.py`: diff parsing and application (stale numbers,
+  CRLF, missing trailing newline, all-or-nothing on a bad hunk), replacement
+  modes, previews and the shared batch budget.
+
 ## 2.4.3 - 2026-08-04
 
 ### Transport: dedup, cache and a real queue

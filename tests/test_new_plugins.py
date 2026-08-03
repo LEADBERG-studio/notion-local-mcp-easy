@@ -89,7 +89,11 @@ class MysqlSafetyTests(unittest.TestCase):
 
     def test_password_is_never_placed_on_the_command_line(self):
         """argv is world-readable, so a password there is a leak."""
-        with mock.patch.dict("os.environ", {"APP_DB_PW": "sup3rs3cret"}):
+        # CI runners have no database clients installed, and this test is about
+        # argument construction, not about the client being present.
+        with mock.patch.dict("os.environ", {"APP_DB_PW": "sup3rs3cret"}), mock.patch.object(
+            db_shared.shutil, "which", return_value="/usr/bin/mysql"
+        ):
             args, temp_path = db_shared.mysql_defaults_file({"password_env": "APP_DB_PW"})
             try:
                 command = db_shared.mysql_cli_args({"database": "app"}, "SELECT 1", args)
@@ -136,27 +140,40 @@ class SubagentSecrecyTests(unittest.TestCase):
     def setUp(self):
         subagent._SESSIONS.clear()
 
-    def test_status_hides_endpoint_key_and_model(self):
+    def test_status_hides_the_endpoint_and_the_key(self):
+        """The model id is deliberately visible; the way to reach it is not.
+
+        Switching models is only useful if the caller can see which model
+        answered, so the id is shown. The endpoint and the key stay hidden,
+        because those are what would let the model bypass this plugin.
+        """
         status = subagent.invoke("subagent_status", {}, SUB_CTX)
         text = repr(status)
         self.assertNotIn("models.example.com", text)
         self.assertNotIn("sk-supersecret", text)
-        self.assertNotIn("secret-model-x", text)
         self.assertTrue(status["configured"])
         self.assertTrue(status["keyPresent"])
 
-    def test_model_is_only_revealed_when_explicitly_allowed(self):
+    def test_the_model_can_still_be_hidden_on_request(self):
         status = subagent.invoke(
-            "subagent_status", {}, {"pluginConfig": {**SUB_CONFIG, "expose_model": True}}
+            "subagent_status", {}, {"pluginConfig": {**SUB_CONFIG, "expose_model": False}}
         )
+        self.assertEqual(status["model"], "<hidden>")
+
+    def test_the_model_id_is_visible_so_it_can_be_switched(self):
+        status = subagent.invoke("subagent_status", {}, SUB_CTX)
         self.assertEqual(status["model"], "secret-model-x")
 
     def test_a_leaky_remote_reply_is_redacted(self):
         leak = "use https://models.example.com/v1 with sk-supersecret on secret-model-x"
+        # The endpoint and the key must never survive, whatever the remote says.
         cleaned = subagent._redact(leak, subagent._target(SUB_CONFIG))
         self.assertNotIn("models.example.com", cleaned)
         self.assertNotIn("sk-supersecret", cleaned)
-        self.assertNotIn("secret-model-x", cleaned)
+        hidden = subagent._redact(
+            leak, subagent._target({**SUB_CONFIG, "expose_model": False})
+        )
+        self.assertNotIn("secret-model-x", hidden)
 
     def test_an_unconfigured_plugin_says_so_without_breaking_startup(self):
         self.assertEqual(subagent.validate_config({}, {}), {})
