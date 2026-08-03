@@ -85,7 +85,7 @@ docs/ru/index.html
 Дополнительно launcher теперь ведёт локальное profile-aware хранилище `%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json`: `PATH[N]` остаётся базовым anchor saved-областей, но каждая область разворачивается в workflow profile с `accessMode`, `environmentMode`, metadata и area-specific plugin state. Активный профиль по-прежнему зеркалится обратно в legacy `config.json`, чтобы старый launcher/config/runtime flow не ломался.
 
 
-Поверх этого работает универсальная plugin-system: каждый плагин содержит собственные `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat` и `STATUS.bat`. Оператор запускает setup из папки плагина, выбирает `current` или `global` scope, отвечает на вопросы настройки, а helper создаёт локальный `plugin.local.*.json`; при следующем старте MCP plugin runtime читает эти локальные конфиги и регистрирует tools. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, AI/subagent family `openai_compat`, а также `ide_gateway`.
+Поверх этого работает универсальная plugin-system: каждый плагин содержит собственные `SETUP.bat`, `ENABLE.bat`, `DISABLE.bat` и `STATUS.bat`. Оператор запускает setup из папки плагина, выбирает `current` или `global` scope, отвечает на вопросы настройки, а helper создаёт локальный `plugin.local.*.json`; при следующем старте MCP plugin runtime читает эти локальные конфиги и регистрирует tools. В комплекте уже подтверждены DB-family плагины `sqlite` и `postgres`, AI/subagent family `subagent`, а также `ide_gateway`.
 
 
 ## IDE Gateway: мост из IDE в песочницу модели
@@ -107,7 +107,7 @@ SSH здесь больше нет. Installer сам сохраняет защи
 2. Запустите `plugins\ide_gateway\SETUP.bat`: `current`, `full_access`, `sandbox`, для первого запуска `ephemeral`.
 3. Перезапустите MCP: `STOP.bat`, затем `START.bat`.
 4. Напишите модели: **«подними мост»**. Ничего дополнительно вводить не нужно.
-5. В IDE создайте OpenAI-compatible provider и вставьте итоговые `base_url`, `api_key`, `model`.
+5. В IDE создайте Remote model subagent и вставьте итоговые `base_url`, `api_key`, `model`.
 
 Нормальный итог выглядит так:
 
@@ -523,7 +523,7 @@ Serveo остаётся режимом совместимости: launcher ис
 
 
 
-- AI/subagent family: `openai_compat` с tools `*_list_models`, `*_describe_provider`, `*_generate_text`, `*_run_subagent`, secret refs через env и trusted-only gating для subagent/full-access сценариев.
+- AI/subagent family: `subagent` с tools `*_list_models`, `*_describe_provider`, `*_generate_text`, `*_run_subagent`, secret refs через env и trusted-only gating для subagent/full-access сценариев.
 
 
 

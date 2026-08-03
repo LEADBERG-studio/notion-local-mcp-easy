@@ -38,9 +38,10 @@ class MysqlConfigTests(unittest.TestCase):
             )
 
     def test_list_connections_needs_no_database(self):
-        self.assertEqual(
-            mysql.invoke("mysql_list_connections", {}, CTX), {"connections": ["main"]}
-        )
+        """Listing aliases must work before any server is reachable."""
+        payload = mysql.invoke("mysql_list_connections", {}, CTX)
+        self.assertEqual([item["name"] for item in payload["connections"]], ["main"])
+        self.assertEqual(payload["connections"][0]["database"], "app")
 
     def test_unknown_alias_is_explicit(self):
         with self.assertRaises(ValueError):

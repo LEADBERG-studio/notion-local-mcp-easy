@@ -215,37 +215,6 @@ def collect_subagent_config(existing: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def collect_openai_compat_config(existing: dict[str, Any]) -> dict[str, Any]:
-    print("OpenAI-compatible setup: API keys are referenced by environment variable name.")
-    providers = []
-    old = existing.get("providers") if isinstance(existing.get("providers"), list) else []
-    while True:
-        prev = old[len(providers)] if len(providers) < len(old) and isinstance(old[len(providers)], dict) else {}
-        name = prompt_text("Provider alias", str(prev.get("name", "")) or ("main" if not providers else ""), required=not providers)
-        if not name:
-            break
-        models_default = ",".join(str(item) for item in prev.get("models", []) if str(item).strip()) if isinstance(prev.get("models"), list) else ""
-        models = [item.strip() for item in prompt_text("Models comma-separated", models_default).split(",") if item.strip()]
-        default_model = prompt_text("Default model", str(prev.get("default_model", "")) or (models[0] if models else ""), required=True)
-        if default_model not in models:
-            models.insert(0, default_model)
-        providers.append({
-            "name": name,
-            "base_url": prompt_text("Base URL before /chat/completions", str(prev.get("base_url", "")), required=True).rstrip("/"),
-            "api_key_env": prompt_text("API key env var", str(prev.get("api_key_env", "")), required=True),
-            "models": models,
-            "default_model": default_model,
-            "subagent_model": prompt_text("Subagent model", str(prev.get("subagent_model", "")) or default_model, required=True),
-        })
-        if not prompt_bool("Add another provider?", False):
-            break
-    return {
-        "providers": providers,
-        "default_provider": prompt_text("Default provider alias", str(existing.get("default_provider", "")) or providers[0]["name"], required=True),
-        "default_model": prompt_text("Default model override", str(existing.get("default_model", "")) or providers[0]["default_model"], required=True),
-        "subagent_defaults": existing.get("subagent_defaults") if isinstance(existing.get("subagent_defaults"), dict) else {"temperature": 0.2, "max_output_tokens": 800},
-    }
-
 def collect_ide_gateway_config(existing: dict[str, Any]) -> dict[str, Any]:
     print("IDE Gateway setup: OpenAI-compatible bridge from IDE to the active MCP model.")
     config = dict(existing)
@@ -370,8 +339,6 @@ def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
         return collect_mysql_config(base)
     if plugin_id == "subagent":
         return collect_subagent_config(base)
-    if plugin_id == "openai_compat":
-        return collect_openai_compat_config(base)
     if plugin_id == "ide_gateway":
         return collect_ide_gateway_config(base)
     if plugin_id == "ide_bridge":

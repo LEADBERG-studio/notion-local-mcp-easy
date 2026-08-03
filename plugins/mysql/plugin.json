@@ -1,105 +1,354 @@
 {
   "id": "mysql",
   "display_name": "MySQL / MariaDB",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "entrypoint": "plugin.py",
-  "supported_modes": ["read_only", "full_access"],
-  "capabilities": ["database", "sql", "query", "mysql", "mariadb"],
+  "supported_modes": [
+    "read_only",
+    "full_access"
+  ],
+  "capabilities": [
+    "database",
+    "sql",
+    "query",
+    "mysql",
+    "mariadb"
+  ],
   "config_schema_version": 1,
   "required_env": [],
-  "dependencies": ["mysql"],
+  "dependencies": [
+    "mysql"
+  ],
   "required": false,
   "install_scope_support": "both",
   "tools": [
     {
       "name": "mysql_list_connections",
       "title": "MySQL list connections",
-      "description": "List configured MySQL connection aliases for the active profile context.",
+      "description": "List configured connection aliases with their database and host.",
       "capability": "database.list_connections",
       "mode_required": "read_only",
-      "input_schema": {"type": "object", "properties": {}},
-      "output_schema": {"type": "object"},
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "mysql.list_connections",
-      "safety_tags": ["db", "read_only"],
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "mysql_server_info",
+      "title": "MySQL server info",
+      "description": "Report the server version and confirm it meets the MySQL version this plugin targets. Use this first when a connection misbehaves.",
+      "capability": "database.server_info",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          }
+        },
+        "required": [
+          "connection"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "mysql.server_info",
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "mysql_list_schemas",
+      "title": "MySQL list schemas",
+      "description": "List non-system schemas visible to this connection.",
+      "capability": "database.list_schemas",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "row_limit": {
+            "type": "integer",
+            "description": "Maximum rows to return. Capped for transport safety."
+          }
+        },
+        "required": [
+          "connection"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "mysql.list_schemas",
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
       "diagnostic_visibility": "full"
     },
     {
       "name": "mysql_list_tables",
       "title": "MySQL list tables",
-      "description": "List tables, types and approximate row counts for a configured MySQL connection alias.",
+      "description": "List tables with type and on-disk size.",
       "capability": "database.list_tables",
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
         "properties": {
-          "connection": {"type": "string"},
-          "row_limit": {"type": "integer", "description": "Maximum rows to return. Defaults to a transport-safe cap."}
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "schema": {
+            "type": "string",
+            "description": "Schema to inspect. Defaults to the connection database."
+          },
+          "row_limit": {
+            "type": "integer",
+            "description": "Maximum rows to return. Capped for transport safety."
+          }
         },
-        "required": ["connection"]
+        "required": [
+          "connection"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "mysql.list_tables",
-      "safety_tags": ["db", "read_only"],
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
       "diagnostic_visibility": "full"
     },
     {
       "name": "mysql_describe_table",
       "title": "MySQL describe table",
-      "description": "Describe columns, keys and defaults of a table in a configured MySQL connection alias.",
+      "description": "Describe columns, indexes and constraints of one table.",
       "capability": "database.describe_table",
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
         "properties": {
-          "connection": {"type": "string"},
-          "table": {"type": "string", "description": "Table name, optionally schema-qualified."}
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "table": {
+            "type": "string",
+            "description": "Table name, optionally schema-qualified."
+          }
         },
-        "required": ["connection", "table"]
+        "required": [
+          "connection",
+          "table"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "mysql.describe_table",
-      "safety_tags": ["db", "read_only"],
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "mysql_count_rows",
+      "title": "MySQL count rows",
+      "description": "Exact row count for a table, with an optional WHERE clause.",
+      "capability": "database.count_rows",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "table": {
+            "type": "string",
+            "description": "Table name, optionally schema-qualified."
+          },
+          "where": {
+            "type": "string",
+            "description": "Optional WHERE clause without the WHERE keyword."
+          }
+        },
+        "required": [
+          "connection",
+          "table"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "mysql.count_rows",
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "mysql_sample_rows",
+      "title": "MySQL sample rows",
+      "description": "Return the first rows of a table so its shape is obvious without writing SQL.",
+      "capability": "database.sample_rows",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "table": {
+            "type": "string",
+            "description": "Table name, optionally schema-qualified."
+          },
+          "row_limit": {
+            "type": "integer",
+            "description": "Maximum rows to return. Capped for transport safety."
+          }
+        },
+        "required": [
+          "connection",
+          "table"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "mysql.sample_rows",
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
       "diagnostic_visibility": "full"
     },
     {
       "name": "mysql_query",
       "title": "MySQL query",
-      "description": "Run a single read-only SQL query. Rows are capped for transport safety; use row_limit or LIMIT/OFFSET to page.",
+      "description": "Run a read-only SQL query. The connection is read-only at the server level, so writes are refused. Rows are capped; page with LIMIT/OFFSET or row_limit.",
       "capability": "database.query",
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
         "properties": {
-          "connection": {"type": "string"},
-          "sql": {"type": "string"},
-          "row_limit": {"type": "integer"},
-          "params_json": {"type": "string"}
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "sql": {
+            "type": "string"
+          },
+          "row_limit": {
+            "type": "integer",
+            "description": "Maximum rows to return. Capped for transport safety."
+          },
+          "params_json": {
+            "type": "string"
+          }
         },
-        "required": ["connection", "sql"]
+        "required": [
+          "connection",
+          "sql"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "mysql.query",
-      "safety_tags": ["db", "read_only"],
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
+      "diagnostic_visibility": "full"
+    },
+    {
+      "name": "mysql_explain",
+      "title": "MySQL explain",
+      "description": "Show the query plan without running the query.",
+      "capability": "database.explain",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "sql": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "sql"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "mysql.explain",
+      "safety_tags": [
+        "db",
+        "read_only"
+      ],
       "diagnostic_visibility": "full"
     },
     {
       "name": "mysql_execute",
       "title": "MySQL execute",
-      "description": "Run a mutating SQL statement against a configured MySQL connection alias. Requires full_access.",
+      "description": "Run a mutating SQL statement. Requires full_access.",
       "capability": "database.execute",
       "mode_required": "full_access",
       "input_schema": {
         "type": "object",
         "properties": {
-          "connection": {"type": "string"},
-          "sql": {"type": "string"},
-          "params_json": {"type": "string"}
+          "connection": {
+            "type": "string",
+            "description": "Configured connection alias."
+          },
+          "sql": {
+            "type": "string"
+          },
+          "params_json": {
+            "type": "string"
+          }
         },
-        "required": ["connection", "sql"]
+        "required": [
+          "connection",
+          "sql"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "mysql.execute",
-      "safety_tags": ["db", "full_access"],
+      "safety_tags": [
+        "db",
+        "full_access"
+      ],
       "diagnostic_visibility": "full"
     }
   ]

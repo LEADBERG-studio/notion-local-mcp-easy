@@ -1,10 +1,17 @@
 {
   "id": "subagent",
   "display_name": "Remote model subagent",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "entrypoint": "plugin.py",
-  "supported_modes": ["read_only", "full_access"],
-  "capabilities": ["ai", "subagent", "prompt-testing"],
+  "supported_modes": [
+    "read_only",
+    "full_access"
+  ],
+  "capabilities": [
+    "ai",
+    "subagent",
+    "prompt-testing"
+  ],
   "config_schema_version": 1,
   "required_env": [],
   "dependencies": [],
@@ -17,10 +24,43 @@
       "description": "Report whether a remote model is configured and list open sessions. Connection details are never returned.",
       "capability": "subagent.status",
       "mode_required": "read_only",
-      "input_schema": {"type": "object", "properties": {}},
-      "output_schema": {"type": "object"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Configured target name. Omit to use the default target."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "subagent.status",
-      "safety_tags": ["ai", "read_only"],
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
+      "diagnostic_visibility": "redacted"
+    },
+    {
+      "name": "subagent_list_targets",
+      "title": "List subagent targets",
+      "description": "List the configured remote model targets by name. Endpoints, keys and model ids are never returned.",
+      "capability": "subagent.list_targets",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "handler_ref": "subagent.list_targets",
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
       "diagnostic_visibility": "redacted"
     },
     {
@@ -32,14 +72,31 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "prompt": {"type": "string", "description": "What to ask the remote model."},
-          "system_prompt": {"type": "string", "description": "Optional system prompt for this call. Overrides the configured default."}
+          "prompt": {
+            "type": "string",
+            "description": "What to ask the remote model."
+          },
+          "system_prompt": {
+            "type": "string",
+            "description": "Optional system prompt for this call. Overrides the configured default."
+          },
+          "target": {
+            "type": "string",
+            "description": "Configured target name. Omit to use the default target."
+          }
         },
-        "required": ["prompt"]
+        "required": [
+          "prompt"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "subagent.ask",
-      "safety_tags": ["ai", "read_only"],
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
       "diagnostic_visibility": "redacted"
     },
     {
@@ -51,12 +108,24 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "system_prompt": {"type": "string", "description": "System prompt for the whole session. This is the prompt under test."}
+          "system_prompt": {
+            "type": "string",
+            "description": "System prompt for the whole session. This is the prompt under test."
+          },
+          "target": {
+            "type": "string",
+            "description": "Configured target name. Omit to use the default target."
+          }
         }
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "subagent.start",
-      "safety_tags": ["ai", "read_only"],
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
       "diagnostic_visibility": "redacted"
     },
     {
@@ -68,14 +137,27 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "session": {"type": "string", "description": "Session id from subagent_start."},
-          "prompt": {"type": "string"}
+          "session": {
+            "type": "string",
+            "description": "Session id from subagent_start."
+          },
+          "prompt": {
+            "type": "string"
+          }
         },
-        "required": ["session", "prompt"]
+        "required": [
+          "session",
+          "prompt"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "subagent.say",
-      "safety_tags": ["ai", "read_only"],
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
       "diagnostic_visibility": "redacted"
     },
     {
@@ -86,12 +168,23 @@
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
-        "properties": {"session": {"type": "string"}},
-        "required": ["session"]
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session"
+        ]
       },
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object"
+      },
       "handler_ref": "subagent.end",
-      "safety_tags": ["ai", "read_only"],
+      "safety_tags": [
+        "ai",
+        "read_only"
+      ],
       "diagnostic_visibility": "redacted"
     }
   ]

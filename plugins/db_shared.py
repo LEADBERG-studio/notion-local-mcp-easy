@@ -133,7 +133,20 @@ def require_program(program: str, *, label: str) -> str:
     return resolved
 
 
-def postgres_env(record: dict[str, Any]) -> dict[str, str]:
+def postgres_env(
+    record: dict[str, Any],
+    *,
+    read_only: bool = False,
+    statement_timeout_ms: int | None = None,
+) -> dict[str, str]:
+    """Environment for psql, including session-level safety options.
+
+    Read-only is enforced through ``default_transaction_read_only`` rather than
+    a BEGIN/COMMIT wrapper. Multiple ``-c`` arguments are separate requests, so
+    a wrapper is fragile; a session option applies to everything the connection
+    does, including writes hidden inside a function or a CTE. Supported by every
+    PostgreSQL version this plugin targets.
+    """
     env = os.environ.copy()
     password_env = str(record.get("password_env", "")).strip()
     if password_env:
@@ -144,13 +157,35 @@ def postgres_env(record: dict[str, Any]) -> dict[str, str]:
     sslmode = str(record.get("sslmode", "")).strip()
     if sslmode:
         env["PGSSLMODE"] = sslmode
+    # Force UTF-8 data and untranslated messages. On a localised Windows the
+    # client otherwise emits OEM-codepage text that arrives as mojibake, which
+    # makes a real error unreadable. Verified against PostgreSQL 17.
+    env["PGCLIENTENCODING"] = "UTF8"
+    env["LC_MESSAGES"] = "C"
+    env.setdefault("LANG", "C")
+    options: list[str] = []
+    if read_only:
+        options.append("-c default_transaction_read_only=on")
+    if statement_timeout_ms:
+        options.append(f"-c statement_timeout={int(statement_timeout_ms)}")
+    if options:
+        existing = env.get("PGOPTIONS", "").strip()
+        env["PGOPTIONS"] = (existing + " " + " ".join(options)).strip()
     return env
 
 
-def postgres_cli_args(record: dict[str, Any], sql: str) -> list[str]:
+DEFAULT_SQL_TIMEOUT = max(5, int(os.environ.get("MCP_DB_TIMEOUT_SECONDS", "") or 60))
+
+
+def postgres_cli_args(record: dict[str, Any], statements: list[str]) -> list[str]:
     args = [
         require_program("psql", label="PostgreSQL"),
         "-X",
+        # Never prompt for a password. Without this, psql blocks on stdin
+        # forever when a password is missing, which looks like a hung tool call
+        # instead of a configuration error. Found by live-testing against a real
+        # PostgreSQL 17 server.
+        "-w",
         "-v",
         "ON_ERROR_STOP=1",
         "-A",
@@ -158,6 +193,7 @@ def postgres_cli_args(record: dict[str, Any], sql: str) -> list[str]:
         "\t",
         "-P",
         "footer=off",
+        "--no-psqlrc",
     ]
     host = str(record.get("host", "")).strip()
     if host:
@@ -168,20 +204,60 @@ def postgres_cli_args(record: dict[str, Any], sql: str) -> list[str]:
     user = str(record.get("user", "")).strip()
     if user:
         args.extend(["-U", user])
-    args.extend(["-d", str(record["database"]), "-c", sql])
+    args.extend(["-d", str(record["database"])])
+    for statement in statements:
+        args.extend(["-c", statement])
     return args
 
 
-def run_postgres_sql(record: dict[str, Any], sql: str) -> str:
-    proc = subprocess.run(
-        postgres_cli_args(record, sql),
-        capture_output=True,
-        text=True,
-        env=postgres_env(record),
-        check=False,
-    )
+def run_postgres_sql(
+    record: dict[str, Any],
+    sql: str,
+    *,
+    read_only: bool = False,
+    timeout: int | None = None,
+    statement_timeout_ms: int | None = None,
+) -> str:
+    """Run one statement through psql.
+
+    With ``read_only=True`` the *server* refuses writes, so this is a guarantee
+    rather than a guess about what the SQL text does. ``statement_timeout_ms``
+    is enforced inside PostgreSQL, so a runaway query is cancelled there instead
+    of merely being abandoned locally.
+    """
+    resolved_timeout = timeout or DEFAULT_SQL_TIMEOUT
+    if read_only and statement_timeout_ms is None:
+        statement_timeout_ms = resolved_timeout * 1000
+    try:
+        proc = subprocess.run(
+            postgres_cli_args(record, [sql]),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=postgres_env(
+                record, read_only=read_only, statement_timeout_ms=statement_timeout_ms
+            ),
+            check=False,
+            timeout=resolved_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"PostgreSQL query timed out after {resolved_timeout}s") from exc
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "psql command failed").strip()
+        lowered = detail.lower()
+        if "no password supplied" in lowered or "password authentication failed" in lowered:
+            detail += (
+                " | Set password_env on this connection to the name of an environment "
+                "variable holding the password."
+            )
+        if "read-only transaction" in lowered:
+            detail += (
+                " | This tool runs on a read-only connection. "
+                "Use postgres_execute for statements that change data."
+            )
+        if "statement timeout" in lowered or "canceling statement" in lowered:
+            detail += " | The database cancelled the query. Narrow it or add a LIMIT."
         raise ValueError(detail)
     return proc.stdout.strip()
 
@@ -270,8 +346,29 @@ def mysql_defaults_file(record: dict[str, Any]) -> tuple[list[str], object]:
     return [f"--defaults-extra-file={handle.name}"], Path(handle.name)
 
 
-def mysql_cli_args(record: dict[str, Any], sql: str, defaults_args: list[str]) -> list[str]:
-    args = [require_program("mysql", label="MySQL"), *defaults_args, "--batch", "--raw"]
+def mysql_cli_args(
+    record: dict[str, Any],
+    sql: str,
+    defaults_args: list[str],
+    *,
+    read_only: bool = False,
+    timeout_seconds: int | None = None,
+) -> list[str]:
+    args = [
+        require_program("mysql", label="MySQL"),
+        *defaults_args,
+        "--batch",
+        "--raw",
+        # MySQL 8 defaults to utf8mb4 server-side; state it on the client too so
+        # emoji and 4-byte characters survive the round trip.
+        "--default-character-set=utf8mb4",
+    ]
+    if read_only:
+        # A session-level setting beats inspecting the SQL text: it also blocks
+        # writes hidden inside a routine. MySQL 5.6+ and all of MySQL 8.
+        args.append("--init-command=SET SESSION TRANSACTION READ ONLY")
+    if timeout_seconds:
+        args.append(f"--connect-timeout={max(2, min(int(timeout_seconds), 60))}")
     host = str(record.get("host", "")).strip()
     if host:
         args.append(f"--host={host}")
@@ -288,18 +385,35 @@ def mysql_cli_args(record: dict[str, Any], sql: str, defaults_args: list[str]) -
     return args
 
 
-def run_mysql_sql(record: dict[str, Any], sql: str, *, timeout: int = 60) -> str:
+def run_mysql_sql(
+    record: dict[str, Any],
+    sql: str,
+    *,
+    read_only: bool = False,
+    timeout: int | None = None,
+) -> str:
+    """Run one statement through the mysql client.
+
+    ``read_only=True`` wraps the statement in ``START TRANSACTION READ ONLY``,
+    which makes the server reject writes. That is stronger than inspecting the
+    SQL text, and it also covers writes hidden inside routines.
+    """
+    resolved_timeout = timeout or DEFAULT_SQL_TIMEOUT
     defaults_args, temp_path = mysql_defaults_file(record)
     try:
         proc = subprocess.run(
-            mysql_cli_args(record, sql, defaults_args),
+            mysql_cli_args(
+                record, sql, defaults_args, read_only=read_only, timeout_seconds=resolved_timeout
+            ),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
-            timeout=timeout,
+            timeout=resolved_timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise ValueError(f"MySQL query timed out after {timeout}s") from exc
+        raise ValueError(f"MySQL query timed out after {resolved_timeout}s") from exc
     finally:
         if temp_path is not None:
             try:
@@ -308,5 +422,43 @@ def run_mysql_sql(record: dict[str, Any], sql: str, *, timeout: int = 60) -> str
                 pass
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "mysql command failed").strip()
+        lowered = detail.lower()
+        if "read only" in lowered or "read-only" in lowered:
+            detail += (
+                " | This tool runs inside a read-only transaction. "
+                "Use mysql_execute for statements that change data."
+            )
+        if "caching_sha2_password" in lowered:
+            detail += (
+                " | MySQL 8 defaults to caching_sha2_password, which needs either a "
+                "TLS connection or a client that supports it. Set ssl_mode=REQUIRED "
+                "on this connection."
+            )
         raise ValueError(detail)
     return proc.stdout.strip()
+
+
+def server_version(record: dict[str, Any], *, provider: str) -> dict[str, Any]:
+    """Read the server version so compatibility can be verified, not assumed."""
+    try:
+        if provider == "postgres":
+            raw = run_postgres_sql(record, "SHOW server_version", read_only=True, timeout=15)
+        else:
+            raw = run_mysql_sql(record, "SELECT VERSION()", read_only=True, timeout=15)
+    except ValueError as exc:
+        return {"reachable": False, "detail": str(exc)[:300]}
+    lines = [line for line in raw.splitlines() if line.strip()]
+    version = lines[-1].strip() if lines else ""
+    major = 0
+    for part in version.replace("-", ".").split("."):
+        if part.isdigit():
+            major = int(part)
+            break
+    minimum = 15 if provider == "postgres" else 8
+    return {
+        "reachable": True,
+        "version": version,
+        "majorVersion": major,
+        "meetsTarget": major >= minimum if major else None,
+        "targetMinimum": minimum,
+    }

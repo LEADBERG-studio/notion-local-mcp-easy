@@ -38,6 +38,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from plugin_runtime import PluginError, PluginManager
 from starlette.middleware.gzip import GZipMiddleware
+
+from transport_guard import TransportGuardMiddleware, stats as transport_stats
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, JSONResponse
 
@@ -2028,6 +2030,45 @@ async def _capture_process(
 
 
 @tool(scope=SCOPE_FILES_READ)
+async def transport_health() -> str:
+    """Report transport limits and traffic counters for this server.
+
+    Use this when calls fail intermittently: it distinguishes a genuine tool
+    error from the transport shedding load. `rejectedOverload` above zero means
+    requests were refused on purpose; a high `replayedRetries` means the client
+    is resending requests that already arrived.
+    """
+    payload = {
+        "server": {
+            "version": SERVER_VERSION,
+            "port": PORT,
+            "authMode": AUTH_MODE,
+            "workspace": str(BASE_DIR),
+            "trustedCommands": ALLOW_COMMANDS,
+        },
+        "transport": {
+            "keepAliveSeconds": KEEP_ALIVE_SECONDS,
+            "limitConcurrency": LIMIT_CONCURRENCY,
+            "socketBacklog": SOCKET_BACKLOG,
+            "gzipMinSize": GZIP_MIN_SIZE,
+            "gracefulShutdownSeconds": GRACEFUL_SHUTDOWN_SECONDS,
+        },
+        "outputLimits": {
+            "toolOutputChars": MAX_OUTPUT_CHARS,
+            "chunkChars": CHUNK_CHAR_LIMIT,
+            "commandOutputChars": MAX_COMMAND_OUTPUT,
+            "maxResults": MAX_RESULTS,
+        },
+        "guard": transport_stats(),
+        "commandJobs": {
+            "maxConcurrent": MAX_COMMAND_JOBS,
+            "tracked": len(COMMAND_JOBS),
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+@tool(scope=SCOPE_FILES_READ)
 async def workspace_info() -> str:
     """Show the allowed workspace, active mode, and git repo-context status."""
     commands = ", ".join(sorted(ALLOWED_COMMANDS)) if ALLOW_COMMANDS else "disabled"
@@ -3185,7 +3226,11 @@ if __name__ == "__main__":
 
     _cleanup_temp_files()
     app = mcp.streamable_http_app()
+    # Order matters: middleware added last runs first. The guard must see the
+    # request before anything else so a duplicate never reaches the tool layer,
+    # and gzip must wrap the guard so replayed bodies are compressed too.
     app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
+    app.add_middleware(TransportGuardMiddleware)
     if AUTH_MODE == AUTH_MODE_LEGACY:
         app.add_middleware(SecurityMiddleware)
     else:

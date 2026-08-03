@@ -78,7 +78,7 @@ class AiPluginFoundationTests(unittest.TestCase):
             )
         return manager, mcp
 
-    def test_ai_plugin_registers_generate_text_but_not_subagent_in_file_only(self):
+    def test_subagent_tools_load_in_file_only_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory) / "workspace"
             workspace.mkdir()
@@ -88,18 +88,13 @@ class AiPluginFoundationTests(unittest.TestCase):
                 profiles_file,
                 access_mode="file_only",
                 plugins={
-                    "openai_compat": {
+                    "subagent": {
                         "scope": "current",
                         "requestedMode": "full_access",
                         "config": {
-                            "providers": [
-                                {
-                                    "name": "main",
-                                    "base_url": "https://example.test/v1",
-                                    "api_key_env": "OPENAI_API_KEY",
-                                    "default_model": "demo-model",
-                                }
-                            ]
+                            "base_url": "https://example.test/v1",
+                            "model": "demo-model",
+                            "api_key_env": "OPENAI_API_KEY",
                         },
                         "attachedAt": "2026-07-20T22:00:00",
                     }
@@ -107,11 +102,14 @@ class AiPluginFoundationTests(unittest.TestCase):
             )
             manager, mcp = self._build_manager(workspace, profiles_file, allow_commands=False)
             names = {item["name"] for item in mcp.registered}
-            self.assertIn("openai_compat_generate_text", names)
-            self.assertNotIn("openai_compat_run_subagent", names)
-            self.assertEqual(manager.states["openai_compat"]["effectiveMode"], "read_only")
+            # Both tools are read-only: talking to a remote model does not touch
+            # the workspace. What the access mode gates is the effective plugin
+            # mode, not the tool set.
+            self.assertIn("subagent_ask", names)
+            self.assertIn("subagent_say", names)
+            self.assertEqual(manager.states["subagent"]["effectiveMode"], "read_only")
 
-    def test_ai_plugin_registers_subagent_tool_only_in_trusted_mode(self):
+    def test_subagent_tools_load_in_trusted_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory) / "workspace"
             workspace.mkdir()
@@ -121,19 +119,13 @@ class AiPluginFoundationTests(unittest.TestCase):
                 profiles_file,
                 access_mode="trusted",
                 plugins={
-                    "openai_compat": {
+                    "subagent": {
                         "scope": "current",
                         "requestedMode": "full_access",
                         "config": {
-                            "providers": [
-                                {
-                                    "name": "main",
-                                    "base_url": "https://example.test/v1",
-                                    "api_key_env": "OPENAI_API_KEY",
-                                    "default_model": "demo-model",
-                                    "subagent_model": "demo-subagent",
-                                }
-                            ]
+                            "base_url": "https://example.test/v1",
+                            "model": "demo-model",
+                            "api_key_env": "OPENAI_API_KEY",
                         },
                         "attachedAt": "2026-07-20T22:00:00",
                     }
@@ -141,11 +133,11 @@ class AiPluginFoundationTests(unittest.TestCase):
             )
             manager, mcp = self._build_manager(workspace, profiles_file, allow_commands=True)
             names = {item["name"] for item in mcp.registered}
-            self.assertIn("openai_compat_generate_text", names)
-            self.assertIn("openai_compat_run_subagent", names)
-            self.assertEqual(manager.states["openai_compat"]["effectiveMode"], "full_access")
+            self.assertIn("subagent_ask", names)
+            self.assertIn("subagent_say", names)
+            self.assertEqual(manager.states["subagent"]["effectiveMode"], "full_access")
 
-    def test_generate_text_uses_env_secret_without_leaking_it_to_diagnostics(self):
+    def test_subagent_uses_env_secret_without_leaking_it(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory) / "workspace"
             workspace.mkdir()
@@ -155,19 +147,13 @@ class AiPluginFoundationTests(unittest.TestCase):
                 profiles_file,
                 access_mode="file_only",
                 plugins={
-                    "openai_compat": {
+                    "subagent": {
                         "scope": "current",
                         "requestedMode": "read_only",
                         "config": {
-                            "providers": [
-                                {
-                                    "name": "main",
-                                    "base_url": "https://example.test/v1",
-                                    "api_key_env": "OPENAI_API_KEY",
-                                    "default_model": "demo-model",
-                                    "models": ["demo-model", "backup-model"],
-                                }
-                            ]
+                            "base_url": "https://example.test/v1",
+                            "model": "demo-model",
+                            "api_key_env": "OPENAI_API_KEY",
                         },
                         "attachedAt": "2026-07-20T22:00:00",
                     }
@@ -175,7 +161,7 @@ class AiPluginFoundationTests(unittest.TestCase):
             )
             with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "super-secret"}, clear=False):
                 manager, mcp = self._build_manager(workspace, profiles_file, allow_commands=False)
-                handler = next(item["fn"] for item in mcp.registered if item["name"] == "openai_compat_generate_text")
+                handler = next(item["fn"] for item in mcp.registered if item["name"] == "subagent_ask")
                 fake_response = mock.MagicMock()
                 fake_response.read.return_value = json.dumps(
                     {
@@ -185,13 +171,15 @@ class AiPluginFoundationTests(unittest.TestCase):
                 ).encode("utf-8")
                 fake_urlopen = mock.MagicMock()
                 fake_urlopen.__enter__.return_value = fake_response
-                with mock.patch("plugins.ai_shared.urllib.request.urlopen", return_value=fake_urlopen) as urlopen:
-                    payload = asyncio.run(handler(prompt="Hello", provider="main", model="demo-model"))
+                with mock.patch("plugins.subagent.plugin.urllib.request.urlopen", return_value=fake_urlopen) as urlopen:
+                    payload = asyncio.run(handler(prompt="Hello"))
                 request = urlopen.call_args.args[0]
                 self.assertEqual(request.headers["Authorization"], "Bearer super-secret")
                 data = json.loads(payload)
-                self.assertEqual(data["output"], "Hello from model")
-                health_text = json.dumps(manager.states["openai_compat"].get("health", {}), ensure_ascii=False)
+                self.assertEqual(data["reply"], "Hello from model")
+                # The endpoint and the model id must not travel back.
+                self.assertNotIn("example.test", payload)
+                health_text = json.dumps(manager.states["subagent"].get("health", {}), ensure_ascii=False)
                 self.assertIn("OPENAI_API_KEY", health_text)
                 self.assertNotIn("super-secret", health_text)
 
@@ -205,48 +193,34 @@ class AiPluginFoundationTests(unittest.TestCase):
                 profiles_file,
                 access_mode="trusted",
                 plugins={
-                    "openai_compat": {
+                    "subagent": {
                         "scope": "current",
                         "requestedMode": "full_access",
                         "config": {
-                            "providers": [
-                                {
-                                    "name": "main",
-                                    "base_url": "https://area.test/v1",
-                                    "api_key_env": "AREA_KEY",
-                                    "default_model": "area-model",
-                                }
-                            ],
-                            "default_provider": "main",
-                            "default_model": "area-model"
+                            "base_url": "https://example.test/v1",
+                            "model": "area-model",
+                            "api_key_env": "OPENAI_API_KEY",
                         },
                         "attachedAt": "2026-07-20T22:00:00",
                     }
                 },
                 global_plugins={
-                    "openai_compat": {
+                    "subagent": {
                         "scope": "global",
                         "requestedMode": "read_only",
                         "config": {
-                            "providers": [
-                                {
-                                    "name": "main",
-                                    "base_url": "https://global.test/v1",
-                                    "api_key_env": "GLOBAL_KEY",
-                                    "default_model": "global-model",
-                                }
-                            ],
-                            "default_provider": "main",
-                            "default_model": "global-model"
+                            "base_url": "https://example.test/v1",
+                            "model": "global-model",
+                            "api_key_env": "OPENAI_API_KEY",
                         },
                         "attachedAt": "2026-07-20T22:00:00",
                     }
                 },
             )
             manager, _ = self._build_manager(workspace, profiles_file, allow_commands=True)
-            self.assertEqual(manager.states["openai_compat"]["attachScope"], "both")
-            self.assertEqual(manager.states["openai_compat"]["configSource"], "merged")
-            self.assertEqual(manager.states["openai_compat"]["config"]["default_model"], "area-model")
+            self.assertEqual(manager.states["subagent"]["attachScope"], "both")
+            self.assertEqual(manager.states["subagent"]["configSource"], "merged")
+            self.assertEqual(manager.states["subagent"]["config"]["model"], "area-model")
 
 
 if __name__ == "__main__":

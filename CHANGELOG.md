@@ -1,3 +1,88 @@
+## 2.4.3 - 2026-08-04
+
+### Transport: dedup, cache and a real queue
+
+Keep-alive and gzip fixed the two obvious causes in 2.4.2. This release adds the
+things that actually make a tunnelled server survive a busy agent.
+
+- **Retry deduplication.** A tunnel hiccup makes a client resend a request that
+  already arrived. Every JSON-RPC request carries an id, so an identical resend
+  is now replayed from a short window instead of executed twice. Writing the
+  same file twice because the transport stuttered was the worst failure mode
+  here, and it is gone.
+- **In-flight joining.** Two identical requests arriving together share one
+  execution. The second waits for the first instead of competing with it for the
+  same connection.
+- **Read cache.** Identical read-only calls (`read_file`, `list_dir`,
+  `grep_files`, `tools/list`, ...) are answered from memory for a few seconds.
+  Agents re-read the same file constantly while reasoning; that traffic no
+  longer reaches the disk or the event loop. Mutations are never cached.
+- **Admission control with `Retry-After`.** Beyond a bounded number of in-flight
+  requests the server refuses work explicitly instead of queueing it where
+  nobody can see it. A refusal is recoverable; a dead transport is not.
+- **The cache is credential-scoped.** Entries are keyed on a hash of the
+  presented credential, so a cached success can never be replayed to a different
+  caller. The OAuth suite caught this the moment it was missing, which is
+  exactly why it is a test and not a comment.
+- New `transport_health` tool reports limits and counters, so an intermittent
+  failure can be told apart from load shedding: `rejectedOverload` above zero
+  means requests were refused on purpose, a high `replayedRetries` means the
+  client is resending.
+- All of it is tunable: `MCP_DEDUP_TTL_SECONDS`, `MCP_READ_CACHE_TTL_SECONDS`,
+  `MCP_MAX_INFLIGHT`, `MCP_ADMISSION_WAIT_SECONDS`, `MCP_CACHE_MAX_ENTRIES`,
+  `MCP_CACHE_MAX_BODY`.
+
+### Database plugins are now complete
+
+Both plugins went from five tools to ten, and read-only became a guarantee
+rather than a guess.
+
+- **Server-enforced read-only.** PostgreSQL reads run with
+  `default_transaction_read_only=on`; MySQL reads run with
+  `SET SESSION TRANSACTION READ ONLY`. Inspecting the SQL text cannot catch a
+  write hidden inside a function, a CTE or a routine. The server can.
+- **In-database timeouts.** PostgreSQL gets `statement_timeout`, so a runaway
+  query is cancelled by the database instead of merely abandoned locally.
+- New tools for both: `*_server_info` (version and a compatibility verdict),
+  `*_list_schemas`, `*_count_rows` (exact, with an optional WHERE),
+  `*_sample_rows`, `*_explain`. `*_describe_table` now returns indexes and
+  constraints or foreign keys, and `*_list_tables` returns on-disk size.
+- **Fixed a hang.** `psql` prompts for a password on stdin when one is missing,
+  which in a server context is an indefinitely hung tool call. It now runs with
+  `-w` and reports an actionable error instead. Found by testing against a real
+  PostgreSQL 17 server, not by reading the code.
+- **Fixed unreadable errors.** On a localised Windows the clients emitted
+  OEM-codepage text that arrived as mojibake. Messages are now untranslated and
+  UTF-8, so a real error is readable.
+- MySQL 8 specifics: `utf8mb4` on the client, and a `caching_sha2_password`
+  failure now explains that it needs TLS and points at `ssl_mode`.
+- Verified against PostgreSQL 15+ (tested with a live 17.9 server and the 17.9
+  client) and the MySQL 8.4 client.
+
+### openai_compat removed
+
+It overlapped the subagent plugin and it leaked: `describe_provider` returned
+the provider endpoint and model list to the model. The subagent plugin covers
+the same ground without exposing anything, so `openai_compat` and its
+`ai_shared` helper are gone.
+
+What moved across: the subagent plugin now supports **several named targets**,
+so one chat can compare models or delegate different jobs to different ones.
+`subagent_list_targets` lists names only. A session stays bound to the target it
+was opened against, so a follow-up cannot silently land on a different model.
+
+### Fixes
+
+- A missing key environment variable no longer stops the subagent plugin from
+  loading. It reported "failed" and took every tool away, hiding the reason.
+  Diagnostics now say `keyPresent: false` and name the variable, and only a real
+  call insists on the key.
+
+### Tests
+
+- Added `tests/test_transport_guard.py`; retargeted the AI plugin suite to the
+  subagent plugin.
+
 ## 2.4.2 - 2026-08-03
 
 ### Transport stability

@@ -47,39 +47,88 @@ _SESSIONS: dict[str, dict[str, Any]] = {}
 # ----------------------------------------------------------------- config
 
 
-def _target(config: dict[str, Any]) -> dict[str, Any]:
-    """Resolve the single configured remote target."""
-    base_url = str(config.get("base_url", "")).strip().rstrip("/")
-    model = str(config.get("model", "")).strip()
-    if not base_url or not model:
+def _targets(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """All configured remote models, keyed by name.
+
+    Two shapes are accepted. A flat config describes one target, which is the
+    common case. A ``targets`` list describes several, so one chat can compare
+    models or delegate different jobs to different ones. Either way the
+    connection details stay here and never leave.
+    """
+    entries = config.get("targets") if isinstance(config.get("targets"), list) else []
+    resolved: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(entries, start=1):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip() or f"target-{index}"
+        merged = {key: value for key, value in config.items() if key != "targets"}
+        merged.update(item)
+        resolved[name] = merged
+    if not resolved and str(config.get("base_url", "")).strip():
+        resolved[str(config.get("name", "")).strip() or "default"] = dict(config)
+    return resolved
+
+
+def _target(config: dict[str, Any], name: str = "", *, require_key: bool = True) -> dict[str, Any]:
+    """Resolve one configured remote target.
+
+    ``require_key=False`` is used by diagnostics. A key that is not present in
+    the environment yet must not stop the plugin from loading: that would take
+    every tool away and hide the reason. Diagnostics report the gap instead, and
+    only a real call insists on the key.
+    """
+    available = _targets(config)
+    if not available:
         raise ValueError(
             "Subagent plugin is not configured yet. Run plugins\\subagent\\SETUP.bat "
             "and provide base_url, model and a key."
         )
+    requested = str(name or config.get("default_target", "")).strip()
+    if requested:
+        if requested not in available:
+            # Names are safe to echo; they are chosen by the operator.
+            raise ValueError(
+                f"Unknown subagent target '{requested}'. Configured: "
+                + ", ".join(sorted(available))
+            )
+        chosen = available[requested]
+        chosen_name = requested
+    else:
+        chosen_name = next(iter(available))
+        chosen = available[chosen_name]
+
+    base_url = str(chosen.get("base_url", "")).strip().rstrip("/")
+    model = str(chosen.get("model", "")).strip()
+    if not base_url or not model:
+        raise ValueError(
+            f"Subagent target '{chosen_name}' is incomplete: base_url and model are required."
+        )
     if not base_url.startswith(("http://", "https://")):
         raise ValueError("Subagent base_url must be a full http(s) URL.")
-    api_key = str(config.get("api_key", "")).strip()
-    api_key_env = str(config.get("api_key_env", "")).strip()
+    api_key = str(chosen.get("api_key", "")).strip()
+    api_key_env = str(chosen.get("api_key_env", "")).strip()
     if api_key_env and not api_key:
         api_key = os.environ.get(api_key_env, "").strip()
-        if not api_key:
+        if not api_key and require_key:
             raise ValueError(
-                "The subagent key is missing. Its environment variable is not set on "
-                "this machine."
+                f"The subagent key is missing: environment variable {api_key_env} is not "
+                "set on this machine."
             )
     return {
+        "target": chosen_name,
         "base_url": base_url,
         "model": model,
         "api_key": api_key,
-        "expose_model": bool(config.get("expose_model", False)),
-        "system_prompt": str(config.get("system_prompt", "")).strip(),
-        "temperature": config.get("temperature"),
-        "max_output_tokens": config.get("max_output_tokens"),
+        "api_key_env": api_key_env,
+        "expose_model": bool(chosen.get("expose_model", False)),
+        "system_prompt": str(chosen.get("system_prompt", "")).strip(),
+        "temperature": chosen.get("temperature"),
+        "max_output_tokens": chosen.get("max_output_tokens"),
         "reply_char_limit": _bounded(
-            config.get("reply_char_limit"), DEFAULT_REPLY_CHARS, MAX_REPLY_CHARS
+            chosen.get("reply_char_limit"), DEFAULT_REPLY_CHARS, MAX_REPLY_CHARS
         ),
-        "timeout_seconds": _bounded(config.get("timeout_seconds"), DEFAULT_TIMEOUT, MAX_TIMEOUT),
-        "history_turns": _bounded(config.get("history_turns"), DEFAULT_HISTORY_TURNS, 100),
+        "timeout_seconds": _bounded(chosen.get("timeout_seconds"), DEFAULT_TIMEOUT, MAX_TIMEOUT),
+        "history_turns": _bounded(chosen.get("history_turns"), DEFAULT_HISTORY_TURNS, 100),
     }
 
 
@@ -94,23 +143,28 @@ def _bounded(value: Any, default: int, ceiling: int) -> int:
 def validate_config(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     # Validate without raising when unconfigured: the plugin should load and say
     # so through its own tools rather than break server startup.
-    if not str(config.get("base_url", "")).strip():
+    if not _targets(config):
         return config
-    _target(config)
+    # Shape only. A missing key is a runtime problem, reported by the tools.
+    for name in _targets(config):
+        _target(config, name, require_key=False)
     return config
 
 
 def healthcheck(context: dict[str, Any]) -> dict[str, Any]:
     config = context.get("pluginConfig") if isinstance(context.get("pluginConfig"), dict) else {}
     try:
-        target = _target(config)
+        target = _target(config, require_key=False)
     except ValueError as exc:
         return {"provider": "subagent", "configured": False, "detail": str(exc)}
     # Deliberately no endpoint, no key, no model unless explicitly allowed.
     return {
         "provider": "subagent",
         "configured": True,
+        "targets": sorted(_targets(config)),
+        "activeTarget": target["target"],
         "keyPresent": bool(target["api_key"]),
+        "keyEnv": target.get("api_key_env") or "(inline key)",
         "model": target["model"] if target["expose_model"] else "<hidden>",
         "replyCharLimit": target["reply_char_limit"],
         "activeSessions": len(_live_sessions()),
@@ -138,6 +192,7 @@ def _new_session(target: dict[str, Any], system_prompt: str) -> dict[str, Any]:
         "id": session_id,
         "system": system_prompt or target["system_prompt"],
         "turns": [],
+        "target": target["target"],
         "created": time.time(),
         "updated": time.time(),
     }
@@ -271,25 +326,35 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
         ]
         return status
 
-    target = _target(config)
+    target = _target(config, str(arguments.get("target", "")).strip())
+
+    if tool_name == "subagent_list_targets":
+        return {"targets": sorted(_targets(config)), "activeTarget": target["target"]}
 
     if tool_name == "subagent_ask":
         prompt = str(arguments.get("prompt", "")).strip()
         if not prompt:
             raise ValueError("prompt is required")
         system = str(arguments.get("system_prompt", "")).strip() or target["system_prompt"]
-        return _ask_remote(target, _build_messages(None, system, prompt, 0))
+        result = _ask_remote(target, _build_messages(None, system, prompt, 0))
+        result["target"] = target["target"]
+        return result
 
     if tool_name == "subagent_start":
         system = str(arguments.get("system_prompt", "")).strip()
         session = _new_session(target, system)
+        session["target"] = target["target"]
         return {
             "session": session["id"],
+            "target": target["target"],
             "note": "Send turns with subagent_say and close it with subagent_end.",
         }
 
     if tool_name == "subagent_say":
         session = _session(str(arguments.get("session", "")))
+        # A session stays with the target it was opened against, so a follow-up
+        # cannot silently land on a different model.
+        target = _target(config, session.get("target", ""))
         prompt = str(arguments.get("prompt", "")).strip()
         if not prompt:
             raise ValueError("prompt is required")
@@ -301,6 +366,7 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
         session["turns"] = session["turns"][-target["history_turns"] * 2 :]
         session["updated"] = time.time()
         result["session"] = session["id"]
+        result["target"] = target["target"]
         result["turns"] = len(session["turns"]) // 2
         return result
 
