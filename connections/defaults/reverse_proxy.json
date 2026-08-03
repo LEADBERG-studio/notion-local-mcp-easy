@@ -1,0 +1,15 @@
+{
+  "id": "reverse_proxy",
+  "blueprintVersion": 1,
+  "title": "Custom public URL / reverse proxy",
+  "summary": "No built-in tunnel. The MCP server stays on localhost and your own proxy or domain fronts it.",
+  "operatorPrepares": [
+    "Point your reverse proxy at the local MCP port.",
+    "Provide the public base origin here."
+  ],
+  "settings": {
+    "public_url": "",
+    "health_path": "/health",
+    "start_attempts": 1
+  }
+}

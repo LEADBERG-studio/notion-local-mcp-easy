@@ -7,7 +7,22 @@ RELEASE_DIR = ROOT / "release"
 OUTPUT = RELEASE_DIR / f"notion-mcp-easy-{VERSION}.zip"
 EXCLUDED_DIRS = {".git", ".venv", ".kilo", "__pycache__", ".pytest_cache", ".ruff_cache", "temp", "release"}
 EXCLUDED_SUFFIXES = {".log", ".pyc", ".zip"}
-EXCLUDED_FILES = {"connection.txt", "runtime.json", "config.json", "workflow-profiles.json", "agent-repo-instructions.local.md", "agent-repo-config.local.json"}
+# Operator state must survive a product upgrade. Anything listed here is never
+# packaged, so unzipping a new release over an old install cannot overwrite
+# configured connection profiles or saved work areas.
+EXCLUDED_FILES = {
+    "connection.txt",
+    "runtime.json",
+    "config.json",
+    "config.json.bak",
+    "workflow-profiles.json",
+    "connections.cfg",
+    "connection-profiles.json",
+    "connection-profiles.v2.json",
+    "current-connection.json",
+    "agent-repo-instructions.local.md",
+    "agent-repo-config.local.json",
+}
 
 
 def included_files():

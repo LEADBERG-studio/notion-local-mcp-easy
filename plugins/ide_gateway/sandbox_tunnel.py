@@ -29,6 +29,17 @@ from typing import Any
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_STATE_DIR = Path(os.environ.get("TMPDIR") or os.environ.get("TEMP") or "/tmp") / "ide_gateway_tunnellio"
 
+# Prefer the launcher's shared Tunnellio helpers so the bridge logic lives in
+# one place instead of two. This script is also copied into the model sandbox
+# and run detached, where the package is not importable, so the local fallbacks
+# below remain as a safety net.
+try:  # pragma: no cover - depends on where this script is executed from
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from connections.circuits import _tunnellio_client as _shared
+except Exception:  # noqa: BLE001 - a standalone sandbox copy must still work
+    _shared = None
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     try:
@@ -58,6 +69,8 @@ def _hostname_from_public_url(public_url: str) -> str:
 
 
 def _slug(value: str) -> str:
+    if _shared is not None:
+        return _shared.slugify(value) if value.strip() else _shared.slugify(f"ide-gateway-{int(time.time())}")
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value.strip().lower())
     cleaned = "-".join(part for part in cleaned.split("-") if part)
     return (cleaned or f"ide-gateway-{int(time.time())}")[:80]
@@ -111,14 +124,18 @@ def _start_detached(command: list[str], log_path: Path) -> subprocess.Popen:
 def _read_status(status_path: Path, runtime_config_path: Path) -> dict[str, Any]:
     status = _load_json(status_path)
     config = _load_json(runtime_config_path)
-    public_url = (
-        status.get("publicUrl")
-        or config.get("runtime", {}).get("publicUrl")
-        or config.get("transport", {}).get("publicUrl")
-        or config.get("connection", {}).get("connectionProfile", {}).get("publicUrl")
-        or config.get("connectionProfile", {}).get("publicUrl")
-        or ""
-    )
+    if _shared is not None:
+        # One implementation of "where does the public URL hide in a snapshot".
+        public_url = _shared.public_url_from_snapshot({**config, **status})
+    else:
+        public_url = (
+            status.get("publicUrl")
+            or config.get("runtime", {}).get("publicUrl")
+            or config.get("transport", {}).get("publicUrl")
+            or config.get("connection", {}).get("connectionProfile", {}).get("publicUrl")
+            or config.get("connectionProfile", {}).get("publicUrl")
+            or ""
+        )
     return {"status": status, "config": config, "public_url": str(public_url or "")}
 
 

@@ -1,0 +1,28 @@
+{
+  "id": "serveo_stable",
+  "blueprintVersion": 1,
+  "title": "Serveo stable domain",
+  "summary": "Reserved Serveo hostname bound to your own SSH key. The public URL survives restarts.",
+  "operatorPrepares": [
+    "Generate an SSH key pair yourself.",
+    "Reserve the hostname in your Serveo account and bind that key to it.",
+    "Provide the private key path and the reserved label here."
+  ],
+  "settings": {
+    "hostname": "",
+    "ssh_key": "",
+    "ssh_host": "serveo.net",
+    "ssh_port": "",
+    "remote_port": 80,
+    "public_domain": "serveousercontent.com",
+    "keepalive_interval": 30,
+    "keepalive_count": 3,
+    "strict_host_key_checking": "accept-new",
+    "batch_mode": false,
+    "health_path": "/health",
+    "start_attempts": 4
+  },
+  "notes": {
+    "batch_mode": "Must stay false. Serveo completes auth with an empty keyboard-interactive challenge even for registered keys; BatchMode disables that and breaks auth. Verified live 2026-07-17."
+  }
+}

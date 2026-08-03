@@ -189,7 +189,7 @@ class TunnelSetupWizardTests(unittest.TestCase):
                 mock.patch.object(launcher, "CONFIG_FILE", config_file),
                 mock.patch("launcher.input", side_effect=inputs),
             ):
-                rc = launcher.tunnel_setup()
+                rc = launcher.legacy_tunnel_setup()
             self.assertEqual(rc, 0)
             stored = json.loads(config_file.read_text(encoding="utf-8"))
             self.assertEqual(stored["tunnel_backend"], "sish")

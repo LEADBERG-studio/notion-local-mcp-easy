@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.3.0</small>
+        <small>документация для начинающих · v2.4.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -65,11 +65,23 @@
 
 <h2>Файлы</h2>
 <table><thead><tr><th>Файл</th><th>Назначение</th></tr></thead><tbody>
-<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\config.json</code></td><td>Основная локальная конфигурация.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\current-connection.json</code></td><td><strong>Источник истины:</strong> рабочие области, активный выбор, учётные данные.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\connection-profiles.v2.json</code></td><td>Настроенные профили подключения. Переживают обновление продукта.</td></tr>
+<tr><td><code>connections/defaults/&lt;id&gt;.json</code></td><td>Неизменяемые прообразы профилей. Едут в релизе, руками не правятся.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\config.json</code></td><td>Генерируемое зеркало активного профиля для обратной совместимости.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\config.json.bak</code></td><td>Единственный rolling backup зеркала.</td></tr>
 <tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\oauth_state.json</code></td><td>OAuth state/clients/tokens.</td></tr>
-<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code></td><td>Profiles и plugin state.</td></tr>
-<tr><td><code>connections.cfg</code></td><td>Слоты workspace и меню.</td></tr>
+<tr><td><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code></td><td>Legacy profiles и plugin state.</td></tr>
+<tr><td><code>connections.cfg</code></td><td>Зеркало слотов workspace, правится вручную.</td></tr>
 <tr><td><code>plugins/*/plugin.json</code></td><td>Manifest плагина.</td></tr>
+</tbody></table>
+
+<h2>Скрипты</h2>
+<table><thead><tr><th>Скрипт</th><th>Что спрашивает</th></tr></thead><tbody>
+<tr><td><code>PROFILES.bat</code></td><td>Только то, что нужно конкретному контуру</td></tr>
+<tr><td><code>SETUP.bat</code></td><td>Папка, режим доступа, профиль подключения</td></tr>
+<tr><td><code>START.bat</code></td><td>Только рабочую область</td></tr>
+<tr><td><code>DOCTOR.bat</code></td><td>Ничего. Показывает процессы туннелей и висяки</td></tr>
 </tbody></table>
 
 <h2>Auth modes</h2>
@@ -77,11 +89,21 @@
 oauth   = OAuth only
 dual    = Bearer + OAuth</code></pre>
 
-<h2>Tunnel backends</h2>
-<pre><code>tunnellio
-serveo
-sish
-custom_proxy</code></pre>
+<h2>Профили подключения</h2>
+<pre><code>serveo_stable       имя + SSH-ключ
+serveo_temporary    ничего
+tunnellio_stable    домен + SSH-ключ
+tunnellio_random    API-ключ (проверяется на сервере)
+tunnellio_bridge    ничего (домен и ключ опциональны)
+sish                хост, порт, домен, subdomain, ключ
+reverse_proxy       публичный origin</code></pre>
+
+<h2>Настройка профилей без меню</h2>
+<pre><code>python profiles_setup.py --list
+python profiles_setup.py --configure &lt;id&gt;
+python profiles_setup.py --verify &lt;id&gt;
+python profiles_setup.py --blueprint &lt;id&gt;
+python profiles_setup.py --reset &lt;id&gt;</code></pre>
 
 <h2>OAuth endpoints</h2>
 <pre><code>/.well-known/oauth-authorization-server
@@ -93,7 +115,7 @@ custom_proxy</code></pre>
 
 <h2>Тесты</h2>
 <pre><code>python -m py_compile server.py launcher.py core.py profiles.py plugin_runtime.py
-python -m unittest discover -s tests -v</code></pre>
+python -m unittest discover -s tests -t tests</code></pre>
 
     <section class="card">
       <h2>Tunnellio API</h2>

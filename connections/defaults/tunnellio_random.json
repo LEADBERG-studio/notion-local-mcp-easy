@@ -1,0 +1,31 @@
+{
+  "id": "tunnellio_random",
+  "blueprintVersion": 1,
+  "title": "Tunnellio random domain",
+  "summary": "Managed Tunnellio runtime with a server-issued ephemeral domain. Only an API token is required; the setup script validates it against the server before saving.",
+  "operatorPrepares": [
+    "Create an API token in the Tunnellio cabinet.",
+    "Paste it here. Nothing else is required."
+  ],
+  "settings": {
+    "api_token": "",
+    "base_url": "https://api.tunnellio.ru",
+    "client_path": "",
+    "state_dir": "",
+    "runtime_name": "",
+    "connection_mode": "cloud_proxy",
+    "oauth_client_policy": "shared",
+    "use_discovery": true,
+    "enable_pkce": true,
+    "session_strategy": "open_then_launch",
+    "watch": false,
+    "url_timeout_seconds": 40,
+    "verify_timeout_seconds": 15,
+    "health_path": "/health",
+    "start_attempts": 3
+  },
+  "notes": {
+    "api_token": "Validated live through POST /v1/meta during profile setup. An authenticated 'plan_required' answer still proves the token is real; only 401/invalid_token is rejected.",
+    "runtime_name": "Empty means the launcher derives a stable name from the workspace path."
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "sish",
+  "blueprintVersion": 1,
+  "title": "Self-hosted sish relay",
+  "summary": "SSH reverse tunnel into your own sish relay with your own wildcard domain.",
+  "operatorPrepares": [
+    "Run a sish relay and point a wildcard DNS record at it.",
+    "Generate an SSH key pair and authorize it on the relay.",
+    "Provide relay host, port, wildcard domain, subdomain label and private key here."
+  ],
+  "settings": {
+    "ssh_host": "",
+    "ssh_port": "2222",
+    "ssh_user": "",
+    "wildcard_domain": "",
+    "subdomain": "",
+    "ssh_key": "",
+    "remote_port": 80,
+    "keepalive_interval": 30,
+    "keepalive_count": 3,
+    "strict_host_key_checking": "accept-new",
+    "health_path": "/health",
+    "start_attempts": 4
+  }
+}

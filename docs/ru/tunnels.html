@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.3.0</small>
+        <small>документация для начинающих · v2.4.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -64,51 +64,83 @@
       <h1>Туннели и публичный URL</h1>
 <p>Локальный MCP слушает <code>127.0.0.1:8765</code>. Чтобы внешний клиент подключился к нему, нужен публичный URL.</p>
 
-<h2>Варианты</h2>
-<table><thead><tr><th>Backend</th><th>Что делает</th><th>Когда выбирать</th></tr></thead><tbody>
-<tr><td><code>tunnellio</code></td><td>Managed runtime через <code>tunnellio.exe</code></td><td>Рекомендуемый вариант, если доступен.</td></tr>
-<tr><td><code>serveo</code> temporary</td><td>Временный домен Serveo</td><td>Быстрый тест.</td></tr>
-<tr><td><code>serveo</code> stable</td><td>Reserved hostname + SSH key</td><td>Нужен стабильный адрес без своего proxy.</td></tr>
-<tr><td><code>sish</code></td><td>Ваш SSH reverse tunnel relay</td><td>Вы контролируете relay/DNS.</td></tr>
-<tr><td><code>custom_proxy</code></td><td>Launcher не поднимает туннель, а использует ваш URL</td><td>Production/self-hosted reverse proxy.</td></tr>
+<h2>Семь контуров</h2>
+<p>В 2.4.0 каждый вид подключения — независимый контур со своими настройками, своей проверкой и своим запуском. Контуры не пересекаются: сломанный или недонастроенный контур не влияет на остальные.</p>
+
+<table><thead><tr><th>Профиль</th><th>Что делает</th><th>Когда выбирать</th></tr></thead><tbody>
+<tr><td><code>tunnellio_bridge</code></td><td>Keyless нативный TCP-мост, случайный домен от сервера</td><td>Быстрее всего начать: не требует вообще ничего.</td></tr>
+<tr><td><code>tunnellio_stable</code></td><td>Зарезервированный домен + ваш SSH-ключ, прямой SSH на edge</td><td>Нужен постоянный адрес, ключ вы сделали сами.</td></tr>
+<tr><td><code>tunnellio_random</code></td><td>Managed runtime, домен выдаёт сервер</td><td>Есть API-ключ, постоянный домен не нужен.</td></tr>
+<tr><td><code>serveo_temporary</code></td><td>Временный домен Serveo</td><td>Быстрый тест без регистрации.</td></tr>
+<tr><td><code>serveo_stable</code></td><td>Зарезервированное имя + ваш SSH-ключ</td><td>Стабильный адрес без своего proxy.</td></tr>
+<tr><td><code>sish</code></td><td>Ваш собственный SSH reverse tunnel relay</td><td>Вы контролируете relay и DNS.</td></tr>
+<tr><td><code>reverse_proxy</code></td><td>Туннель не поднимается, используется ваш URL</td><td>Production / self-hosted reverse proxy.</td></tr>
 </tbody></table>
 
-<h2>Tunnellio</h2>
+<div class="callout info">Все профили настраиваются в одном месте: <code>PROFILES.bat</code>. Выбор профиля для рабочей папки — в <code>SETUP.bat</code>.</div>
+
+<h2>Tunnellio direct TCP bridge</h2>
+<p>Самый простой путь. Keyless: ни SSH-ключа, ни регистрации public key. Достаточно, чтобы рядом с <code>launcher.py</code> лежал <code>tunnellio.exe</code>.</p>
 <ol class="steps">
-  <li>Положите <code>tunnellio.exe</code> рядом с <code>launcher.py</code>.</li>
-  <li>Запустите <code>SETUP.bat</code> или <code>START.bat</code>.</li>
-  <li>Выберите Tunnellio managed runtime.</li>
-  <li>Если нужен стабильный OAuth URL, задайте domain/reservation параметры, если они требуются вашим Tunnellio runtime.</li>
-  <li>Проверьте итоговый public URL через <code>SHOW_CONNECTION.bat</code>.</li>
+  <li>Откройте <code>PROFILES.bat</code> и выберите Tunnellio direct TCP bridge.</li>
+  <li>Оба вопроса можно пропустить: домен и API-ключ опциональны. Сервер выдаст случайный домен.</li>
+  <li>Если у вас есть зарезервированный домен, укажите его — адрес станет постоянным.</li>
 </ol>
+<p>Если зарезервированный эфемерный домен истёк, контур один раз переподнимется на свежем случайном домене вместо падения. Это поведение отключается полем <code>expired_domain_fallback</code> в прообразе.</p>
+
+<h2>Tunnellio stable domain</h2>
+<ol class="steps">
+  <li>Сгенерируйте SSH-ключ сами.</li>
+  <li>Зарезервируйте домен в кабинете Tunnellio и привяжите к нему этот ключ.</li>
+  <li>В <code>PROFILES.bat</code> укажите путь к приватному ключу и метку домена.</li>
+</ol>
+<p>Больше для этого режима ничего не требуется: API-ключ здесь не нужен. Контур открывает прямой SSH reverse forward на edge Tunnellio, который говорит по протоколу sish.</p>
+<h3>Два транспорта</h3>
+<p>У этого профиля есть переключатель <code>transport</code>:</p>
+<ul>
+  <li><code>ssh</code> (по умолчанию) — прямой reverse forward на edge. Не нужен ни клиентский бинарь, ни обращения к API. Максимально устойчивый вариант.</li>
+  <li><code>cli</code> — управляемый запуск через <code>tunnellio.exe connect</code>: супервизия, health-check и runtime-снимок. Доступен начиная с клиента Tunnellio 0.6.0, который перестал требовать API-ключ для зарезервированного домена и перестал считать <code>403 plan_required</code> ошибкой авторизации.</li>
+</ul>
+<p>Если управляемый клиент не стартует, контур один раз откатывается на прямой SSH: резервация одна и та же, и отсутствующий бинарь не должен стоить вам туннеля.</p>
+
+<h2>Tunnellio random domain</h2>
+<ol class="steps">
+  <li>Создайте API-ключ в кабинете Tunnellio.</li>
+  <li>В <code>PROFILES.bat</code> вставьте только его.</li>
+  <li>Скрипт сразу проверит ключ на сервере и сохранит профиль только после подтверждения.</li>
+</ol>
+<p>Ответ <code>plan_required</code> считается успехом: он доказывает, что ключ настоящий и принят. Отклоняется только реальная ошибка авторизации.</p>
 
 <h2>Serveo temporary</h2>
-<p>Подходит для пробы. Минус: URL может поменяться, а OAuth-клиенты любят стабильный issuer/redirect setup.</p>
+<p>Ничего настраивать не нужно. Минус: URL меняется после переподключений, а OAuth-клиенты любят стабильный issuer.</p>
 
 <h2>Serveo stable</h2>
 <ol class="steps">
-  <li>Подготовьте reserved hostname.</li>
-  <li>Подготовьте SSH key, который принимает Serveo.</li>
-  <li>В setup выберите Serveo stable domain.</li>
-  <li>Укажите hostname и путь к key.</li>
+  <li>Сгенерируйте SSH-ключ сами.</li>
+  <li>Зарезервируйте имя в аккаунте Serveo и привяжите к нему ключ.</li>
+  <li>В <code>PROFILES.bat</code> укажите имя и путь к приватному ключу.</li>
 </ol>
+<p>Если указать <code>.pub</code>, контур сам подставит парный приватный ключ или скажет, что приватного рядом нет.</p>
 
 <h2>Self-hosted sish</h2>
 <ol class="steps">
   <li>Поднимите sish relay на сервере.</li>
   <li>Настройте DNS wildcard, например <code>*.relay.example.com</code>.</li>
-  <li>Подготовьте SSH private key для relay.</li>
-  <li>Выберите self-hosted sish relay в <code>tunnel_setup</code>.</li>
-  <li>Укажите <code>tunnel_host</code>, <code>tunnel_ssh_port</code>, <code>*.tunnellio.site</code>, reserved subdomain и key path.</li>
+  <li>Авторизуйте свой SSH-ключ на relay.</li>
+  <li>В <code>PROFILES.bat</code> укажите хост relay, порт, wildcard-домен, subdomain и путь к ключу.</li>
 </ol>
+<p>У этого контура собственные поля. Он больше не переиспользует <code>serveo_hostname</code> и не делит ключ с другими режимами.</p>
 
 <h2>Что проверять</h2>
 <ul>
   <li>Public URL открывается снаружи.</li>
   <li>MCP endpoint заканчивается на <code>/mcp</code>.</li>
-  <li>Host совпадает с <code>MCP_PUBLIC_URL</code> / <code>public_url</code>.</li>
   <li>Для OAuth URL стабилен и HTTPS.</li>
+  <li>Проверить профиль до запуска: пункт <code>v&lt;номер&gt;</code> в <code>PROFILES.bat</code>.</li>
 </ul>
+
+<div class="callout warn"><strong>Автоматической подмены канала нет.</strong> Если активный контур не поднялся, launcher скажет об этом и остановится. Перейти на другой канал можно только явно через <code>SETUP.bat</code>.</div>
+
 
     <section class="card">
       <h2>Tunnellio: постоянный URL и управляемый доступ</h2>

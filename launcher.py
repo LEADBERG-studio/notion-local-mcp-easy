@@ -46,6 +46,10 @@ from urllib.parse import urlsplit
 
 
 from core import DEFAULT_ALLOWED_COMMANDS
+import connection_runtime
+from connections.base import ConnectionConfigError, ConnectionSetupAborted
+from connections.store import ConnectionStoreError
+from connections import diagnostics as tunnel_diagnostics
 
 
 def configure_stdio_for_unicode() -> None:
@@ -80,7 +84,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -191,8 +195,13 @@ def config_uses_serveo(config: dict) -> bool:
 
 
 def tunnel_process_match(config: dict) -> str:
+    resolved = connection_runtime.active_or_none()
+    if resolved is not None:
+        return resolved.circuit.process_match(resolved.settings)
     backend = config_tunnel_backend(config)
     if backend == "tunnellio":
+        if tunnellio_uses_direct_ssh(config):
+            return "ssh"
         return "tunnellio.exe"
     if backend == "sish":
         return sish_tunnel_match(config)
@@ -206,6 +215,9 @@ def custom_public_url(config: dict) -> str:
 
 
 def reverse_proxy_enabled(config: dict) -> bool:
+    resolved = connection_runtime.active_or_none()
+    if resolved is not None:
+        return not resolved.circuit.starts_process
     raw = str(config.get("tunnel_backend", "")).strip()
     if raw:
         return normalize_tunnel_backend(raw) == "custom_proxy"
@@ -291,6 +303,23 @@ def tunnellio_runtime_name(config: dict) -> str:
     return slugify_runtime_name(f"{workspace_name}-mcp-{digest}")
 
 
+def tunnellio_uses_direct_ssh(config: dict) -> bool:
+    """Stable Tunnellio domain reserved in the cabinet with a bound SSH key.
+
+    For free accounts the Tunnellio CLI ``connect`` command always issues a
+    ``POST /v1/meta`` call that returns ``403 plan_required``. A reserved
+    stable domain, however, works through plain SSH reverse forwarding (the
+    Tunnellio SSH edge speaks the sish protocol). When both a stable
+    ``tunnellio_domain`` (hostname) and an ``ssh_key`` are configured, the
+    launcher must bypass the CLI entirely and talk SSH directly.
+    """
+    if tunnel_backend(config) != "tunnellio":
+        return False
+    hostname = str(config.get("tunnellio_domain", "")).strip().lower().strip(".")
+    key_path = Path(str(config.get("ssh_key", "") or config.get("tunnellio_key", ""))).expanduser()
+    return bool(hostname) and key_path.is_file()
+
+
 
 
 
@@ -323,6 +352,7 @@ CONNECTION_PROFILE_FIELDS = {
         "tunnellio_runtime_name", "tunnellio_base_url", "tunnellio_token", "tunnellio_domain",
         "tunnellio_key", "tunnellio_connection_mode", "tunnellio_oauth_client_policy",
         "tunnellio_use_discovery", "tunnellio_enable_pkce",
+        "ssh_key", "tunnel_ssh_port",
     },
     "serveo_temporary": {"tunnel_backend", "tunnel_mode_preference"},
     "serveo_stable": {"tunnel_backend", "tunnel_mode_preference", "serveo_hostname", "ssh_key"},
@@ -407,7 +437,7 @@ def sanitize_active_connection_config(config: dict, mode: str) -> dict:
     mode = normalize_tunnel_mode(mode)
     if mode != "reverse_proxy":
         result["public_url"] = ""
-    if mode not in {"serveo_stable", "sish"}:
+    if mode not in {"serveo_stable", "sish", "tunnellio"}:
         result["serveo_hostname"] = ""
         result["ssh_key"] = ""
     if mode != "sish":
@@ -516,10 +546,19 @@ def prompt_tunnel_mode(existing: dict) -> str:
 
 
 def config_public_url(config: dict) -> str:
+    resolved = connection_runtime.active_or_none()
+    if resolved is not None:
+        return resolved.circuit.static_url(resolved.settings)
     custom = custom_public_url(config)
     if custom:
         return custom
     backend = tunnel_backend(config)
+    if backend == "tunnellio":
+        hostname = str(config.get("tunnellio_domain", "")).strip().lower().strip(".")
+        if hostname and tunnellio_uses_direct_ssh(config):
+            site_domain = str(config.get("tunnel_domain", "")).strip().lower().strip(".") or DEFAULT_TUNNELLIO_SITE_DOMAIN
+            return f"https://{hostname}.{site_domain}"
+        return ""
     if backend == "sish":
         hostname = str(config.get("serveo_hostname", "")).strip().lower()
         domain = str(config.get("tunnel_domain", "")).strip().lower().strip(".")
@@ -576,14 +615,17 @@ CONFIG_SENSITIVE_FIELDS = {
 
 
 def backup_config_file(reason: str) -> Path | None:
+    """Keep exactly one rolling backup of the generated legacy mirror.
+
+    The old timestamped pile was actively harmful: stale entries were later
+    mined for 'missing' values and leaked settings between connection modes.
+    """
     if not CONFIG_FILE.is_file():
         return None
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    safe_reason = re.sub(r"[^A-Za-z0-9_.-]+", "-", reason.strip()).strip("-") or "write"
-    backup = CONFIG_FILE.with_name(f"config.backup.{stamp}.{safe_reason}.json")
+    backup = CONFIG_FILE.with_name("config.json.bak")
     try:
         shutil.copy2(CONFIG_FILE, backup)
-        prune_config_backups(limit=5)
+        prune_config_backups(limit=0)
         return backup
     except OSError:
         return None
@@ -693,7 +735,14 @@ def stop_previous_tunnel_runtime(config: dict) -> None:
             with contextlib.suppress(Exception):
                 request_tunnellio_stop(config, runtime_name, force=True)
 
-def start_and_resolve_tunnel(config: dict, *, attempts: int = 4) -> tuple[subprocess.Popen, queue.Queue[str], str]:
+def start_and_resolve_tunnel(config: dict, *, attempts: int | None = None) -> tuple[subprocess.Popen, queue.Queue[str], str]:
+    resolved = connection_runtime.active_or_none()
+    if attempts is None:
+        attempts = connection_runtime.start_attempts(resolved) if resolved is not None else 4
+    fallback_command = (
+        connection_runtime.fallback_tunnel_command(resolved) if resolved is not None else None
+    )
+    fallback_used = False
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         if attempt > 1:
@@ -701,7 +750,8 @@ def start_and_resolve_tunnel(config: dict, *, attempts: int = 4) -> tuple[subpro
             print(f"Tunnel start retry {attempt}/{attempts} in {delay}s...")
             time.sleep(delay)
         stop_previous_tunnel_runtime(config)
-        tunnel, lines = start_tunnel(config)
+        command = fallback_command if fallback_used else None
+        tunnel, lines = start_tunnel(config, command) if command else start_tunnel(config)
         try:
             url = resolve_tunnel_url(config, tunnel, lines)
             return tunnel, lines, url
@@ -710,6 +760,16 @@ def start_and_resolve_tunnel(config: dict, *, attempts: int = 4) -> tuple[subpro
             if tunnel.poll() is None:
                 with contextlib.suppress(Exception):
                     tunnel.terminate()
+            if fallback_command is not None and not fallback_used:
+                # A pinned ephemeral domain can expire between runs. The circuit
+                # offered an explicit recovery command, so use it once instead of
+                # making the operator reconfigure the profile by hand.
+                fallback_used = True
+                print(
+                    "The reserved domain did not come up. Retrying once with a fresh "
+                    "server-issued domain, as this profile allows."
+                )
+                continue
             if tunnel_log_suggests_remote_port_busy():
                 if attempt >= attempts:
                     raise RuntimeError(
@@ -1430,7 +1490,65 @@ def choose_workspace_from_connections(config: dict) -> dict:
 
 
 
+def _sync_area_paths_to_connections_cfg() -> None:
+    """Keep the human-editable connections.cfg in step with the known areas.
+
+    The file stays for backward compatibility and manual editing, but it is now
+    a mirror: the permanent record lives in current-connection.json.
+    """
+    try:
+        from connections import store as _store
+
+        current = _store.load_current()
+        paths = {
+            index: str(area.get("workspace", ""))
+            for index, area in enumerate(current.get("areas", {}).values(), start=1)
+        }
+        if not paths:
+            return
+        connections = load_connections_cfg()
+        CONNECTIONS_FILE.write_text(
+            connections_cfg_template(bool(connections.get("menu", False)), paths),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _apply_resolved(resolved) -> dict:
+    """Turn a resolved connection into the flat config the launcher runs on."""
+    config = connection_runtime.legacy_config_for(
+        resolved,
+        version=VERSION,
+        allowed_commands=sorted(DEFAULT_ALLOWED_COMMANDS),
+    )
+    _sync_area_paths_to_connections_cfg()
+    return config
+
+
 def setup(force: bool = False) -> dict:
+    """Entry point used by both START and SETUP.
+
+    ``force`` means SETUP.bat: choose folder, access mode and connection
+    profile. Without it this is the START path, which only picks a work area.
+    """
+    ensure_connections_cfg_exists()
+    legacy = load_json(CONFIG_FILE)
+    try:
+        if force:
+            resolved = connection_runtime.setup_flow(SCRIPT_DIR, legacy)
+        else:
+            resolved = connection_runtime.start_flow(SCRIPT_DIR, legacy)
+    except ConnectionStoreError as exc:
+        if force:
+            raise
+        print(f"\n{exc}\n")
+        resolved = connection_runtime.setup_flow(SCRIPT_DIR, legacy)
+    print(f"Connection profile: {connection_runtime.describe(resolved)}")
+    return _apply_resolved(resolved)
+
+
+def legacy_setup(force: bool = False) -> dict:
     ensure_connections_cfg_exists()
     raw_existing = load_json(CONFIG_FILE)
     existing = heal_legacy_config(raw_existing, persist=True) if raw_existing else {}
@@ -2485,14 +2603,73 @@ def build_tunnellio_tunnel_command(config: dict) -> list[str]:
 
 
 
+DEFAULT_TUNNELLIO_SSH_HOST = "tunnellio.site"
+DEFAULT_TUNNELLIO_SSH_PORT = "2222"
+DEFAULT_TUNNELLIO_SSH_USER = "tunnel"
+DEFAULT_TUNNELLIO_SITE_DOMAIN = "tunnellio.site"
+
+
+
+def build_tunnellio_ssh_tunnel_command(config: dict) -> list[str]:
+    """Direct SSH reverse tunnel to a reserved Tunnellio stable domain.
+
+    Mirrors the sish/Serveo flow: opens a plain SSH reverse forward to the
+    Tunnellio SSH edge. The Tunnellio server speaks the sish protocol, so a
+    reserved hostname + its SSH key yield a working public HTTPS endpoint
+    without the CLI and without any Tunnellio API calls (``POST /v1/meta``
+    is what blocks free accounts on the ``connect`` subcommand).
+    """
+    if not shutil.which("ssh"):
+        raise RuntimeError(
+            "OpenSSH client was not found. Install Windows Optional Feature: OpenSSH Client."
+        )
+
+    hostname = str(config.get("tunnellio_domain", "")).strip().lower().strip(".")
+    if not hostname:
+        raise RuntimeError(
+            "Tunnellio direct SSH mode requires 'tunnellio_domain' (the reserved hostname)."
+        )
+
+    key_path = Path(str(config.get("ssh_key", "") or config.get("tunnellio_key", ""))).expanduser()
+    if not key_path.is_file():
+        raise RuntimeError(f"Tunnellio private SSH key not found: {key_path}")
+
+    port = int(config.get("port", 8765))
+    ssh_host = str(config.get("tunnel_host", "")).strip() or DEFAULT_TUNNELLIO_SSH_HOST
+    ssh_port = str(config.get("tunnel_ssh_port", "")).strip() or DEFAULT_TUNNELLIO_SSH_PORT
+    ssh_user = DEFAULT_TUNNELLIO_SSH_USER
+
+    remote = f"{hostname}:80:127.0.0.1:{port}"
+    command = [
+        "ssh",
+        "-N",
+        "-T",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=3",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "IdentitiesOnly=yes",
+        "-i", str(key_path),
+        "-p", ssh_port,
+        "-R", remote,
+        f"{ssh_user}@{ssh_host}",
+    ]
+    return command
 
 
 
 def build_tunnel_command(config: dict) -> list[str]:
+    resolved = connection_runtime.active_or_none()
+    if resolved is not None:
+        if not resolved.circuit.starts_process:
+            raise RuntimeError(f"{resolved.circuit.title} does not use a built-in tunnel process.")
+        return connection_runtime.tunnel_command(resolved)
     if reverse_proxy_enabled(config):
         raise RuntimeError("Reverse proxy mode does not use a built-in tunnel process.")
     backend = tunnel_backend(config)
     if backend == "tunnellio":
+        if tunnellio_uses_direct_ssh(config):
+            return build_tunnellio_ssh_tunnel_command(config)
         return build_tunnellio_tunnel_command(config)
     if backend == "sish":
         return build_sish_tunnel_command(config)
@@ -2500,9 +2677,9 @@ def build_tunnel_command(config: dict) -> list[str]:
 
 
 
-def start_tunnel(config: dict) -> tuple[subprocess.Popen, queue.Queue[str]]:
+def start_tunnel(config: dict, command: list[str] | None = None) -> tuple[subprocess.Popen, queue.Queue[str]]:
 
-    command = build_tunnel_command(config)
+    command = command or build_tunnel_command(config)
 
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
 
@@ -2713,9 +2890,67 @@ def resolve_tunnel_url(
 
 ) -> str:
 
+    resolved = connection_runtime.active_or_none()
+
+    if resolved is not None:
+
+        if not resolved.circuit.url_is_dynamic:
+
+            deadline = time.time() + max(0.0, startup_grace)
+
+            while time.time() < deadline:
+
+                if process.poll() is not None:
+
+                    raise tunnel_error(f"Tunnel process exited with code {process.returncode}")
+
+                time.sleep(0.1)
+
+            if process.poll() is not None:
+
+                raise tunnel_error(f"Tunnel process exited with code {process.returncode}")
+
+        try:
+
+            url = connection_runtime.tunnel_url(process, lines, resolved)
+
+        except ConnectionConfigError as exc:
+
+            raise tunnel_error(str(exc)) from exc
+
+        if not url:
+
+            raise tunnel_error(f"{resolved.circuit.title} did not produce a public URL.")
+
+        return url
+
     backend = tunnel_backend(config)
 
     if backend == "tunnellio":
+
+        if tunnellio_uses_direct_ssh(config):
+
+            deadline = time.time() + max(0.0, startup_grace)
+
+            while time.time() < deadline:
+
+                if process.poll() is not None:
+
+                    raise tunnel_error(f"SSH tunnel exited with code {process.returncode}")
+
+                time.sleep(0.1)
+
+            if process.poll() is not None:
+
+                raise tunnel_error(f"SSH tunnel exited with code {process.returncode}")
+
+            public_url = config_public_url(config)
+
+            if not public_url:
+
+                raise tunnel_error("Tunnellio direct SSH needs a stable public URL: set 'tunnellio_domain' and 'ssh_key'.")
+
+            return public_url
 
         return resolve_tunnellio_url(process=process, config=config)
 
@@ -2781,7 +3016,7 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
         "tunnel_match": (
             "custom_proxy"
             if backend == "custom_proxy"
-            else "tunnellio.exe" if backend == "tunnellio" else sish_tunnel_match(config) if backend == "sish" else "serveo.net"
+            else tunnel_process_match(config) if backend == "tunnellio" else sish_tunnel_match(config) if backend == "sish" else "serveo.net"
         ),
         "tunnel_backend": backend,
         "tunnellio_runtime_name": tunnellio_runtime_name(config)
@@ -2940,6 +3175,11 @@ def validate_runtime_config(config: dict) -> dict:
         raise RuntimeError("Access token is missing. Run SETUP.bat explicitly.")
     if bool(result.get("allow_commands", False)) and not result.get("allowed_commands"):
         result["allowed_commands"] = sorted(DEFAULT_ALLOWED_COMMANDS)
+    if connection_runtime.active_or_none() is not None:
+        # The active circuit validated its own settings during resolve(). No
+        # cross-circuit sanitising happens here any more: there is nothing to
+        # sanitise, because circuits never share fields.
+        return result
     mode = selected_mode_from_config(result)
     result = sanitize_active_connection_config(result, mode)
     if mode == "serveo_stable":
@@ -2959,13 +3199,18 @@ def validate_runtime_config(config: dict) -> dict:
         if not key_path.is_file():
             raise RuntimeError(f"sish private key not found: {key_path}")
     elif mode == "tunnellio":
-        if not tunnellio_executable_path(result).is_file():
-            raise RuntimeError("Tunnellio client is missing. Choose another tunnel mode or restore tunnellio.exe.")
-        if not tunnellio_credentials_available(result):
-            raise RuntimeError(
-                "Tunnellio API token is missing. Restore its saved connection profile "
-                "or choose another tunnel mode in SETUP.bat."
-            )
+        if tunnellio_uses_direct_ssh(result):
+            key_path = Path(str(result.get("ssh_key", "") or result.get("tunnellio_key", ""))).expanduser()
+            if not key_path.is_file():
+                raise RuntimeError(f"Tunnellio private SSH key not found: {key_path}")
+        else:
+            if not tunnellio_executable_path(result).is_file():
+                raise RuntimeError("Tunnellio client is missing. Choose another tunnel mode or restore tunnellio.exe.")
+            if not tunnellio_credentials_available(result):
+                raise RuntimeError(
+                    "Tunnellio API token is missing. Restore its saved connection profile "
+                    "or choose another tunnel mode in SETUP.bat."
+                )
     return result
 
 
@@ -3042,17 +3287,22 @@ def run() -> int:
         return 1
     finally:
         if tunnel is not None and tunnel.poll() is None:
-            if tunnel_backend(config) == "tunnellio":
-                with contextlib.suppress(Exception):
-                    request_tunnellio_stop(config, tunnellio_runtime_name(config), force=True)
-            stop_pid(
-                tunnel.pid,
-                "tunnellio.exe"
-                if tunnel_backend(config) == "tunnellio"
-                else sish_tunnel_match(config)
-                if tunnel_backend(config) == "sish"
-                else "serveo.net",
-            )
+            resolved = connection_runtime.active_or_none()
+            if resolved is not None:
+                connection_runtime.stop_circuit(resolved)
+                stop_pid(tunnel.pid, resolved.circuit.process_match(resolved.settings))
+            else:
+                if tunnel_backend(config) == "tunnellio":
+                    with contextlib.suppress(Exception):
+                        request_tunnellio_stop(config, tunnellio_runtime_name(config), force=True)
+                stop_pid(
+                    tunnel.pid,
+                    "tunnellio.exe"
+                    if tunnel_backend(config) == "tunnellio"
+                    else sish_tunnel_match(config)
+                    if tunnel_backend(config) == "sish"
+                    else "serveo.net",
+                )
         if server is not None and server.poll() is None:
             stop_pid(server.pid, "server.py")
         if server_log is not None:
@@ -3061,6 +3311,41 @@ def run() -> int:
 
 
 
+def doctor(cleanup: bool = False) -> int:
+    """Show tunnel processes and optionally clean up orphans.
+
+    Killing a launcher window can leave its ssh/tunnellio child alive, still
+    holding a relay port. Those leftovers are invisible in a raw task list, so
+    this command names them and says which one the running launcher owns.
+    """
+    workspace = ""
+    resolved = connection_runtime.active_or_none()
+    if resolved is not None:
+        workspace = str(resolved.area.get("workspace", ""))
+    else:
+        workspace = str(load_json(CONFIG_FILE).get("workspace", ""))
+
+    processes = tunnel_diagnostics.scan(RUNTIME_FILE, workspace=workspace)
+    print()
+    print(tunnel_diagnostics.report(processes))
+    stray = tunnel_diagnostics.orphans(processes)
+    if not stray:
+        return 0
+    if not cleanup:
+        print()
+        print("Run DOCTOR.bat --cleanup to stop the orphaned processes above.")
+        return 0
+    print()
+    for process in stray:
+        if not yes_no(f"Stop orphaned pid {process.pid} ({process.image})?", True):
+            continue
+        ok, message = tunnel_diagnostics.terminate(process.pid)
+        if not ok:
+            ok, message = tunnel_diagnostics.terminate(process.pid, force=True)
+        print(f"  {message}")
+    return 0
+
+
 def mask_token(token: str) -> str:
 
     if len(token) <= 10:
@@ -3108,6 +3393,19 @@ def show_connection(full: bool) -> int:
 
 
 def tunnel_setup() -> int:
+    """Kept for backward compatibility; connection setup now lives in PROFILES.
+
+    Editing tunnel fields in the flat config is exactly what used to leak
+    settings between modes, so this entry point defers to the profile script.
+    """
+    print("\nTunnel settings moved to the connection profile setup in 2.4.0.")
+    print("Opening it now (same as running PROFILES.bat).\n")
+    import profiles_setup
+
+    return profiles_setup.main([])
+
+
+def legacy_tunnel_setup() -> int:
     config = load_json(CONFIG_FILE)
     if not config:
         print("Run setup first: the base configuration does not exist yet.")
@@ -3362,6 +3660,12 @@ def main() -> int:
 
     )
 
+    parser.add_argument("--profiles", action="store_true", help="configure connection profiles (same as PROFILES.bat)")
+
+    parser.add_argument("--doctor", action="store_true", help="show tunnel processes and spot orphaned ones")
+
+    parser.add_argument("--cleanup", action="store_true", help="with --doctor: offer to stop orphaned tunnel processes")
+
     parser.add_argument("--oauth", action="store_true", help="configure auth mode (legacy/oauth/dual)")
 
     parser.add_argument("--register-oauth-client", action="store_true", help="pre-register an OAuth client for BYO OAuth app flows")
@@ -3387,6 +3691,16 @@ def main() -> int:
     if args.show:
 
         return show_connection(args.full)
+
+    if args.doctor:
+
+        return doctor(cleanup=args.cleanup)
+
+    if args.profiles:
+
+        import profiles_setup
+
+        return profiles_setup.main([])
 
     if args.oauth:
 

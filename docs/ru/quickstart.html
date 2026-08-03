@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.3.0</small>
+        <small>документация для начинающих · v2.4.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -66,13 +66,17 @@
 
 <ol class="steps">
   <li><strong>Распакуйте архив</strong><br>Положите папку проекта в место без кириллических/проблемных символов в пути, если возможно.</li>
-  <li><strong>Запустите <code>START.bat</code></strong><br>Двойной клик в Windows. На Linux/macOS используйте <code>./start.sh</code> или <code>python launcher.py</code>.</li>
-  <li><strong>Выберите workspace</strong><br>Это папка, в которой агент сможет работать. Для начала выберите отдельную тестовую папку.</li>
-  <li><strong>Выберите tunnel mode</strong><br>Если есть <code>tunnellio.exe</code>, обычно выбирайте Tunnellio. Если нет — Serveo temporary для пробы.</li>
-  <li><strong>Оставьте trusted developer mode выключенным</strong><br>Пока вам нужны только файлы — отвечайте <code>n</code>.</li>
+  <li><strong>Выберите профиль подключения</strong><br>Запустите <code>PROFILES.bat</code> и посмотрите список. Два профиля готовы сразу и ничего не спрашивают: <strong>Tunnellio direct TCP bridge</strong> и <strong>Serveo temporary domain</strong>. Для первого запуска берите любой из них.</li>
+  <li><strong>Настройте рабочую область</strong><br>Запустите <code>SETUP.bat</code>. Он спросит три вещи: папку, режим доступа и профиль подключения из готовых.</li>
+  <li><strong>Оставьте file-only режим</strong><br>Пока вам нужны только файлы, выбирайте <code>file_only</code>. Trusted developer mode включите позже, когда понадобится запуск команд.</li>
+  <li><strong>Запустите <code>START.bat</code></strong><br>Он спросит только рабочую область, если их несколько. Никаких вопросов про туннели, ключи и домены при старте больше нет.</li>
   <li><strong>Скопируйте параметры подключения</strong><br>Launcher покажет URL и токен либо OAuth endpoints. Также можно открыть <code>SHOW_CONNECTION.bat</code>.</li>
   <li><strong>Добавьте Custom MCP в клиенте</strong><br>Для legacy/Bearer укажите URL <code>https://.../mcp</code> и Authorization=Bearer &lt;token&gt; (Bearer token). Для OAuth используйте OAuth flow клиента.</li>
 </ol>
+
+<div class="callout info">
+  <strong>Нужен постоянный адрес?</strong> Сгенерируйте SSH-ключ и зарезервируйте имя в аккаунте Serveo или в кабинете Tunnellio, затем настройте профиль <strong>Serveo stable</strong> или <strong>Tunnellio stable</strong> в <code>PROFILES.bat</code>: скрипт спросит только ключ и имя. Либо возьмите <strong>Tunnellio random</strong>, там нужен только API-ключ.
+</div>
 
 <div class="callout info">
   <strong>Не закрывайте окно сервера.</strong> Пока окно запущено, туннель и MCP доступны. Если закрыли — запустите <code>START.bat</code> снова.

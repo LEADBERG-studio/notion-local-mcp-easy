@@ -1,3 +1,52 @@
+## 2.4.0 - 2026-08-03
+
+### Connection rebuild
+
+- **One permanent connection record.** `current-connection.json` now holds every work area, its access mode, its connection profile and its credentials. The old mix of `config.json`, `connection-profiles.json`, `workflow-profiles.json` and `connections.cfg` no longer competes for authority.
+- **Independent circuits.** Every connection technology lives in its own module under `connections/circuits/` with a private settings namespace, its own validation, command builder, URL resolution, health path, retry policy and shutdown. A circuit cannot read, require or rewrite another circuit's fields.
+- **Immutable blueprints.** Each circuit ships a read-only example in `connections/defaults/<id>.json`. A profile is created by cloning its blueprint, so a freshly configured profile is already complete and operators are never asked for plumbing values.
+- **Standalone profile setup.** New `PROFILES.bat` / `profiles_setup.py` is the only writer of connection profiles: configure, verify, inspect the read-only blueprint, reset to blueprint. Also available as `launcher.py --profiles` and `profiles.sh`.
+- **Split responsibilities.** `START.bat` now only asks which work area to run. `SETUP.bat` handles folder, access mode and which configured profile the area uses.
+- **Profiles survive upgrades.** `build_release.py` excludes `connections.cfg`, `connection-profiles*.json` and `current-connection.json`, so unzipping a release over an existing install no longer wipes operator state.
+
+### Tunnel diagnostics
+
+- Added `DOCTOR.bat` / `launcher.py --doctor`: lists every running tunnel process, names what each one forwards, and marks the one the running launcher owns. Killing a launcher window used to leave its `ssh`/`tunnellio` child alive holding a relay port, invisible in a raw task list.
+- `--doctor --cleanup` offers to stop orphaned processes one by one. The live tunnel is never reported as an orphan and is never terminated.
+
+### New and reworked circuits
+
+- Added **Tunnellio direct TCP bridge** to the launcher: keyless native transport, valid with zero configuration, server-issued random domain with no extra conditions, optional reserved domain and optional API token, plus one-shot recovery to a fresh domain when a cached ephemeral domain has expired.
+- **Tunnellio random domain** validates the API token live against the server during setup and refuses to save an unconfirmed token. An authenticated `plan_required` answer counts as valid; only `401`/`invalid_token` is rejected.
+- **Tunnellio stable domain** supports two transports. `ssh` (default) is a direct reverse forward to the Tunnellio edge: no client binary, no API call, maximum robustness. `cli` uses the managed `tunnellio.exe connect` path for supervision and health checks, and is available now that Tunnellio client 0.6.0 stopped demanding an API token for a reserved domain and stopped treating `403 plan_required` as an auth failure. If the managed client cannot start, the circuit falls back to direct SSH once rather than costing the operator their tunnel.
+- **Serveo stable** and **Serveo temporary** are both retained as separate circuits. Temporary needs no input at all; stable asks only for the reserved hostname and the SSH key.
+- **sish** and **reverse proxy** keep their own fields instead of borrowing `serveo_hostname` and `tunnel_domain`.
+
+### Fixes
+
+- Mode is never inferred from files on disk. The presence of `tunnellio.exe` no longer selects the Tunnellio backend, and a leftover hostname no longer selects Serveo.
+- Sensitive values are never restored across modes. The old self-heal read the newest timestamped backup regardless of which mode the values belonged to, which is how a key or domain from one circuit leaked into another.
+- Config backups reduced to a single rolling `config.json.bak`; the timestamped pile is pruned.
+- Interactive prompts no longer spin forever when stdin is closed (service start, CI, piped launch). They abort with a clear message.
+- Removed a stray project-root `config.json` that carried a hardcoded access token.
+- The Tunnellio bridge logic existed twice: once in the launcher circuits and once inside the `ide_gateway` plugin. The plugin now reuses `connections/circuits/_tunnellio_client.py` when importable, keeping its local fallbacks only for the standalone copy that runs inside a model sandbox.
+- Bundled Tunnellio client updated to 0.6.0.
+- `TUNNEL_SETUP` now defers to the profile setup script instead of hand-editing tunnel fields in the flat config.
+
+### Compatibility
+
+- The legacy flat `config.json` is still written for older consumers, but purely as a generated mirror of the active profile. Fields belonging to inactive circuits are always empty.
+- `connections.cfg` remains and stays hand-editable; it is now a mirror of the known work areas.
+- Pre-2.4.0 installations are imported once, conservatively, without rotating any secret and without guessing a mode from ambiguous evidence.
+- Per-area MCP tokens and OAuth owner codes by default, plus an opt-in shared-credentials flag so connection channels can be swapped without re-authorizing MCP clients.
+
+### Tests
+
+- Added `tests/test_connection_circuits.py` (42 tests): per-circuit commands, validation, URL resolution and cross-circuit isolation.
+- Added `tests/test_tunnel_diagnostics.py`: live-versus-orphan classification and safe cleanup.
+- Added `tests/test_connection_store.py` (33 tests): areas, per-area vs shared auth, legacy migration, upgrade safety and release packaging.
+- Full suite: 392 tests OK.
+
 ## 2.3.0 - 2026-08-03
 
 - `ide_gateway` plugin manifest is bumped to `0.4.0` for the new one-command sandbox installer and native Tunnellio transport.

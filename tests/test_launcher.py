@@ -250,7 +250,22 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result["public_url"], "")
         self.assertEqual(result["tunnel_host"], "")
 
-    def test_config_backups_are_limited_to_five(self):
+    def test_config_keeps_exactly_one_rolling_backup(self):
+        """2.4.0: the timestamped backup pile is gone. Stale backups used to be
+        mined for 'missing' values, which leaked settings between modes."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_file = root / "config.json"
+            config_file.write_text(json.dumps({"workspace": "x", "token": "t"}), encoding="utf-8")
+            with mock.patch.object(launcher, "CONFIG_FILE", config_file):
+                for index in range(8):
+                    launcher.save_config({"workspace": f"x-{index}", "token": "t"}, reason=f"t-{index}")
+                timestamped = list(root.glob("config.backup.*.json"))
+                rolling = list(root.glob("config.json.bak"))
+        self.assertEqual(timestamped, [])
+        self.assertEqual(len(rolling), 1)
+
+    def _retired_test_config_backups_are_limited_to_five(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             config_file = root / "config.json"
@@ -304,7 +319,7 @@ class LauncherTests(unittest.TestCase):
 
             ):
 
-                config = launcher.setup(force=False)
+                config = launcher.legacy_setup(force=False)
 
                 saved = launcher.load_connections_cfg()
 
@@ -362,7 +377,7 @@ class LauncherTests(unittest.TestCase):
 
                 with mock.patch("launcher.input", side_effect=["2"]):
 
-                    updated = launcher.setup(force=False)
+                    updated = launcher.legacy_setup(force=False)
 
             self.assertEqual(updated["workspace"], str(workspace_two.resolve()))
 
@@ -400,7 +415,7 @@ class LauncherTests(unittest.TestCase):
 
             ):
 
-                launcher.setup(force=False)
+                launcher.legacy_setup(force=False)
 
             profiles_file = root / "workflow-profiles.json"
 
@@ -558,7 +573,7 @@ class LauncherTests(unittest.TestCase):
 
                 with mock.patch("launcher.input", side_effect=["2"]):
 
-                    updated = launcher.setup(force=False)
+                    updated = launcher.legacy_setup(force=False)
 
             self.assertEqual(updated["workspace"], str(workspace_two.resolve()))
 
@@ -614,7 +629,7 @@ class LauncherTests(unittest.TestCase):
 
                 with mock.patch("launcher.input", side_effect=["0", str(workspace_two)]):
 
-                    updated = launcher.setup(force=False)
+                    updated = launcher.legacy_setup(force=False)
 
                 saved = launcher.load_connections_cfg()
 
@@ -680,7 +695,7 @@ class LauncherTests(unittest.TestCase):
 
                 with mock.patch("launcher.input", side_effect=["0", str(new_workspace), "10"]):
 
-                    updated = launcher.setup(force=False)
+                    updated = launcher.legacy_setup(force=False)
 
                 saved = launcher.load_connections_cfg()
 
@@ -728,7 +743,7 @@ class LauncherTests(unittest.TestCase):
 
                 with mock.patch("launcher.input", side_effect=["q"]):
 
-                    updated = launcher.setup(force=False)
+                    updated = launcher.legacy_setup(force=False)
 
                 saved = launcher.load_connections_cfg()
 
@@ -796,7 +811,7 @@ class LauncherTests(unittest.TestCase):
 
             ):
 
-                config = launcher.setup(force=False)
+                config = launcher.legacy_setup(force=False)
 
             self.assertEqual(config["tunnel_backend"], "serveo")
 
@@ -844,7 +859,7 @@ class LauncherTests(unittest.TestCase):
 
             ):
 
-                config = launcher.setup(force=False)
+                config = launcher.legacy_setup(force=False)
 
             self.assertEqual(config["tunnel_backend"], "serveo")
 
@@ -888,7 +903,7 @@ class LauncherTests(unittest.TestCase):
 
             ):
 
-                config = launcher.setup(force=False)
+                config = launcher.legacy_setup(force=False)
 
             self.assertEqual(config["tunnel_backend"], "custom_proxy")
 
@@ -954,7 +969,7 @@ class LauncherTests(unittest.TestCase):
 
             ):
 
-                config = launcher.setup(force=False)
+                config = launcher.legacy_setup(force=False)
 
             self.assertEqual(config["tunnel_backend"], "sish")
 

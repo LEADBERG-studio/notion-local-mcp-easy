@@ -1,0 +1,19 @@
+{
+  "id": "serveo_temporary",
+  "blueprintVersion": 1,
+  "title": "Serveo temporary domain",
+  "summary": "Zero-setup SSH reverse tunnel. Serveo issues a random public domain that can change after every reconnect.",
+  "asksNothing": true,
+  "settings": {
+    "ssh_host": "serveo.net",
+    "ssh_port": "",
+    "remote_port": 80,
+    "keepalive_interval": 30,
+    "keepalive_count": 3,
+    "strict_host_key_checking": "accept-new",
+    "url_pattern": "https://[a-zA-Z0-9.-]+\\.serveousercontent\\.com",
+    "url_timeout_seconds": 45,
+    "health_path": "/health",
+    "start_attempts": 4
+  }
+}

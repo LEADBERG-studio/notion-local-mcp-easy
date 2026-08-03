@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.3.0</small>
+        <small>документация для начинающих · v2.4.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -81,12 +81,38 @@
 <p>Для файлов <code>.github/workflows/*.yml</code> credential должен иметь permission/scope <code>workflow</code>. Classic PAT: <code>repo</code> + <code>workflow</code>. Fine-grained PAT: <code>Contents: Read and write</code> + <code>Workflows: Read and write</code>.</p>
 
 <h2>Туннель не поднялся</h2>
+<p>Сначала проверьте сам профиль, не запуская сервер: в <code>PROFILES.bat</code> пункт <code>v&lt;номер&gt;</code>. Проверка расскажет, чего не хватает именно этому контуру.</p>
 <ul>
-  <li>Tunnellio: проверьте наличие <code>tunnellio.exe</code> и runtime config.</li>
-  <li>Serveo: проверьте SSH/key/hostname.</li>
-  <li>sish: проверьте DNS wildcard, relay host, SSH key и port.</li>
-  <li>reverse proxy: проверьте HTTPS certificate и proxy_pass на <code>127.0.0.1:8765</code>.</li>
+  <li><strong>Tunnellio bridge:</strong> проверьте наличие <code>tunnellio.exe</code> рядом с <code>launcher.py</code>. Домен и ключ для этого профиля не обязательны.</li>
+  <li><strong>Tunnellio stable:</strong> проверьте, что домен зарезервирован в кабинете, а указанный приватный ключ привязан именно к нему.</li>
+  <li><strong>Tunnellio random:</strong> перепроверьте API-ключ. Профиль не сохраняется, пока сервер его не подтвердил, так что ошибка обычно означает истёкший ключ.</li>
+  <li><strong>Serveo:</strong> проверьте SSH-клиент, путь к приватному ключу и зарезервированное имя.</li>
+  <li><strong>sish:</strong> проверьте DNS wildcard, хост relay, порт и авторизацию ключа на relay.</li>
+  <li><strong>reverse proxy:</strong> проверьте HTTPS-сертификат и proxy_pass на <code>127.0.0.1:8765</code>.</li>
 </ul>
+
+<h2>Туннель занят или порт не освобождается</h2>
+<p>Если окно launcher закрыли принудительно, его дочерний процесс (<code>ssh</code> или <code>tunnellio</code>) мог остаться жив и продолжать держать порт на relay. В обычном списке задач такой процесс не отличить от рабочего.</p>
+<p>Запустите <code>DOCTOR.bat</code>. Он покажет все процессы туннелей, что каждый пробрасывает, когда запущен, и пометит тот, которым владеет текущий launcher:</p>
+<pre><code>Tunnel processes found: 2
+  [LIVE] pid 27228 ssh.exe  forwards mcp:80:127.0.0.1:8765  claimed by https://mcp.tunnellio.site/mcp
+  [orphan] pid 9310 ssh.exe  forwards old:80:127.0.0.1:8765</code></pre>
+<p><code>DOCTOR.bat --cleanup</code> предложит остановить висяки по одному. Живой туннель никогда не помечается как orphan и никогда не останавливается.</p>
+
+<h2>Проблема у провайдера туннеля</h2>
+<p>Если у внешнего сервиса временные проблемы (например, истёк сертификат), launcher <strong>не будет</strong> молча уходить на другой канал. Он скажет прямо, что активный контур не поднялся.</p>
+<p>Что делать: настройте запасной профиль в <code>PROFILES.bat</code>, затем переключите на него рабочую область в <code>SETUP.bat</code>. Это занимает несколько секунд и не требует правки конфигов руками. Токен при смене профиля не меняется.</p>
+<div class="callout info">Самый быстрый запасной вариант — <strong>Tunnellio direct TCP bridge</strong> или <strong>Serveo temporary</strong>: оба не требуют никакой настройки.</div>
+
+<h2>Профиль не выбирается в SETUP</h2>
+<p>В <code>SETUP.bat</code> можно выбрать только настроенный профиль. Если профиль показан как <code>NOT configured</code>, сначала пройдите его в <code>PROFILES.bat</code>.</p>
+
+<h2>После обновления пропали настройки</h2>
+<p>Начиная с 2.4.0 такого быть не должно: <code>current-connection.json</code>, <code>connection-profiles.v2.json</code> и <code>connections.cfg</code> исключены из релизного архива, поэтому распаковка новой версии поверх старой их не затирает.</p>
+<p>Если вы обновляетесь с версии до 2.4.0, старый плоский конфиг импортируется один раз автоматически: токен сохраняется, режим определяется только по явным признакам. Если однозначно определить режим нельзя, профиль не назначается и <code>SETUP.bat</code> попросит выбрать его явно. Это сделано намеренно: раньше система угадывала режим и включала не тот канал.</p>
+
+<h2>Настройка не запускается без консоли</h2>
+<p>Интерактивные скрипты требуют консоль. Если запустить их как службу или через пайп, они завершатся с понятным сообщением, а не зависнут. Запускайте <code>SETUP.bat</code> и <code>PROFILES.bat</code> напрямую.</p>
 
 <h2>Плагины не появились</h2>
 <ul>

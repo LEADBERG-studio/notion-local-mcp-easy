@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.3.0</small>
+        <small>документация для начинающих · v2.4.0</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -61,32 +61,69 @@
       </div>
     </aside>
     <main class="content">
-      <h1>Workflow profiles</h1>
-<p>Workflow profile — это сохранённая рабочая область с режимом доступа, metadata и plugin state.</p>
+      <h1>Профили</h1>
+<p>В продукте два разных вида профилей. Их легко перепутать, поэтому разберём отдельно.</p>
 
-<h2>Зачем это нужно</h2>
+<table><thead><tr><th>Вид</th><th>Про что</th><th>Чем настраивается</th></tr></thead><tbody>
+<tr><td><strong>Профиль подключения</strong></td><td>Как сервер выходит наружу: Serveo, Tunnellio, sish, свой proxy</td><td><code>PROFILES.bat</code></td></tr>
+<tr><td><strong>Рабочая область</strong></td><td>Какая папка, какой режим доступа, какой профиль подключения используется</td><td><code>SETUP.bat</code></td></tr>
+</tbody></table>
+
+<h2>Профили подключения (2.4.0)</h2>
+<p>Каждому виду подключения соответствует свой независимый контур кода со своими настройками и своими правилами. Контур не видит поля чужих контуров, поэтому он не может потребовать ключ от другого режима или преобразовать домен по чужим правилам.</p>
+
+<h3>Неизменяемый прообраз</h3>
+<p>У каждого профиля есть прообраз в <code>connections/defaults/&lt;id&gt;.json</code>. Он едет в релизе, руками не правится и содержит все значения по умолчанию. При первой настройке профиль клонируется из прообраза, поэтому вас спрашивают только то, что действительно нужно именно этому контуру.</p>
+<p>Посмотреть прообраз можно прямо из меню: пункт <code>b&lt;номер&gt;</code>. Вернуть профиль к прообразу: <code>r&lt;номер&gt;</code>.</p>
+
+<h3>Что спрашивает каждый профиль</h3>
+<table><thead><tr><th>Профиль</th><th>Вопросы</th></tr></thead><tbody>
+<tr><td>Serveo stable domain</td><td>Зарезервированное имя и приватный SSH-ключ</td></tr>
+<tr><td>Serveo temporary domain</td><td>Ничего</td></tr>
+<tr><td>Tunnellio stable domain</td><td>Зарезервированный домен и приватный SSH-ключ</td></tr>
+<tr><td>Tunnellio random domain</td><td>API-ключ. Проверяется на сервере до сохранения</td></tr>
+<tr><td>Tunnellio direct TCP bridge</td><td>Ничего. Домен и API-ключ опциональны</td></tr>
+<tr><td>Self-hosted sish relay</td><td>Хост relay, порт, wildcard-домен, subdomain, ключ</td></tr>
+<tr><td>Custom public URL</td><td>Публичный origin</td></tr>
+</tbody></table>
+
+<h3>Меню PROFILES.bat</h3>
+<pre><code>&lt;n&gt;    настроить профиль n
+v&lt;n&gt;   проверить профиль n
+b&lt;n&gt;   показать неизменяемый прообраз профиля n
+r&lt;n&gt;   сбросить профиль n к прообразу
+q      выход</code></pre>
+<p>Есть и неинтерактивный режим:</p>
+<pre><code>python profiles_setup.py --list
+python profiles_setup.py --configure tunnellio_random
+python profiles_setup.py --verify serveo_stable
+python profiles_setup.py --reset sish</code></pre>
+
+<h3>Обновление продукта</h3>
+<div class="callout info">Настроенные профили хранятся в <code>%LOCALAPPDATA%\NotionMcpEasy\connection-profiles.v2.json</code> и <strong>переживают обновление продукта</strong>. Они меняются только когда вы сами запустили <code>PROFILES.bat</code>.</div>
+
+<h2>Рабочие области</h2>
+<p>Постоянная запись обо всех рабочих областях и о том, какая из них активна, лежит в одном файле:</p>
+<pre><code>%LOCALAPPDATA%\NotionMcpEasy\current-connection.json</code></pre>
+<p>Для каждой области хранятся папка, режим доступа, выбранный профиль подключения, порт и учётные данные. Вручную этот файл править не нужно.</p>
+
+<h3>Токены</h3>
+<p>По умолчанию у каждой области свой MCP-токен и свой OAuth owner code, так что разные проекты изолированы. В <code>SETUP.bat</code> есть отдельный вопрос про общие учётные данные: включите его, если хотите переключать каналы подключения, не переподключая MCP-клиентов заново.</p>
+
+<h3>Access mode</h3>
 <ul>
-  <li>Быстро переключаться между проектами.</li>
-  <li>Иметь разные plugin-настройки для разных workspace.</li>
-  <li>Не пересоздавать token при смене папки.</li>
+  <li><code>file_only</code> — безопасный режим без запуска команд.</li>
+  <li><code>trusted</code> — включает allow-listed command execution.</li>
 </ul>
 
 <h2>connections.cfg</h2>
 <pre><code>MENU = on
 PATH[1] = E:\project-a
 PATH[2] = E:\project-b</code></pre>
-<p>Если <code>MENU = on</code>, при старте launcher показывает меню сохранённых путей.</p>
+<p>Файл сохранён для обратной совместимости и по-прежнему правится вручную. Теперь это зеркало известных рабочих областей: источник истины — <code>current-connection.json</code>. При обновлении продукта этот файл больше не перезаписывается.</p>
 
 <h2>workflow-profiles.json</h2>
-<p>Файл хранится в:</p>
-<pre><code>%LOCALAPPDATA%\NotionMcpEasy\workflow-profiles.json</code></pre>
-<p>Обычно его не надо редактировать вручную. Он содержит <code>activeProfileId</code>, список profiles, <code>globalPlugins</code> и plugin state.</p>
-
-<h2>Access mode</h2>
-<ul>
-  <li><code>file_only</code> — безопасный режим без запуска команд.</li>
-  <li><code>trusted</code> — включает allow-listed command execution.</li>
-</ul>
+<p>Legacy-хранилище прежних workflow profiles. Оно остаётся для совместимости со старыми установками и plugin state, но выбор подключения им больше не управляется.</p>
       <footer class="page-footer">
         <p>Локальная документация. Откройте <code>docs/ru/index.html</code> двойным кликом или через любой статический web server.</p>
       </footer>

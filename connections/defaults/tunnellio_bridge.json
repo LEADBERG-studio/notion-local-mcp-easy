@@ -1,0 +1,33 @@
+{
+  "id": "tunnellio_bridge",
+  "blueprintVersion": 1,
+  "title": "Tunnellio direct TCP bridge",
+  "summary": "Keyless native Tunnellio TCP bridge. No SSH key, no key registration. Leave everything empty for a server-issued random domain, or pin a reserved domain.",
+  "operatorPrepares": [
+    "Nothing. Press Enter twice for a random domain.",
+    "Optional: a reserved domain label if you want a fixed URL.",
+    "Optional: an API token if your plan requires one for reserved domains."
+  ],
+  "settings": {
+    "domain": "",
+    "api_token": "",
+    "base_url": "https://api.tunnellio.ru",
+    "client_path": "",
+    "state_dir": "",
+    "runtime_name": "",
+    "public_domain": "tunnellio.site",
+    "watch": true,
+    "health_path": "/health",
+    "health_interval": 10,
+    "health_timeout": 5,
+    "health_failures": 3,
+    "restart_delay": 3,
+    "url_timeout_seconds": 40,
+    "expired_domain_fallback": true,
+    "start_attempts": 3
+  },
+  "notes": {
+    "expired_domain_fallback": "A cached one-day ephemeral domain may expire. When true, the circuit retries once with a fresh random domain instead of failing the start.",
+    "domain": "Empty means the bridge asks the server for a random domain, which needs no extra conditions."
+  }
+}

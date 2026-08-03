@@ -1,0 +1,35 @@
+{
+  "id": "tunnellio_stable",
+  "blueprintVersion": 2,
+  "title": "Tunnellio stable domain",
+  "summary": "Reserved Tunnellio domain bound to your own SSH key. No API token is required in this mode.",
+  "operatorPrepares": [
+    "Generate an SSH key pair yourself.",
+    "Reserve the domain in the Tunnellio cabinet and bind that key to it.",
+    "Provide the private key path and the reserved label here."
+  ],
+  "settings": {
+    "domain": "",
+    "ssh_key": "",
+    "transport": "ssh",
+    "ssh_host": "tunnellio.site",
+    "ssh_port": "2222",
+    "ssh_user": "tunnel",
+    "remote_port": 80,
+    "public_domain": "tunnellio.site",
+    "keepalive_interval": 30,
+    "keepalive_count": 3,
+    "strict_host_key_checking": "accept-new",
+    "client_path": "",
+    "state_dir": "",
+    "runtime_name": "",
+    "watch": true,
+    "cli_fallback_to_ssh": true,
+    "health_path": "/health",
+    "start_attempts": 4
+  },
+  "notes": {
+    "transport": "'ssh' is a direct reverse forward to the Tunnellio edge: no client binary, no API call, maximum robustness. 'cli' uses the managed tunnellio.exe connect path for supervision and health checks; it requires Tunnellio client 0.6.0 or newer, which stopped demanding an API token for a reserved domain and stopped treating 403 plan_required as an auth failure.",
+    "cli_fallback_to_ssh": "When the managed client cannot start, fall back to the direct SSH command once. The reservation is identical either way, so a missing binary should not cost you the tunnel."
+  }
+}

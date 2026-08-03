@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 2.3.0
+# Notion Local MCP Easy 2.4.0
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -26,7 +26,61 @@ python -m pip install -r requirements.txt
 python launcher.py
 ```
 
-4. Follow the prompts to choose a workspace, auth mode, and tunnel mode.
+4. Configure a connection profile, then pick a workspace and access mode.
+
+```bash
+python profiles_setup.py       # build or repair a connection profile
+python launcher.py --setup     # folder, access mode, connection profile
+python launcher.py             # start: only asks which work area to run
+```
+
+## Connection profiles (2.4.0)
+
+Connection handling was rebuilt in 2.4.0. Every connection technology is now an
+independent circuit with its own settings namespace, its own validation and its
+own runtime path. No circuit can read, require or rewrite another circuit's
+fields, so a problem in one channel cannot take the others down with it.
+
+The work is split into three steps:
+
+| Script | Purpose | Prompts |
+| --- | --- | --- |
+| `PROFILES.bat` / `profiles_setup.py` | Build connection profiles | Only what that circuit needs |
+| `SETUP.bat` / `--setup` | Configure a work area | Folder, access mode, profile |
+| `START.bat` / `launcher.py` | Run the server | Work area only |
+
+Seven profiles ship with the product:
+
+1. **Serveo stable domain** — you generate the SSH key and reserve the hostname yourself; the profile asks for those two values only.
+2. **Serveo temporary domain** — asks nothing. Random domain, may change on reconnect.
+3. **Tunnellio stable domain** — you generate the SSH key and reserve the domain yourself; the profile asks for those two values only. Nothing else is required for this mode.
+4. **Tunnellio random domain** — API token only. The setup script validates it against the Tunnellio server and refuses to save an unconfirmed token.
+5. **Tunnellio direct TCP bridge** — keyless native bridge. Valid with zero input: the server issues a random domain. A reserved domain and an API token are optional.
+6. **Self-hosted sish relay** — your own relay host, port, wildcard domain, subdomain and key.
+7. **Custom public URL / reverse proxy** — public origin only, no built-in tunnel.
+
+Key properties:
+
+- Each profile has an immutable blueprint in `connections/defaults/<id>.json`. Blueprints ship with the release, are never hand-edited and supply every default, so a freshly configured profile is already complete.
+- Configured profiles live in `%LOCALAPPDATA%\NotionMcpEasy\connection-profiles.v2.json` and **survive product upgrades**. They change only when the profile setup script runs.
+- Work areas and the active selection live in one permanent file, `current-connection.json`.
+- There is no silent failover between circuits. Switching channels is always an explicit operator action.
+- The legacy `config.json` is still written for backward compatibility, but it is a generated mirror of the active profile. Fields belonging to inactive circuits are always empty.
+- Per-area MCP tokens and OAuth owner codes by default, with an opt-in shared-credentials flag so channels can be swapped without re-authorizing clients.
+
+## Tunnel diagnostics
+
+Killing a launcher window can leave its `ssh` or `tunnellio` child alive, still
+holding a relay port and invisible in a raw task list.
+
+```bash
+DOCTOR.bat              # or: python launcher.py --doctor
+DOCTOR.bat --cleanup    # offer to stop orphaned processes one by one
+```
+
+The report names every tunnel process, what it forwards, when it started, and
+which one the running launcher owns. The live tunnel is never reported as an
+orphan and is never terminated.
 
 ## Shell helpers
 
@@ -36,6 +90,7 @@ On POSIX-like environments, the `.sh` wrappers mirror the Python launcher comman
 ./setup.sh
 ./start.sh
 ./show_connection.sh
+./profiles.sh
 ./tunnel_setup.sh
 ./register_oauth_client.sh
 ./stop.sh
