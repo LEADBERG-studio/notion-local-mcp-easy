@@ -1,3 +1,63 @@
+## 2.4.2 - 2026-08-03
+
+### Transport stability
+
+Two separate causes were killing connections through a tunnel, and neither was a
+bug in the tool code.
+
+- **Bursts of small calls.** Uvicorn's default keep-alive is 5 seconds. A client
+  reusing its HTTP/1.1 connection could send a request on a socket the server was
+  closing at that exact moment; the relay had nothing to forward it to and
+  answered `502 Bad Gateway`. Keep-alive is now 120 seconds by default, which
+  removes the race. Override with `MCP_KEEP_ALIVE_SECONDS`.
+- **Large single responses.** Responses are now gzipped above 1 KB. JSON-RPC
+  payloads are text and shrink by roughly an order of magnitude, so the same
+  answer spends far less time on the wire. Override with `MCP_GZIP_MIN_SIZE`.
+- Added bounded concurrency (`MCP_LIMIT_CONCURRENCY`, default 64), a larger
+  socket backlog (`MCP_SOCKET_BACKLOG`), more header room for proxy metadata
+  (`MCP_MAX_HEADER_BYTES`) and an explicit graceful shutdown window. A tunnel is
+  one TCP path, so refusing excess work is recoverable while a dead transport is
+  not.
+- **Plugin output is now clipped.** Core tools were capped by the server's own
+  decorator, but plugin tools reached the transport unclipped, so one broad query
+  could push megabytes through the tunnel. Same ceiling now applies
+  (`MCP_PLUGIN_OUTPUT_CHARS`).
+- **Database results are capped by default.** 200 rows, 500 characters per cell,
+  with the withheld amount reported and a hint to page. A broad `SELECT` was the
+  easiest way to take the transport down by accident.
+
+### START asks about the folder
+
+The normal setup is one outbound channel registered once in the cloud project,
+with many folders pointed at it. So the folder is the question worth asking.
+
+- START always opens with the work area list and an "add another folder" entry.
+- A folder added at START inherits the standing connection profile instead of
+  asking about protocols again.
+- SETUP asks once whether the chosen profile should become the standing default
+  for folders added later.
+
+### New plugins
+
+- **MySQL / MariaDB** (`plugins/mysql`): connection aliases, table listing,
+  column description, read-only query and a separate `full_access` execute. The
+  read-only tool refuses write statements and stacked statements outright. The
+  password is passed through a private defaults file, never on a command line
+  where any process could read it.
+- **Remote model subagent** (`plugins/subagent`): lets the model in chat talk to
+  another model for prompt and tool testing, or as a delegate. One-shot
+  `subagent_ask`, plus `subagent_start` / `subagent_say` / `subagent_end` for
+  multi-turn work. Endpoint, key and model id live in local config and are never
+  returned by any tool, error or log line; the model id is hidden unless
+  explicitly exposed. Replies are capped, session history is a bounded rolling
+  window, and token usage is reported because that is what costs money.
+- PostgreSQL gained the same row caps and `row_limit` argument.
+- Both new plugins have setup flows in `plugin_setup.py`.
+
+### Tests
+
+- Added `tests/test_transport_hardening.py` and `tests/test_new_plugins.py`.
+
 ## 2.4.1 - 2026-08-03
 
 ### Named connection profiles

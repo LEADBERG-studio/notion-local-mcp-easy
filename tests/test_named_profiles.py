@@ -291,23 +291,34 @@ class QuickStartTests(NamedProfileTestCase):
         )
         store.save_current(current)
 
-    def test_single_area_with_a_profile_asks_nothing(self):
+    def test_start_asks_for_the_folder_and_nothing_else(self):
+        """The folder is the question worth asking.
+
+        The usual setup is one outbound channel registered once, with many
+        folders pointed at it, so START opens on the folder list. Pressing Enter
+        takes the last used one and connects; the protocol is never re-asked.
+        """
         prod = self.stable("Prod MCP", "prod-mcp")
         self.prepare_area(prod["id"])
+        asked = []
 
-        def refuse(_text):
-            raise AssertionError("start_flow asked a question it did not need to ask")
+        def record(text):
+            asked.append(text)
+            return ""  # Enter: keep the highlighted work area
 
-        with mock.patch.object(connection_runtime.flow, "default_prompt", refuse):
+        with mock.patch.object(connection_runtime.flow, "default_prompt", record):
             resolved = connection_runtime.start_flow(PROJECT)
         self.assertEqual(resolved.profile_name, "Prod MCP")
+        self.assertEqual(len(asked), 1)
+        self.assertIn("work area", asked[0].lower())
 
     def test_an_area_without_a_profile_asks_once(self):
         prod = self.stable("Prod MCP", "prod-mcp")
         self.prepare_area()
-        answers = iter(["1"])
+        # Folder choice, then the profile question for an area that has none.
+        answers = iter(["", "1"])
         with mock.patch.object(
-            connection_runtime.flow, "default_prompt", lambda _text: next(answers)
+            connection_runtime.flow, "default_prompt", lambda _text: next(answers, "1")
         ):
             resolved = connection_runtime.start_flow(PROJECT)
         self.assertEqual(resolved.profile_name, prod["name"])

@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from plugins.db_shared import (
+    cap_rows,
     find_connection,
     health_payload,
     normalize_connections,
     parse_params_json,
     parse_tsv,
+    resolve_row_limit,
     run_postgres_sql,
     shell_program_exists,
     sql_literal,
@@ -71,7 +73,8 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
             "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') "
             "ORDER BY 1"
         )
-        return {"connection": alias, "tables": parse_tsv(run_postgres_sql(record, sql))}
+        rows = parse_tsv(run_postgres_sql(record, sql))
+        return {"connection": alias, **cap_rows(rows, resolve_row_limit(arguments))}
 
     if tool_name == "postgres_describe_table":
         raw_table = str(arguments.get("table", ""))
@@ -93,7 +96,8 @@ def invoke(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -
         raise ValueError("sql is required")
     _ensure_no_params(arguments)
     if tool_name == "postgres_query":
-        return {"connection": alias, "rows": parse_tsv(run_postgres_sql(record, sql))}
+        rows = parse_tsv(run_postgres_sql(record, sql))
+        return {"connection": alias, **cap_rows(rows, resolve_row_limit(arguments))}
     if tool_name == "postgres_execute":
         if context.get("effectiveMode") != "full_access":
             raise ValueError("postgres_execute requires full_access under a trusted profile")

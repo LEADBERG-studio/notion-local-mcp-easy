@@ -37,6 +37,7 @@ from mcp.server.auth.routes import TOKEN_PATH
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from plugin_runtime import PluginError, PluginManager
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, JSONResponse
 
@@ -134,6 +135,31 @@ MAX_RESULTS = 1000
 MAX_OUTPUT_CHARS = 10_000
 DEFAULT_READ_LINES = 400
 CHUNK_CHAR_LIMIT = 9_500
+
+# --- Transport hardening -------------------------------------------------
+# The server is almost always reached through a reverse tunnel, and a tunnel
+# punishes two things: idle connection churn and large single responses.
+#
+# Uvicorn's default keep-alive is 5 seconds. A client that reuses its HTTP/1.1
+# connection for a burst of small calls can send a request on a socket the
+# server is closing at that exact moment; the relay has nothing to forward it
+# to and answers 502 Bad Gateway. That is the "many small requests kill the
+# transport" symptom. Holding connections open removes the race entirely.
+KEEP_ALIVE_SECONDS = max(5, int(os.environ.get("MCP_KEEP_ALIVE_SECONDS", "120")))
+# Back-pressure instead of collapse: a tunnel is one TCP path, so accepting an
+# unbounded number of concurrent requests only queues them where nobody can see
+# it. Refusing excess work is recoverable; a dead transport is not.
+LIMIT_CONCURRENCY = max(8, int(os.environ.get("MCP_LIMIT_CONCURRENCY", "64")))
+SOCKET_BACKLOG = max(128, int(os.environ.get("MCP_SOCKET_BACKLOG", "512")))
+# Headers can get large behind proxies that append forwarding metadata.
+H11_MAX_INCOMPLETE_EVENT_SIZE = max(
+    16 * 1024, int(os.environ.get("MCP_MAX_HEADER_BYTES", str(64 * 1024)))
+)
+GRACEFUL_SHUTDOWN_SECONDS = max(1, int(os.environ.get("MCP_GRACEFUL_SHUTDOWN", "5")))
+# Compress anything worth compressing. JSON-RPC payloads are text and shrink by
+# roughly an order of magnitude, which is the cheapest possible fix for "large
+# outputs kill the transport".
+GZIP_MIN_SIZE = max(256, int(os.environ.get("MCP_GZIP_MIN_SIZE", "1024")))
 TEMP_DIRNAME = "temp"
 TEMP_PATH_PREFIX = "@temp/"
 TEMP_FILE_TTL_SECONDS = 24 * 60 * 60
@@ -3159,6 +3185,7 @@ if __name__ == "__main__":
 
     _cleanup_temp_files()
     app = mcp.streamable_http_app()
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
     if AUTH_MODE == AUTH_MODE_LEGACY:
         app.add_middleware(SecurityMiddleware)
     else:
@@ -3182,4 +3209,14 @@ if __name__ == "__main__":
     elif PUBLIC_URL:
         print(f"Public URL: {PUBLIC_URL}")
     _configure_logging()
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=PORT,
+        log_level="info",
+        timeout_keep_alive=KEEP_ALIVE_SECONDS,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+        limit_concurrency=LIMIT_CONCURRENCY,
+        backlog=SOCKET_BACKLOG,
+        h11_max_incomplete_event_size=H11_MAX_INCOMPLETE_EVENT_SIZE,
+    )

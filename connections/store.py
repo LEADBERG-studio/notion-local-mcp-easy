@@ -354,7 +354,36 @@ def default_current() -> dict[str, Any]:
         "activeAreaId": "",
         "areas": {},
         "globalAuth": {"mode": "legacy", "token": "", "oauthOwnerCode": ""},
+        # The standing outbound channel. The common setup is one configured
+        # protocol registered in the cloud project, with many folders pointed
+        # at it, so a new folder should inherit this instead of asking.
+        "defaultProfile": "",
     }
+
+
+def default_profile_id(current: dict[str, Any], profiles_path: Path | None = None) -> str:
+    """The profile a new work area should inherit.
+
+    Explicit default first, then the profile most areas already use, then the
+    only saved profile. Returns an empty string when there is nothing to
+    inherit, in which case the caller must ask.
+    """
+    explicit = find_profile(str(current.get("defaultProfile", "")), profiles_path)
+    if explicit is not None and is_configured(explicit["id"], profiles_path):
+        return explicit["id"]
+    counts: dict[str, int] = {}
+    for area in current.get("areas", {}).values():
+        entry = find_profile(str(area.get("connectionProfile", "")), profiles_path)
+        if entry is not None and is_configured(entry["id"], profiles_path):
+            counts[entry["id"]] = counts.get(entry["id"], 0) + 1
+    if counts:
+        return max(sorted(counts), key=lambda key: counts[key])
+    usable = [entry["id"] for entry in list_profiles(profiles_path) if is_configured(entry["id"], profiles_path)]
+    return usable[0] if len(usable) == 1 else ""
+
+
+def set_default_profile(current: dict[str, Any], profile_id: str) -> None:
+    current["defaultProfile"] = str(profile_id or "")
 
 
 def _normalize_auth(raw: Any) -> dict[str, Any]:
@@ -395,6 +424,7 @@ def load_current(path: Path | None = None) -> dict[str, Any]:
         return current
     current["activeAreaId"] = str(raw.get("activeAreaId", ""))
     current["globalAuth"] = _normalize_auth(raw.get("globalAuth"))
+    current["defaultProfile"] = str(raw.get("defaultProfile", ""))
     areas = raw.get("areas") if isinstance(raw.get("areas"), dict) else {}
     for area_id, entry in areas.items():
         if not isinstance(entry, dict):
@@ -413,6 +443,7 @@ def save_current(current: dict[str, Any], path: Path | None = None) -> Path:
         "activeAreaId": str(current.get("activeAreaId", "")),
         "areas": current.get("areas") or {},
         "globalAuth": _normalize_auth(current.get("globalAuth")),
+        "defaultProfile": str(current.get("defaultProfile", "")),
     }
     return _write_json(path or CURRENT_FILE, payload)
 

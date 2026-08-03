@@ -198,3 +198,115 @@ def parse_tsv(text: str) -> list[dict[str, str]]:
         values = line.split("\t")
         rows.append({header: values[index] if index < len(values) else "" for index, header in enumerate(headers)})
     return rows
+
+# --- Result size guards ---------------------------------------------------
+# A database plugin is the easiest way to take a tunnel down: one broad SELECT
+# can return megabytes. Rows are capped by default and the caller is told what
+# was withheld, so paging is an obvious next step instead of a blind retry.
+DEFAULT_ROW_LIMIT = max(1, int(os.environ.get("MCP_DB_ROW_LIMIT", "") or 200))
+MAX_ROW_LIMIT = max(DEFAULT_ROW_LIMIT, int(os.environ.get("MCP_DB_MAX_ROW_LIMIT", "") or 2000))
+MAX_CELL_CHARS = max(80, int(os.environ.get("MCP_DB_MAX_CELL_CHARS", "") or 500))
+
+
+def resolve_row_limit(arguments: dict[str, Any]) -> int:
+    raw = str(arguments.get("row_limit", "") or "").strip()
+    if not raw:
+        return DEFAULT_ROW_LIMIT
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("row_limit must be an integer") from exc
+    if value <= 0:
+        raise ValueError("row_limit must be positive")
+    return min(value, MAX_ROW_LIMIT)
+
+
+def cap_rows(rows: list[dict[str, str]], limit: int) -> dict[str, Any]:
+    """Trim a result set for transport and report honestly what was cut."""
+    trimmed = []
+    for row in rows[:limit]:
+        cleaned = {}
+        for key, value in row.items():
+            text = "" if value is None else str(value)
+            if len(text) > MAX_CELL_CHARS:
+                text = text[:MAX_CELL_CHARS] + f"...[+{len(text) - MAX_CELL_CHARS} chars]"
+            cleaned[key] = text
+        trimmed.append(cleaned)
+    payload: dict[str, Any] = {"rows": trimmed, "rowCount": len(trimmed)}
+    if len(rows) > limit:
+        payload["truncated"] = True
+        payload["totalRowsSeen"] = len(rows)
+        payload["hint"] = (
+            f"Only the first {limit} rows are shown. Add LIMIT/OFFSET to the query "
+            "or raise row_limit if you really need more."
+        )
+    return payload
+
+
+def mysql_defaults_file(record: dict[str, Any]) -> tuple[list[str], object]:
+    """Pass the password via a temp defaults file, never on the command line.
+
+    Command lines are visible to every process on the machine, so a password in
+    argv is a credential leak. MySQL reads --defaults-extra-file first, which
+    keeps the secret in a file only this user can read.
+    """
+    import tempfile
+
+    password_env = str(record.get("password_env", "")).strip()
+    if not password_env:
+        return [], None
+    secret = os.environ.get(password_env, "")
+    if not secret:
+        raise ValueError(f"Environment variable not set: {password_env}")
+    handle = tempfile.NamedTemporaryFile(
+        "w", suffix=".cnf", delete=False, encoding="utf-8", newline="\n"
+    )
+    handle.write("[client]\npassword=" + secret + "\n")
+    handle.close()
+    try:
+        os.chmod(handle.name, 0o600)
+    except OSError:
+        pass
+    return [f"--defaults-extra-file={handle.name}"], Path(handle.name)
+
+
+def mysql_cli_args(record: dict[str, Any], sql: str, defaults_args: list[str]) -> list[str]:
+    args = [require_program("mysql", label="MySQL"), *defaults_args, "--batch", "--raw"]
+    host = str(record.get("host", "")).strip()
+    if host:
+        args.append(f"--host={host}")
+    port = str(record.get("port", "")).strip()
+    if port:
+        args.append(f"--port={port}")
+    user = str(record.get("user", "")).strip()
+    if user:
+        args.append(f"--user={user}")
+    ssl_mode = str(record.get("ssl_mode", "")).strip()
+    if ssl_mode:
+        args.append(f"--ssl-mode={ssl_mode}")
+    args.extend(["--database=" + str(record["database"]), "--execute=" + sql])
+    return args
+
+
+def run_mysql_sql(record: dict[str, Any], sql: str, *, timeout: int = 60) -> str:
+    defaults_args, temp_path = mysql_defaults_file(record)
+    try:
+        proc = subprocess.run(
+            mysql_cli_args(record, sql, defaults_args),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"MySQL query timed out after {timeout}s") from exc
+    finally:
+        if temp_path is not None:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "mysql command failed").strip()
+        raise ValueError(detail)
+    return proc.stdout.strip()

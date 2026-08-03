@@ -1,0 +1,98 @@
+{
+  "id": "subagent",
+  "display_name": "Remote model subagent",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py",
+  "supported_modes": ["read_only", "full_access"],
+  "capabilities": ["ai", "subagent", "prompt-testing"],
+  "config_schema_version": 1,
+  "required_env": [],
+  "dependencies": [],
+  "required": false,
+  "install_scope_support": "both",
+  "tools": [
+    {
+      "name": "subagent_status",
+      "title": "Subagent status",
+      "description": "Report whether a remote model is configured and list open sessions. Connection details are never returned.",
+      "capability": "subagent.status",
+      "mode_required": "read_only",
+      "input_schema": {"type": "object", "properties": {}},
+      "output_schema": {"type": "object"},
+      "handler_ref": "subagent.status",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "redacted"
+    },
+    {
+      "name": "subagent_ask",
+      "title": "Ask the remote model",
+      "description": "Send one prompt to the configured remote model and return its reply. Use this for a single question with no follow-up.",
+      "capability": "subagent.ask",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "What to ask the remote model."},
+          "system_prompt": {"type": "string", "description": "Optional system prompt for this call. Overrides the configured default."}
+        },
+        "required": ["prompt"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "subagent.ask",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "redacted"
+    },
+    {
+      "name": "subagent_start",
+      "title": "Start a subagent session",
+      "description": "Open a multi-turn conversation with the remote model. Returns a session id to use with subagent_say.",
+      "capability": "subagent.start",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "system_prompt": {"type": "string", "description": "System prompt for the whole session. This is the prompt under test."}
+        }
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "subagent.start",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "redacted"
+    },
+    {
+      "name": "subagent_say",
+      "title": "Send a turn to the subagent",
+      "description": "Send the next turn in an open subagent session. History is kept on this side within a bounded rolling window.",
+      "capability": "subagent.say",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "session": {"type": "string", "description": "Session id from subagent_start."},
+          "prompt": {"type": "string"}
+        },
+        "required": ["session", "prompt"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "subagent.say",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "redacted"
+    },
+    {
+      "name": "subagent_end",
+      "title": "Close a subagent session",
+      "description": "Discard an open subagent session and its history.",
+      "capability": "subagent.end",
+      "mode_required": "read_only",
+      "input_schema": {
+        "type": "object",
+        "properties": {"session": {"type": "string"}},
+        "required": ["session"]
+      },
+      "output_schema": {"type": "object"},
+      "handler_ref": "subagent.end",
+      "safety_tags": ["ai", "read_only"],
+      "diagnostic_visibility": "redacted"
+    }
+  ]
+}

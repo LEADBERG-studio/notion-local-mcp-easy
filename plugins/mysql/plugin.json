@@ -1,69 +1,70 @@
 {
-  "id": "postgres",
-  "display_name": "PostgreSQL",
+  "id": "mysql",
+  "display_name": "MySQL / MariaDB",
   "version": "1.0.0",
   "entrypoint": "plugin.py",
   "supported_modes": ["read_only", "full_access"],
-  "capabilities": ["database", "sql", "query", "postgresql"],
+  "capabilities": ["database", "sql", "query", "mysql", "mariadb"],
   "config_schema_version": 1,
   "required_env": [],
-  "dependencies": ["psql"],
+  "dependencies": ["mysql"],
   "required": false,
   "install_scope_support": "both",
   "tools": [
     {
-      "name": "postgres_list_connections",
-      "title": "PostgreSQL list connections",
-      "description": "List configured PostgreSQL connection aliases for the active profile context.",
+      "name": "mysql_list_connections",
+      "title": "MySQL list connections",
+      "description": "List configured MySQL connection aliases for the active profile context.",
       "capability": "database.list_connections",
       "mode_required": "read_only",
       "input_schema": {"type": "object", "properties": {}},
       "output_schema": {"type": "object"},
-      "handler_ref": "postgres.list_connections",
+      "handler_ref": "mysql.list_connections",
       "safety_tags": ["db", "read_only"],
       "diagnostic_visibility": "full"
     },
     {
-      "name": "postgres_list_tables",
-      "title": "PostgreSQL list tables",
-      "description": "List tables for a configured PostgreSQL connection alias.",
+      "name": "mysql_list_tables",
+      "title": "MySQL list tables",
+      "description": "List tables, types and approximate row counts for a configured MySQL connection alias.",
       "capability": "database.list_tables",
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
         "properties": {
-          "connection": {"type": "string"}
+          "connection": {"type": "string"},
+          "row_limit": {"type": "integer", "description": "Maximum rows to return. Defaults to a transport-safe cap."}
         },
         "required": ["connection"]
       },
       "output_schema": {"type": "object"},
-      "handler_ref": "postgres.list_tables",
+      "handler_ref": "mysql.list_tables",
       "safety_tags": ["db", "read_only"],
       "diagnostic_visibility": "full"
     },
     {
-      "name": "postgres_describe_table",
-      "title": "PostgreSQL describe table",
-      "description": "Describe columns of a table in a configured PostgreSQL connection alias.",
+      "name": "mysql_describe_table",
+      "title": "MySQL describe table",
+      "description": "Describe columns, keys and defaults of a table in a configured MySQL connection alias.",
       "capability": "database.describe_table",
       "mode_required": "read_only",
       "input_schema": {
         "type": "object",
         "properties": {
           "connection": {"type": "string"},
-          "table": {"type": "string"}
+          "table": {"type": "string", "description": "Table name, optionally schema-qualified."}
         },
         "required": ["connection", "table"]
       },
       "output_schema": {"type": "object"},
-      "handler_ref": "postgres.describe_table",
+      "handler_ref": "mysql.describe_table",
       "safety_tags": ["db", "read_only"],
       "diagnostic_visibility": "full"
     },
     {
-      "name": "postgres_query",
-      "title": "PostgreSQL query",
-      "description": "Run a read-only SQL query against a configured PostgreSQL connection alias.",
+      "name": "mysql_query",
+      "title": "MySQL query",
+      "description": "Run a single read-only SQL query. Rows are capped for transport safety; use row_limit or LIMIT/OFFSET to page.",
       "capability": "database.query",
       "mode_required": "read_only",
       "input_schema": {
@@ -77,14 +78,14 @@
         "required": ["connection", "sql"]
       },
       "output_schema": {"type": "object"},
-      "handler_ref": "postgres.query",
+      "handler_ref": "mysql.query",
       "safety_tags": ["db", "read_only"],
       "diagnostic_visibility": "full"
     },
     {
-      "name": "postgres_execute",
-      "title": "PostgreSQL execute",
-      "description": "Run a mutating SQL statement against a configured PostgreSQL connection alias.",
+      "name": "mysql_execute",
+      "title": "MySQL execute",
+      "description": "Run a mutating SQL statement against a configured MySQL connection alias. Requires full_access.",
       "capability": "database.execute",
       "mode_required": "full_access",
       "input_schema": {
@@ -92,13 +93,12 @@
         "properties": {
           "connection": {"type": "string"},
           "sql": {"type": "string"},
-          "row_limit": {"type": "integer"},
           "params_json": {"type": "string"}
         },
         "required": ["connection", "sql"]
       },
       "output_schema": {"type": "object"},
-      "handler_ref": "postgres.execute",
+      "handler_ref": "mysql.execute",
       "safety_tags": ["db", "full_access"],
       "diagnostic_visibility": "full"
     }

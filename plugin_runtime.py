@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import importlib.util
 import inspect
+import functools
 import json
 import os
 from pathlib import Path
@@ -449,6 +450,38 @@ def build_plugin_states(
     return states
 
 
+PLUGIN_OUTPUT_CHAR_LIMIT = max(
+    2_000, int(os.environ.get("MCP_PLUGIN_OUTPUT_CHARS", "") or 10_000)
+)
+
+
+def clip_plugin_output(handler: Any, *, plugin_id: str, name: str) -> Any:
+    """Cap what a plugin tool can push through the transport.
+
+    The limit is a transport guard, not a data policy: the message says how much
+    was withheld and suggests narrowing the request, so the caller can page
+    instead of retrying the same oversized query.
+    """
+
+    @functools.wraps(handler)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        result = handler(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        if not isinstance(result, str):
+            return result
+        if len(result) <= PLUGIN_OUTPUT_CHAR_LIMIT:
+            return result
+        return (
+            result[:PLUGIN_OUTPUT_CHAR_LIMIT]
+            + f"\n\n... [{name} output truncated: {len(result):,} chars total, showing "
+            f"first {PLUGIN_OUTPUT_CHAR_LIMIT:,}. Narrow the request, add a LIMIT, "
+            "or select fewer columns.]"
+        )
+
+    return wrapper
+
+
 def register_plugin_tools(
     *,
     mcp: Any,
@@ -496,6 +529,12 @@ def register_plugin_tools(
                     state=state,
                     profile_context=profile_context,
                 )
+                # Plugin output used to reach the transport unclipped, so one
+                # broad query (SELECT * on a big table) could push megabytes
+                # through a tunnel and take the connection down. Core tools are
+                # clipped by the server's own decorator; plugins get the same
+                # ceiling here.
+                handler = clip_plugin_output(handler, plugin_id=plugin_id, name=descriptor["name"])
                 mcp.tool(
                     name=descriptor["name"],
                     title=descriptor["title"],

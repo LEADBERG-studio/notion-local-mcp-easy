@@ -153,6 +153,68 @@ def collect_postgres_config(existing: dict[str, Any]) -> dict[str, Any]:
             break
     return {"connections": connections}
 
+def collect_mysql_config(existing: dict[str, Any]) -> dict[str, Any]:
+    print("MySQL setup: use password_env, never store passwords in plugin config.")
+    print("The password is passed to the client through a private defaults file,")
+    print("never on a command line where other processes could read it.")
+    connections = []
+    old = existing.get("connections") if isinstance(existing.get("connections"), list) else []
+    while True:
+        prev = old[len(connections)] if len(connections) < len(old) and isinstance(old[len(connections)], dict) else {}
+        name = prompt_text("Connection alias", str(prev.get("name", "")) or ("main" if not connections else ""), required=not connections)
+        if not name:
+            break
+        record = {"name": name, "database": prompt_text("Database name", str(prev.get("database", "")), required=True)}
+        for key, label in [("host", "Host"), ("port", "Port"), ("user", "User"), ("password_env", "Password env var"), ("ssl_mode", "SSL mode")]:
+            value = prompt_text(label, str(prev.get(key, "")))
+            if value:
+                record[key] = value
+        connections.append(record)
+        if not prompt_bool("Add another MySQL connection?", False):
+            break
+    return {"connections": connections}
+
+
+def collect_subagent_config(existing: dict[str, Any]) -> dict[str, Any]:
+    print("Subagent setup: the endpoint, key and model stay in this local config.")
+    print("They are never returned by any tool, so the model in chat can use the")
+    print("remote model without ever seeing how to reach it.")
+    config: dict[str, Any] = {
+        "base_url": prompt_text(
+            "Remote base URL (OpenAI-compatible, ending in /v1)",
+            str(existing.get("base_url", "")),
+            required=True,
+        ),
+        "model": prompt_text("Remote model id", str(existing.get("model", "")), required=True),
+    }
+    env_name = prompt_text(
+        "Key environment variable name (recommended, Enter to paste the key instead)",
+        str(existing.get("api_key_env", "")),
+    )
+    if env_name:
+        config["api_key_env"] = env_name
+    else:
+        key = prompt_text("API key", str(existing.get("api_key", "")))
+        if key:
+            config["api_key"] = key
+    system_prompt = prompt_text("Default system prompt (optional)", str(existing.get("system_prompt", "")))
+    if system_prompt:
+        config["system_prompt"] = system_prompt
+    for key, label in [
+        ("reply_char_limit", "Reply character limit"),
+        ("timeout_seconds", "Request timeout in seconds"),
+        ("history_turns", "Session history turns to keep"),
+        ("max_output_tokens", "Max output tokens"),
+    ]:
+        value = prompt_text(label, str(existing.get(key, "")))
+        if value:
+            config[key] = value
+    config["expose_model"] = prompt_bool(
+        "Reveal the remote model id in tool output?", bool(existing.get("expose_model", False))
+    )
+    return config
+
+
 def collect_openai_compat_config(existing: dict[str, Any]) -> dict[str, Any]:
     print("OpenAI-compatible setup: API keys are referenced by environment variable name.")
     providers = []
@@ -304,6 +366,10 @@ def collect_config(plugin_id: str, existing: dict[str, Any]) -> dict[str, Any]:
         return collect_sqlite_config(base)
     if plugin_id == "postgres":
         return collect_postgres_config(base)
+    if plugin_id == "mysql":
+        return collect_mysql_config(base)
+    if plugin_id == "subagent":
+        return collect_subagent_config(base)
     if plugin_id == "openai_compat":
         return collect_openai_compat_config(base)
     if plugin_id == "ide_gateway":

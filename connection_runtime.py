@@ -183,6 +183,12 @@ def setup_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
         connection_profile=profile_id,
         use_global_auth=use_global,
     )
+    # Remember this as the standing channel, so folders added later at START
+    # inherit it instead of asking again.
+    if flow.ask_yes_no(
+        "\nUse this connection profile for folders added later?", True
+    ):
+        store.set_default_profile(current, profile_id)
     store.save_current(current)
     resolved = store.resolve(current, script_dir=script_dir)
     store.save_current(current)
@@ -204,33 +210,77 @@ def _area_line(area: dict[str, Any]) -> list[str]:
     return lines
 
 
-def choose_area(current: dict[str, Any]) -> dict[str, Any]:
-    areas = list(current["areas"].values())
-    if len(areas) == 1:
-        return areas[0]
-    active_id = current.get("activeAreaId", "")
-    print("\n=== Work area ===")
-    for index, area in enumerate(areas, start=1):
-        marker = "  (last used)" if area["id"] == active_id else ""
-        print(f" {index}. {area['displayName']}{marker}")
-        for line in _area_line(area):
-            print(line)
-    default_index = next(
-        (str(i) for i, area in enumerate(areas, start=1) if area["id"] == active_id), "1"
-    )
+def choose_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any]:
+    """START always starts here: which folder do we serve?
+
+    The common setup is one outbound channel registered once in the cloud
+    project, with many folders pointed at it. So the folder is the question
+    worth asking, and the profile is inherited from the standing default.
+    """
     while True:
+        areas = list(current["areas"].values())
+        active_id = current.get("activeAreaId", "")
+        default_profile = store.default_profile_id(current)
+        print("\n=== Work area ===")
+        for index, area in enumerate(areas, start=1):
+            marker = "  (last used)" if area["id"] == active_id else ""
+            print(f" {index}. {area['displayName']}{marker}")
+            for line in _area_line(area):
+                print(line)
+        print(" 0. add another folder")
+        if default_profile:
+            entry = store.get_profile(default_profile)
+            print(f"\n    New folders will use: {entry['name']}")
+        default_index = next(
+            (str(i) for i, area in enumerate(areas, start=1) if area["id"] == active_id), "1"
+        )
         raw = flow.default_prompt(f"\nChoose a work area [{default_index}]: ").strip()
         raw = raw or default_index
+        if raw == "0":
+            added = add_area(current, script_dir)
+            if added is not None:
+                return added
+            continue
         if raw.isdigit() and 1 <= int(raw) <= len(areas):
             return areas[int(raw) - 1]
-        print("   Enter one of the numbers above.")
+        print("   Enter one of the numbers above, or 0 to add a folder.")
+
+
+def add_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any] | None:
+    """Add a folder during START and inherit the standing channel."""
+    workspace = prompt_existing_folder("Folder to serve", Path(script_dir).resolve())
+    known = current["areas"].get(store.area_id_for(workspace))
+    if known is not None:
+        print(f"   That folder is already saved as '{known['displayName']}'.")
+        return known
+    inherited = store.default_profile_id(current)
+    if inherited:
+        entry = store.get_profile(inherited)
+        print(f"   Using the standing connection profile: {entry['name']}")
+        if not flow.ask_yes_no("   Keep it for this folder?", True):
+            inherited = choose_profile()
+    else:
+        inherited = choose_profile()
+    area = store.upsert_area(
+        current,
+        workspace=workspace,
+        access_mode="file_only",
+        connection_profile=inherited,
+    )
+    store.save_current(current)
+    print(
+        f"   Added '{area['displayName']}' in file-only mode. "
+        "Run SETUP.bat if this folder needs trusted developer mode."
+    )
+    return area
 
 
 def start_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) -> ResolvedConnection:
-    """START.bat: pick a work area, then start.
+    """START.bat: pick the folder, then start.
 
-    An area that already has a profile starts immediately. An area without one
-    asks a single question: which saved profile, or create a new one.
+    The folder is the only question in the normal case. The connection profile
+    is inherited from the standing default, and is only asked about when the
+    area has none and nothing can be inherited.
     """
     current = bootstrap(legacy_config)
     if not current["areas"]:
@@ -239,12 +289,18 @@ def start_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
             "mode and a connection profile."
         )
 
-    area = choose_area(current)
+    area = choose_area(current, script_dir)
     current["activeAreaId"] = area["id"]
 
     if store.find_profile(str(area.get("connectionProfile", ""))) is None:
-        print(f"\nWork area '{area['displayName']}' has no usable connection profile yet.")
-        area["connectionProfile"] = choose_profile()
+        inherited = store.default_profile_id(current)
+        if inherited:
+            entry = store.get_profile(inherited)
+            print(f"\nUsing the standing connection profile: {entry['name']}")
+            area["connectionProfile"] = inherited
+        else:
+            print(f"\nWork area '{area['displayName']}' has no usable connection profile yet.")
+            area["connectionProfile"] = choose_profile()
         area["updatedAt"] = store.now_iso()
         store.save_current(current)
 
