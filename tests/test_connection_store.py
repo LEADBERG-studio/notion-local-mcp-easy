@@ -47,16 +47,24 @@ class StoreTestCase(unittest.TestCase):
             patch.stop()
         self._tmp.cleanup()
 
-    def configure_bridge(self):
-        return store.save_profile("tunnellio_bridge", {})
+    def configure_bridge(self, name="Bridge", **settings):
+        # Profiles are named instances now, so the id is passed explicitly here
+        # to keep these tests readable.
+        return store.create_profile(
+            "tunnellio_bridge", name, settings, verified=True, profile_id="tunnellio_bridge"
+        )
 
-    def configure_serveo(self):
+    def configure_serveo(self, name="Serveo stable", hostname="my-mcp", profile_id="serveo_stable"):
         key = self.root / "serveo_key"
         key.write_text("KEY", encoding="utf-8")
         # Mirrors what PROFILES.bat does: a profile is only stored after its
         # own verification step passed.
-        return store.save_profile(
-            "serveo_stable", {"hostname": "my-mcp", "ssh_key": str(key)}, verified=True
+        return store.create_profile(
+            "serveo_stable",
+            name,
+            {"hostname": hostname, "ssh_key": str(key)},
+            verified=True,
+            profile_id=profile_id,
         )
 
 
@@ -77,7 +85,7 @@ class ProfileStorageTests(StoreTestCase):
 
     def test_saving_records_verification_and_timestamps(self):
         entry = self.configure_serveo()
-        self.assertTrue(entry["configuredAt"])
+        self.assertTrue(entry["createdAt"])
         self.assertTrue(entry["updatedAt"])
         self.assertTrue(entry["verifiedAt"])
         self.assertEqual(entry["blueprintVersion"], 1)
@@ -94,6 +102,7 @@ class ProfileStorageTests(StoreTestCase):
         self.assertFalse(store.is_configured("sish"))
 
     def test_foreign_keys_in_stored_json_are_dropped_on_load(self):
+        # A v2 file: one profile per circuit, keyed by circuit id.
         self.profiles_file.write_text(
             json.dumps(
                 {
@@ -119,14 +128,17 @@ class ProfileStorageTests(StoreTestCase):
 
     def test_unknown_circuit_ids_in_storage_are_ignored(self):
         self.profiles_file.write_text(
-            json.dumps({"schemaVersion": 2, "profiles": {"ngrok": {"settings": {}}}}),
+            json.dumps({"schemaVersion": 3, "profiles": {"x": {"circuit": "ngrok", "settings": {}}}}),
             encoding="utf-8",
         )
         self.assertEqual(store.load_profiles()["profiles"], {})
 
     def test_one_rolling_backup_not_a_pile(self):
-        for index in range(4):
-            store.save_profile("reverse_proxy", {"public_url": f"https://n{index}.example.com"})
+        store.create_profile(
+            "reverse_proxy", "Proxy", {"public_url": "https://n0.example.com"}, profile_id="proxy"
+        )
+        for index in range(1, 4):
+            store.update_profile("proxy", settings={"public_url": f"https://n{index}.example.com"})
         backups = list(self.root.glob("connection-profiles.v2.json*"))
         names = sorted(path.name for path in backups)
         self.assertEqual(
@@ -341,7 +353,7 @@ class LegacyMigrationTests(StoreTestCase):
     def test_migration_runs_only_once(self):
         legacy = {"workspace": str(self.workspace), "tunnel_backend": "serveo"}
         store.migrate_legacy(legacy)
-        store.save_profile("serveo_temporary", {})
+        store.create_profile("serveo_temporary", "Temp", {})
         second = store.migrate_legacy(
             {"workspace": str(self.root / "other"), "tunnel_backend": "serveo"}
         )

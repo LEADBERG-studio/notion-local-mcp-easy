@@ -1,20 +1,31 @@
 """Connection profile setup for Notion Local MCP Easy.
 
+A connection profile is a **named instance** of a circuit, not the circuit
+itself. Two folders can use the same protocol with different domains, keys or
+relays, so each combination is saved under its own name and picked from one
+flat numbered list.
+
 This is the only script that writes connection profiles. It is deliberately
 separate from SETUP.bat and START.bat:
 
-* START picks a work area and nothing else.
-* SETUP picks folder, access mode and which configured profile an area uses.
-* PROFILES (this script) is where a profile is actually built or repaired.
+* START picks a work area and starts. If the area already has a profile, that
+  is one keypress.
+* SETUP picks folder, access mode and which saved profile the area uses.
+* PROFILES (this script) is where profiles are built, edited and named.
 
 Profiles survive product upgrades. They only change when this script runs.
 
 Usage:
-    python profiles_setup.py            interactive menu
-    python profiles_setup.py --list     print status and exit
-    python profiles_setup.py --configure <circuit_id>
-    python profiles_setup.py --verify <circuit_id>
-    python profiles_setup.py --reset <circuit_id>
+    python profiles_setup.py               interactive menu
+    python profiles_setup.py --list        print profiles with their settings
+    python profiles_setup.py --new <circuit_id>
+    python profiles_setup.py --edit <profile_id>
+    python profiles_setup.py --verify <profile_id>
+    python profiles_setup.py --rename <profile_id>
+    python profiles_setup.py --duplicate <profile_id>
+    python profiles_setup.py --delete <profile_id>
+    python profiles_setup.py --reset <profile_id>
+    python profiles_setup.py --blueprint <circuit_id>
 """
 
 from __future__ import annotations
@@ -41,65 +52,188 @@ def product_version() -> str:
         return "unknown"
 
 
-def status_label(circuit_id: str) -> str:
-    entry = store.get_profile(circuit_id)
-    if entry is None:
-        active = store.circuit(circuit_id)
-        if not any(question.required for question in active.questions()):
-            return "ready (no input needed)"
-        return "not configured"
-    if not store.is_configured(circuit_id):
-        return "incomplete"
-    return "configured" + (" + verified" if entry.get("verifiedAt") else "")
+def status_label(entry: dict) -> str:
+    if not store.is_configured(entry["id"]):
+        return "INCOMPLETE"
+    return "ready + verified" if entry.get("verifiedAt") else "ready"
 
 
-def print_table() -> list[str]:
-    ids = list(blueprints.available_ids())
+# ------------------------------------------------------------------ printing
+
+
+def print_profiles() -> list[dict]:
+    """The numbered list. Always shows settings, never just a name."""
+    profiles = store.list_profiles()
     print(f"\n=== Connection profiles (Notion Local MCP Easy {product_version()}) ===\n")
+    if not profiles:
+        print(" No profiles yet. Create one with 'n'.\n")
+        return profiles
+    for index, entry in enumerate(profiles, start=1):
+        print(f" {index}. {entry['name']}")
+        print(f"      protocol: {store.circuit(entry['circuit']).title}   status: {status_label(entry)}")
+        for line in store.describe_profile(entry):
+            print(f"      {line}")
+        print("")
+    return profiles
+
+
+def print_circuits() -> list[str]:
+    ids = list(blueprints.available_ids())
+    print("\nAvailable protocols:\n")
     for index, circuit_id in enumerate(ids, start=1):
         active = store.circuit(circuit_id)
-        print(f" {index}. {active.title}")
-        print(f"      id: {circuit_id}   status: {status_label(circuit_id)}")
-        setup_flow.print_summary(active, store.profile_settings(circuit_id))
+        existing = len(store.profiles_for_circuit(circuit_id))
+        suffix = f"   ({existing} profile(s) already)" if existing else ""
+        print(f" {index}. {active.title}{suffix}")
+        print(f"      {active.blueprint.get('summary', active.summary)}")
+        required = [q.prompt for q in active.questions() if q.required]
+        print(f"      asks: {', '.join(required) if required else 'nothing'}")
         print("")
     return ids
 
 
-def configure(circuit_id: str) -> int:
+def pick(items: list, label: str) -> int | None:
+    if not items:
+        return None
+    raw = setup_flow.default_prompt(f"{label} [1-{len(items)}, Enter to cancel]: ").strip()
+    if not raw:
+        return None
+    if raw.isdigit() and 1 <= int(raw) <= len(items):
+        return int(raw) - 1
+    print("   Enter one of the numbers above.")
+    return None
+
+
+# ------------------------------------------------------------------- actions
+
+
+def ask_name(default: str, *, taken_hint: str = "") -> str:
+    if taken_hint:
+        print(f"   {taken_hint}")
+    raw = setup_flow.default_prompt(f"Profile name [{default}]: ").strip()
+    return raw or default
+
+
+def create(circuit_id: str) -> int:
     active = store.circuit(circuit_id)
-    settings = setup_flow.configure_circuit(active, store.profile_settings(circuit_id))
+    settings = setup_flow.configure_circuit(active, active.default_settings())
     print("\nChecking the profile...")
     ok, message = setup_flow.verify_circuit(active, settings)
     print(f"   {message}")
     if not ok:
-        print("\nThe profile was NOT saved. Fix the values and run this step again.")
+        print("\nThe profile was NOT saved. Fix the values and try again.")
         return 1
-    store.save_profile(circuit_id, settings, verified=True)
-    print(f"\nSaved: {store.PROFILES_FILE}")
-    setup_flow.print_summary(active, settings)
+    print("")
+    name = ask_name(
+        store.suggest_profile_name(circuit_id, settings),
+        taken_hint="Give it a name you will recognise in SETUP, for example 'Prod MCP'.",
+    )
+    entry = store.create_profile(circuit_id, name, settings, verified=True)
+    print(f"\nSaved profile '{entry['name']}' in {store.PROFILES_FILE}")
+    for line in store.describe_profile(entry):
+        print(f"   {line}")
     print("\nAssign it to a work area with SETUP.bat when you want to switch over.")
     return 0
 
 
-def verify(circuit_id: str) -> int:
-    active = store.circuit(circuit_id)
-    settings = store.profile_settings(circuit_id)
+def edit(profile_id: str) -> int:
+    entry = store.get_profile(profile_id)
+    if entry is None:
+        print(f"Unknown profile '{profile_id}'.")
+        return 1
+    active = store.circuit(entry["circuit"])
+    print(f"\nCurrent settings of '{entry['name']}':")
+    for line in store.describe_profile(entry):
+        print(f"   {line}")
+    settings = setup_flow.configure_circuit(active, entry["settings"])
+    print("\nChecking the profile...")
     ok, message = setup_flow.verify_circuit(active, settings)
-    print(f"\n{active.title}: {message}")
-    if ok and store.get_profile(circuit_id) is not None:
-        store.save_profile(circuit_id, settings, verified=True)
+    print(f"   {message}")
+    if not ok:
+        print("\nNothing was changed. Fix the values and try again.")
+        return 1
+    updated = store.update_profile(entry["id"], settings=settings, verified=True)
+    print(f"\nUpdated '{updated['name']}'.")
+    for line in store.describe_profile(updated):
+        print(f"   {line}")
+    return 0
+
+
+def verify(profile_id: str) -> int:
+    entry = store.get_profile(profile_id)
+    if entry is None:
+        print(f"Unknown profile '{profile_id}'.")
+        return 1
+    active = store.circuit(entry["circuit"])
+    ok, message = setup_flow.verify_circuit(active, entry["settings"])
+    print(f"\n{entry['name']}: {message}")
+    if ok:
+        store.update_profile(entry["id"], verified=True)
     return 0 if ok else 1
 
 
-def reset(circuit_id: str) -> int:
-    active = store.circuit(circuit_id)
-    if not setup_flow.ask_yes_no(
-        f"Reset '{active.title}' back to the shipped blueprint and drop your answers?", False
-    ):
+def rename(profile_id: str) -> int:
+    entry = store.get_profile(profile_id)
+    if entry is None:
+        print(f"Unknown profile '{profile_id}'.")
+        return 1
+    updated = store.update_profile(entry["id"], name=ask_name(entry["name"]))
+    print(f"Renamed to '{updated['name']}'.")
+    return 0
+
+
+def duplicate(profile_id: str) -> int:
+    """Copy a profile, then change what differs.
+
+    This is the fast path for 'same protocol, different domain or key'.
+    """
+    entry = store.get_profile(profile_id)
+    if entry is None:
+        print(f"Unknown profile '{profile_id}'.")
+        return 1
+    active = store.circuit(entry["circuit"])
+    print(f"\nCopying '{entry['name']}'. Change what differs, keep the rest.")
+    settings = setup_flow.configure_circuit(active, entry["settings"])
+    ok, message = setup_flow.verify_circuit(active, settings)
+    print(f"   {message}")
+    if not ok:
+        print("\nThe copy was NOT saved.")
+        return 1
+    name = ask_name(store.suggest_profile_name(entry["circuit"], settings))
+    created = store.create_profile(entry["circuit"], name, settings, verified=True)
+    print(f"\nCreated '{created['name']}'.")
+    return 0
+
+
+def delete(profile_id: str) -> int:
+    entry = store.get_profile(profile_id)
+    if entry is None:
+        print(f"Unknown profile '{profile_id}'.")
+        return 1
+    users = [
+        area["displayName"]
+        for area in store.load_current()["areas"].values()
+        if str(area.get("connectionProfile", "")) in {entry["id"], entry["circuit"]}
+    ]
+    if users:
+        print(f"\nUsed by work area(s): {', '.join(users)}.")
+        print("They will ask for a new profile at the next start.")
+    if not setup_flow.ask_yes_no(f"Delete profile '{entry['name']}'?", False):
         print("Nothing changed.")
         return 0
-    store.reset_profile(circuit_id)
-    print(f"'{active.title}' is back to its shipped defaults.")
+    store.delete_profile(entry["id"])
+    print(f"Deleted '{entry['name']}'.")
+    return 0
+
+
+def reset(profile_id: str) -> int:
+    entry = store.get_profile(profile_id)
+    label = entry["name"] if entry else profile_id
+    if not setup_flow.ask_yes_no(f"Reset '{label}' back to the shipped blueprint?", False):
+        print("Nothing changed.")
+        return 0
+    store.reset_profile(profile_id)
+    print(f"'{label}' is back to its shipped defaults.")
     return 0
 
 
@@ -109,33 +243,58 @@ def show_blueprint(circuit_id: str) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------- menu
+
+
+def new_profile_flow() -> int:
+    ids = print_circuits()
+    index = pick(ids, "Choose a protocol")
+    return 0 if index is None else create(ids[index])
+
+
+ACTIONS = {
+    "e": ("edit", edit),
+    "v": ("verify", verify),
+    "r": ("rename", rename),
+    "d": ("duplicate", duplicate),
+    "x": ("delete", delete),
+    "z": ("reset to blueprint", reset),
+}
+
+
 def menu() -> int:
     while True:
-        ids = print_table()
+        profiles = print_profiles()
         print("Actions:")
-        print("  <n>    configure profile n")
-        print("  v<n>   verify profile n")
-        print("  b<n>   show the read-only blueprint for profile n")
-        print("  r<n>   reset profile n to the blueprint")
+        print("  n      create a new profile")
+        if profiles:
+            print("  e<n>   edit profile n")
+            print("  v<n>   verify profile n")
+            print("  r<n>   rename profile n")
+            print("  d<n>   duplicate profile n (same protocol, different domain or key)")
+            print("  x<n>   delete profile n")
+            print("  z<n>   reset profile n to its blueprint")
+        print("  b      show a protocol blueprint")
         print("  q      quit")
         raw = setup_flow.default_prompt("\nChoice: ").strip().lower()
         if raw in {"q", "quit", "exit", ""}:
             return 0
-        prefix = raw[0]
-        number = raw[1:] if prefix in {"v", "b", "r"} else raw
-        if not number.isdigit() or not 1 <= int(number) <= len(ids):
-            print("\nUnknown choice.\n")
-            continue
-        circuit_id = ids[int(number) - 1]
         try:
-            if prefix == "v":
-                verify(circuit_id)
-            elif prefix == "b":
-                show_blueprint(circuit_id)
-            elif prefix == "r":
-                reset(circuit_id)
+            if raw == "n":
+                new_profile_flow()
+            elif raw == "b":
+                ids = print_circuits()
+                index = pick(ids, "Show blueprint for")
+                if index is not None:
+                    show_blueprint(ids[index])
+            elif raw[0] in ACTIONS and raw[1:].isdigit():
+                number = int(raw[1:])
+                if not 1 <= number <= len(profiles):
+                    print("\nNo profile with that number.\n")
+                    continue
+                ACTIONS[raw[0]][1](profiles[number - 1]["id"])
             else:
-                configure(circuit_id)
+                print("\nUnknown choice.\n")
         except ConnectionConfigError as exc:
             print(f"\nERROR: {exc}")
         except KeyboardInterrupt:
@@ -144,26 +303,34 @@ def menu() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Configure connection profiles.")
-    parser.add_argument("--list", action="store_true", help="print profile status and exit")
-    parser.add_argument("--configure", metavar="CIRCUIT", default="")
-    parser.add_argument("--verify", metavar="CIRCUIT", default="")
-    parser.add_argument("--reset", metavar="CIRCUIT", default="")
+    parser = argparse.ArgumentParser(description="Create and manage connection profiles.")
+    parser.add_argument("--list", action="store_true", help="print profiles with their settings")
+    parser.add_argument("--new", metavar="CIRCUIT", default="")
+    parser.add_argument("--edit", metavar="PROFILE", default="")
+    parser.add_argument("--verify", metavar="PROFILE", default="")
+    parser.add_argument("--rename", metavar="PROFILE", default="")
+    parser.add_argument("--duplicate", metavar="PROFILE", default="")
+    parser.add_argument("--delete", metavar="PROFILE", default="")
+    parser.add_argument("--reset", metavar="PROFILE", default="")
     parser.add_argument("--blueprint", metavar="CIRCUIT", default="")
     args = parser.parse_args(argv)
 
     try:
         if args.list:
-            print_table()
+            print_profiles()
             return 0
-        if args.configure:
-            return configure(args.configure)
-        if args.verify:
-            return verify(args.verify)
-        if args.reset:
-            return reset(args.reset)
-        if args.blueprint:
-            return show_blueprint(args.blueprint)
+        for flag, handler in (
+            (args.new, create),
+            (args.edit, edit),
+            (args.verify, verify),
+            (args.rename, rename),
+            (args.duplicate, duplicate),
+            (args.delete, delete),
+            (args.reset, reset),
+            (args.blueprint, show_blueprint),
+        ):
+            if flag:
+                return handler(flag)
         return menu()
     except ConnectionSetupAborted as exc:
         print(f"{exc}", file=sys.stderr)

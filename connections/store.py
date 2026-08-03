@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import os
 import secrets
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ LEGACY_CONFIG_FILE = CONFIG_DIR / "config.json"
 LEGACY_PROFILES_FILE = CONFIG_DIR / "connection-profiles.json"
 
 CURRENT_SCHEMA_VERSION = 1
-PROFILES_SCHEMA_VERSION = 2
+PROFILES_SCHEMA_VERSION = 3
 
 ACCESS_MODES = ("file_only", "trusted")
 AUTH_MODES = ("legacy", "oauth", "dual")
@@ -117,27 +118,57 @@ def all_circuits() -> list[Circuit]:
 # ------------------------------------------------------------------ profiles
 
 
+def slugify_profile_name(name: str) -> str:
+    """Stable id for a saved profile, derived from its human name."""
+    cleaned = re.sub(r"[^a-z0-9]+", "-", str(name or "").strip().lower()).strip("-")
+    return cleaned[:48] or "profile"
+
+
 def default_profiles() -> dict[str, Any]:
     return {"schemaVersion": PROFILES_SCHEMA_VERSION, "profiles": {}}
+
+
+def _normalize_profile(profile_id: str, entry: dict[str, Any]) -> dict[str, Any] | None:
+    """One saved profile instance.
+
+    A profile is a named instance of a circuit, not the circuit itself. Two
+    folders can use the same protocol with different domains or keys, so each
+    combination is saved under its own name.
+    """
+    circuit_id = str(entry.get("circuit") or entry.get("id") or profile_id).strip()
+    if circuit_id not in CIRCUIT_CLASSES:
+        return None
+    settings = entry.get("settings") if isinstance(entry.get("settings"), dict) else {}
+    active = circuit(circuit_id)
+    name = str(entry.get("name") or "").strip() or active.title
+    return {
+        "id": str(profile_id),
+        "name": name,
+        "circuit": circuit_id,
+        "settings": active.merge(settings),
+        "blueprintVersion": int(entry.get("blueprintVersion", 1) or 1),
+        "createdAt": str(entry.get("createdAt") or entry.get("configuredAt") or ""),
+        "updatedAt": str(entry.get("updatedAt", "")),
+        "verifiedAt": str(entry.get("verifiedAt", "")),
+        "notes": str(entry.get("notes", "")),
+    }
 
 
 def load_profiles(path: Path | None = None) -> dict[str, Any]:
     raw = _read_json(path or PROFILES_FILE)
     storage = default_profiles()
-    profiles = raw.get("profiles") if isinstance(raw.get("profiles"), dict) else {}
-    for circuit_id, entry in profiles.items():
-        if circuit_id not in CIRCUIT_CLASSES or not isinstance(entry, dict):
+    entries = raw.get("profiles") if isinstance(raw.get("profiles"), dict) else {}
+    version = int(raw.get("schemaVersion", PROFILES_SCHEMA_VERSION) or PROFILES_SCHEMA_VERSION)
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
             continue
-        settings = entry.get("settings") if isinstance(entry.get("settings"), dict) else {}
-        storage["profiles"][circuit_id] = {
-            "id": circuit_id,
-            "settings": circuit(circuit_id).merge(settings),
-            "blueprintVersion": int(entry.get("blueprintVersion", 1) or 1),
-            "configuredAt": str(entry.get("configuredAt", "")),
-            "updatedAt": str(entry.get("updatedAt", "")),
-            "verifiedAt": str(entry.get("verifiedAt", "")),
-            "notes": str(entry.get("notes", "")),
-        }
+        if version < 3 and "circuit" not in entry:
+            # v2 stored exactly one profile per circuit, keyed by circuit id.
+            # Keep that key as the instance id so existing areas still resolve.
+            entry = {**entry, "circuit": str(key)}
+        normalized = _normalize_profile(str(key), entry)
+        if normalized is not None:
+            storage["profiles"][normalized["id"]] = normalized
     return storage
 
 
@@ -149,59 +180,169 @@ def save_profiles(storage: dict[str, Any], path: Path | None = None) -> Path:
     return _write_json(path or PROFILES_FILE, payload)
 
 
-def get_profile(circuit_id: str, path: Path | None = None) -> dict[str, Any] | None:
-    return load_profiles(path).get("profiles", {}).get(circuit_id)
+def list_profiles(path: Path | None = None) -> list[dict[str, Any]]:
+    """All saved profiles, ordered so the console can number them 1..N."""
+    profiles = list(load_profiles(path)["profiles"].values())
+    order = {cid: index for index, cid in enumerate(blueprints.available_ids())}
+    profiles.sort(key=lambda item: (order.get(item["circuit"], 99), item["name"].lower()))
+    return profiles
 
 
-def profile_settings(circuit_id: str, path: Path | None = None) -> dict[str, Any]:
-    """Configured settings, or a pristine blueprint clone when never set up."""
-    entry = get_profile(circuit_id, path)
+def get_profile(profile_id: str, path: Path | None = None) -> dict[str, Any] | None:
+    return load_profiles(path)["profiles"].get(str(profile_id))
+
+
+def find_profile(reference: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Resolve a profile by id, by name, or by circuit id for old areas."""
+    reference = str(reference or "").strip()
+    if not reference:
+        return None
+    profiles = load_profiles(path)["profiles"]
+    if reference in profiles:
+        return profiles[reference]
+    lowered = reference.lower()
+    for entry in profiles.values():
+        if entry["name"].lower() == lowered:
+            return entry
+    # Pre-2.4.1 areas stored a bare circuit id. Only accept it when there is
+    # exactly one profile for that circuit, so the choice is never a guess.
+    matches = [entry for entry in profiles.values() if entry["circuit"] == reference]
+    return matches[0] if len(matches) == 1 else None
+
+
+def profiles_for_circuit(circuit_id: str, path: Path | None = None) -> list[dict[str, Any]]:
+    return [entry for entry in list_profiles(path) if entry["circuit"] == circuit_id]
+
+
+def profile_settings(profile_id: str, path: Path | None = None) -> dict[str, Any]:
+    """Settings of a saved profile, or a pristine blueprint clone."""
+    entry = get_profile(profile_id, path)
+    if entry is not None:
+        return dict(entry["settings"])
+    if str(profile_id) in CIRCUIT_CLASSES:
+        return circuit(str(profile_id)).default_settings()
+    raise ConnectionConfigError(f"Unknown connection profile '{profile_id}'.")
+
+
+def unique_profile_id(name: str, path: Path | None = None) -> str:
+    base = slugify_profile_name(name)
+    taken = set(load_profiles(path)["profiles"])
+    if base not in taken:
+        return base
+    for suffix in range(2, 100):
+        candidate = f"{base}-{suffix}"
+        if candidate not in taken:
+            return candidate
+    return f"{base}-{secrets.token_hex(3)}"
+
+
+def suggest_profile_name(circuit_id: str, settings: dict[str, Any] | None = None) -> str:
+    """A readable default name built from what makes this profile distinct."""
     active = circuit(circuit_id)
-    return active.merge((entry or {}).get("settings"))
+    merged = active.merge(settings)
+    for key in ("domain", "hostname", "subdomain", "public_url"):
+        value = str(merged.get(key, "")).strip()
+        if value:
+            label = value.replace("https://", "").replace("http://", "").strip("/")
+            return f"{active.title} - {label}"
+    return active.title
 
 
-def save_profile(
+def create_profile(
     circuit_id: str,
+    name: str,
     settings: dict[str, Any],
     *,
     verified: bool = False,
+    profile_id: str = "",
     path: Path | None = None,
 ) -> dict[str, Any]:
     active = circuit(circuit_id)
     storage = load_profiles(path)
-    previous = storage["profiles"].get(circuit_id) or {}
+    resolved_id = str(profile_id).strip() or unique_profile_id(name, path)
     entry = {
-        "id": circuit_id,
+        "id": resolved_id,
+        "name": str(name).strip() or active.title,
+        "circuit": circuit_id,
         "settings": active.merge(settings),
         "blueprintVersion": active.blueprint_version,
-        "configuredAt": str(previous.get("configuredAt") or now_iso()),
+        "createdAt": now_iso(),
         "updatedAt": now_iso(),
-        "verifiedAt": now_iso() if verified else str(previous.get("verifiedAt", "")),
-        "notes": str(previous.get("notes", "")),
+        "verifiedAt": now_iso() if verified else "",
+        "notes": "",
     }
-    storage["profiles"][circuit_id] = entry
+    storage["profiles"][resolved_id] = entry
     save_profiles(storage, path)
     return entry
 
 
-def reset_profile(circuit_id: str, path: Path | None = None) -> dict[str, Any]:
-    """Drop operator answers and return to the untouched shipped blueprint."""
+def update_profile(
+    profile_id: str,
+    *,
+    settings: dict[str, Any] | None = None,
+    name: str | None = None,
+    verified: bool | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
     storage = load_profiles(path)
-    storage["profiles"].pop(circuit_id, None)
-    save_profiles(storage, path)
-    return circuit(circuit_id).default_settings()
-
-
-def is_configured(circuit_id: str, path: Path | None = None) -> bool:
-    entry = get_profile(circuit_id, path)
+    entry = storage["profiles"].get(str(profile_id))
     if entry is None:
-        active = circuit(circuit_id)
+        raise ConnectionConfigError(f"Unknown connection profile '{profile_id}'.")
+    active = circuit(entry["circuit"])
+    if settings is not None:
+        entry["settings"] = active.merge(settings)
+    if name is not None and str(name).strip():
+        entry["name"] = str(name).strip()
+    if verified is not None:
+        entry["verifiedAt"] = now_iso() if verified else ""
+    entry["blueprintVersion"] = active.blueprint_version
+    entry["updatedAt"] = now_iso()
+    storage["profiles"][entry["id"]] = entry
+    save_profiles(storage, path)
+    return entry
+
+
+def delete_profile(profile_id: str, path: Path | None = None) -> bool:
+    storage = load_profiles(path)
+    removed = storage["profiles"].pop(str(profile_id), None) is not None
+    if removed:
+        save_profiles(storage, path)
+    return removed
+
+
+def reset_profile(profile_id: str, path: Path | None = None) -> dict[str, Any]:
+    """Drop operator answers and return to the untouched shipped blueprint."""
+    entry = get_profile(profile_id, path)
+    if entry is None:
+        if str(profile_id) in CIRCUIT_CLASSES:
+            return circuit(str(profile_id)).default_settings()
+        raise ConnectionConfigError(f"Unknown connection profile '{profile_id}'.")
+    defaults = circuit(entry["circuit"]).default_settings()
+    update_profile(entry["id"], settings=defaults, verified=False, path=path)
+    return defaults
+
+
+def is_configured(profile_id: str, path: Path | None = None) -> bool:
+    entry = get_profile(profile_id, path)
+    if entry is None:
+        if str(profile_id) not in CIRCUIT_CLASSES:
+            return False
+        active = circuit(str(profile_id))
         return not any(question.required for question in active.questions())
-    return circuit(circuit_id).is_configured(entry.get("settings"))
+    return circuit(entry["circuit"]).is_configured(entry["settings"])
 
 
 def configured_ids(path: Path | None = None) -> list[str]:
-    return [cid for cid in blueprints.available_ids() if is_configured(cid, path)]
+    return [entry["id"] for entry in list_profiles(path) if is_configured(entry["id"], path)]
+
+
+def describe_profile(entry: dict[str, Any]) -> list[str]:
+    """Human-readable settings of a saved profile.
+
+    Setup shows this next to the name: an operator cannot decide whether to
+    change a profile without seeing what is actually in it.
+    """
+    return circuit(entry["circuit"]).summary_lines(entry["settings"])
 
 
 # --------------------------------------------------------------------- areas
@@ -235,7 +376,9 @@ def _normalize_area(raw: dict[str, Any]) -> dict[str, Any]:
         "workspace": workspace,
         "displayName": str(raw.get("displayName") or (Path(workspace).name if workspace else "")),
         "accessMode": access_mode if access_mode in ACCESS_MODES else "file_only",
-        "connectionProfile": profile if profile in CIRCUIT_CLASSES else "",
+        # A profile reference: the id of a saved profile instance. Old areas
+        # may still hold a bare circuit id, which find_profile() resolves.
+        "connectionProfile": profile,
         "port": int(raw.get("port", 8765) or 8765),
         "useGlobalAuth": bool(raw.get("useGlobalAuth", False)),
         "auth": _normalize_auth(raw.get("auth")),
@@ -339,6 +482,11 @@ class ResolvedConnection:
     settings: dict[str, Any]
     auth: dict[str, Any]
     context: RuntimeContext
+    profile: dict[str, Any] | None = None
+
+    @property
+    def profile_name(self) -> str:
+        return str((self.profile or {}).get("name") or self.circuit.title)
 
     @property
     def public_url(self) -> str:
@@ -368,19 +516,26 @@ def resolve(
             "No work area is selected yet. Run SETUP.bat to choose a folder, an access "
             "mode and a connection profile."
         )
-    circuit_id = str(area.get("connectionProfile", "")).strip()
-    if not circuit_id:
+    reference = str(area.get("connectionProfile", "")).strip()
+    if not reference:
         raise ConnectionStoreError(
             f"Work area '{area.get('displayName')}' has no connection profile assigned. "
             "Run SETUP.bat and pick one."
         )
-    if not is_configured(circuit_id, profiles_path):
+    entry = find_profile(reference, profiles_path)
+    if entry is None:
         raise ConnectionStoreError(
-            f"Connection profile '{circuit_id}' is not configured yet. "
-            "Run PROFILES.bat to set it up, then select it in SETUP.bat."
+            f"Connection profile '{reference}' no longer exists. "
+            "Run SETUP.bat to pick another one, or PROFILES.bat to create it."
         )
-    active = circuit(circuit_id)
-    settings = active.validate(profile_settings(circuit_id, profiles_path))
+    if not is_configured(entry["id"], profiles_path):
+        raise ConnectionStoreError(
+            f"Connection profile '{entry['name']}' is not configured yet. "
+            "Run PROFILES.bat to finish it, then select it in SETUP.bat."
+        )
+    active = circuit(entry["circuit"])
+    settings = active.validate(entry["settings"])
+    profile = entry
     auth = effective_auth(current, area)
     workspace = normalize_path(area["workspace"])
     context = RuntimeContext(
@@ -392,7 +547,7 @@ def resolve(
         runtime_name=runtime_name_for(workspace, script_dir),
     )
     return ResolvedConnection(
-        area=area, circuit=active, settings=settings, auth=auth, context=context
+        area=area, circuit=active, settings=settings, auth=auth, context=context, profile=profile
     )
 
 
@@ -435,6 +590,8 @@ def legacy_mirror(
         "auth_mode": resolved.auth["mode"],
         "oauth_owner_code": resolved.auth["oauthOwnerCode"],
         "connection_profile": resolved.circuit.id,
+        "connection_profile_id": str((resolved.profile or {}).get("id", "")),
+        "connection_profile_name": resolved.profile_name,
         "tunnel_mode_preference": resolved.circuit.id,
         "tunnel_backend": resolved.circuit.legacy_backend,
     }
@@ -539,26 +696,26 @@ def migrate_legacy(
     if not workspace:
         return current
     circuit_id = circuit_from_legacy(legacy)
+    profile_reference = ""
     if circuit_id:
-        storage = load_profiles(profiles_path)
-        if circuit_id not in storage["profiles"]:
-            active = circuit(circuit_id)
-            merged = active.merge(settings_from_legacy(circuit_id, legacy))
-            storage["profiles"][circuit_id] = {
-                "id": circuit_id,
-                "settings": merged,
-                "blueprintVersion": active.blueprint_version,
-                "configuredAt": now_iso(),
-                "updatedAt": now_iso(),
-                "verifiedAt": "",
-                "notes": "imported from the pre-2.4.0 flat config",
-            }
-            save_profiles(storage, profiles_path)
+        merged = circuit(circuit_id).merge(settings_from_legacy(circuit_id, legacy))
+        existing = profiles_for_circuit(circuit_id, profiles_path)
+        if existing:
+            profile_reference = existing[0]["id"]
+        else:
+            entry = create_profile(
+                circuit_id,
+                suggest_profile_name(circuit_id, merged),
+                merged,
+                profile_id=circuit_id,
+                path=profiles_path,
+            )
+            profile_reference = entry["id"]
     area = upsert_area(
         current,
         workspace=workspace,
         access_mode="trusted" if legacy.get("allow_commands") else "file_only",
-        connection_profile=circuit_id or None,
+        connection_profile=profile_reference or None,
         port=int(legacy.get("port", 8765) or 8765),
         use_global_auth=False,
     )

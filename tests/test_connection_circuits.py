@@ -65,8 +65,9 @@ class BlueprintTests(unittest.TestCase):
         path = blueprints.blueprint_path("serveo_stable")
         before = path.read_bytes()
         with tempfile.TemporaryDirectory() as tmp:
-            store.save_profile(
+            store.create_profile(
                 "serveo_stable",
+                "Unit",
                 {"hostname": "unit", "ssh_key": "x"},
                 path=Path(tmp) / "profiles.json",
             )

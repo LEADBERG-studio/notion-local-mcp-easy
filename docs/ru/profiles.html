@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.4.0</small>
+        <small>документация для начинающих · v2.4.1</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -69,7 +69,47 @@
 <tr><td><strong>Рабочая область</strong></td><td>Какая папка, какой режим доступа, какой профиль подключения используется</td><td><code>SETUP.bat</code></td></tr>
 </tbody></table>
 
-<h2>Профили подключения (2.4.0)</h2>
+<h2>Профили подключения</h2>
+<div class="callout info"><strong>Профиль это именованный экземпляр протокола.</strong> Один и тот же протокол можно сохранить несколько раз с разными доменами и ключами. Например, <code>Prod MCP</code> и <code>Staging MCP</code> оба Tunnellio stable, но с разными резервациями. Так две папки работают по одному протоколу, не мешая друг другу.</div>
+
+<h3>Один список, выбор в одно движение</h3>
+<p>Все сохранённые профили лежат в одном пронумерованном списке. И в <code>PROFILES.bat</code>, и в <code>SETUP.bat</code>, и при старте без профиля выбор делается номером <code>1-N</code>. В списке всегда показаны сами настройки, а не только имя: без содержимого нельзя решить, какой профиль нужен и что в нём менять.</p>
+<pre><code> 1. Prod MCP
+      protocol: Tunnellio stable domain   status: ready + verified
+      Domain: prod-mcp
+      SSH key: C:\Users\me\.ssh\mcp
+      Public URL: https://prod-mcp.tunnellio.site
+
+ 2. Staging MCP
+      protocol: Tunnellio stable domain   status: ready + verified
+      Domain: staging
+      SSH key: C:\Users\me\.ssh\staging
+      Public URL: https://staging.tunnellio.site</code></pre>
+
+<h3>Как создаётся профиль</h3>
+<ol class="steps">
+  <li>В <code>PROFILES.bat</code> нажмите <code>n</code>.</li>
+  <li>Выберите протокол. Скрипт спросит только то, что нужно именно ему, остальное возьмёт из неизменяемого прообраза.</li>
+  <li>Профиль проверяется, и только потом сохраняется.</li>
+  <li>Дайте ему понятное имя. Имя предлагается автоматически по отличительному признаку, например <code>Tunnellio stable domain - prod-mcp</code>.</li>
+</ol>
+<p>Нужен второй профиль на том же протоколе? Пункт <code>d&lt;номер&gt;</code> копирует существующий: меняете только то, что отличается, и сохраняете под новым именем.</p>
+
+<h3>Что можно делать с профилем</h3>
+<pre><code>n      создать новый профиль
+e&lt;n&gt;   изменить настройки профиля n
+v&lt;n&gt;   проверить профиль n
+r&lt;n&gt;   переименовать профиль n
+d&lt;n&gt;   скопировать профиль n (тот же протокол, другой домен или ключ)
+x&lt;n&gt;   удалить профиль n
+z&lt;n&gt;   сбросить профиль n к прообразу
+b      показать прообраз протокола
+q      выход</code></pre>
+<p>Без меню:</p>
+<pre><code>python profiles_setup.py --list
+python profiles_setup.py --new tunnellio_stable
+python profiles_setup.py --edit prod-mcp
+python profiles_setup.py --duplicate prod-mcp</code></pre>
 <p>Каждому виду подключения соответствует свой независимый контур кода со своими настройками и своими правилами. Контур не видит поля чужих контуров, поэтому он не может потребовать ключ от другого режима или преобразовать домен по чужим правилам.</p>
 
 <h3>Неизменяемый прообраз</h3>

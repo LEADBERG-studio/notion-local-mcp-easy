@@ -14,7 +14,7 @@
       <span class="brand-mark">MCP</span>
       <span>
         <strong>Notion Local MCP Easy</strong>
-        <small>документация для начинающих · v2.4.0</small>
+        <small>документация для начинающих · v2.4.1</small>
       </span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Открыть меню">☰</button>
@@ -78,7 +78,7 @@
 
 <h2>Скрипты</h2>
 <table><thead><tr><th>Скрипт</th><th>Что спрашивает</th></tr></thead><tbody>
-<tr><td><code>PROFILES.bat</code></td><td>Только то, что нужно конкретному контуру</td></tr>
+<tr><td><code>PROFILES.bat</code></td><td>Только то, что нужно протоколу. Создание, правка, копия, переименование</td></tr>
 <tr><td><code>SETUP.bat</code></td><td>Папка, режим доступа, профиль подключения</td></tr>
 <tr><td><code>START.bat</code></td><td>Только рабочую область</td></tr>
 <tr><td><code>DOCTOR.bat</code></td><td>Ничего. Показывает процессы туннелей и висяки</td></tr>
@@ -100,10 +100,14 @@ reverse_proxy       публичный origin</code></pre>
 
 <h2>Настройка профилей без меню</h2>
 <pre><code>python profiles_setup.py --list
-python profiles_setup.py --configure &lt;id&gt;
-python profiles_setup.py --verify &lt;id&gt;
-python profiles_setup.py --blueprint &lt;id&gt;
-python profiles_setup.py --reset &lt;id&gt;</code></pre>
+python profiles_setup.py --new &lt;protocol&gt;
+python profiles_setup.py --edit &lt;profile&gt;
+python profiles_setup.py --verify &lt;profile&gt;
+python profiles_setup.py --rename &lt;profile&gt;
+python profiles_setup.py --duplicate &lt;profile&gt;
+python profiles_setup.py --delete &lt;profile&gt;
+python profiles_setup.py --reset &lt;profile&gt;
+python profiles_setup.py --blueprint &lt;protocol&gt;</code></pre>
 
 <h2>OAuth endpoints</h2>
 <pre><code>/.well-known/oauth-authorization-server

@@ -1,3 +1,46 @@
+## 2.4.1 - 2026-08-03
+
+### Named connection profiles
+
+A connection profile is now a **named instance** of a protocol, not one profile
+per protocol. The case that drove this: two folders speaking the same protocol
+against different domains, with different keys.
+
+- Profiles have their own names and ids, so `Prod MCP` and `Staging MCP` can both
+  be `tunnellio_stable` with different domains and keys.
+- One flat numbered list everywhere: pick `1-N` and connect in a single move.
+- Every list shows the actual settings, not just a name. Choosing between two
+  profiles is impossible if you cannot see which domain and key each carries.
+- `PROFILES.bat` gained create, edit, rename, duplicate, delete, verify, reset
+  and blueprint view. Duplicate is the fast path for "same protocol, different
+  domain": copy, change what differs, save under a new name.
+- New profiles are named for you from what makes them distinct, for example
+  `Tunnellio stable domain - prod-mcp`. The name is editable.
+- A profile can be selected by number or by name.
+- An incomplete profile can never be selected for a work area.
+- `START.bat` is a quick start: an area that already has a profile asks nothing.
+  An area without one asks a single question, offering the saved profiles plus
+  "create a new profile" inline.
+- The active profile name is shown at startup and written into the connection
+  info, so it is obvious which channel is live.
+- Deleting a profile that a work area uses is reported, and that area asks for a
+  new profile at the next start instead of failing silently.
+
+### Compatibility
+
+- Profile storage moved to schema 3. Version 2 files, which held one profile per
+  circuit keyed by circuit id, are imported automatically: the circuit id is
+  kept as the instance id so existing work areas keep resolving.
+- A work area still pointing at a bare circuit id resolves when exactly one
+  profile exists for that circuit, and asks for an explicit choice otherwise.
+  Ambiguity is never guessed.
+- The legacy mirror gained `connection_profile_id` and `connection_profile_name`.
+
+### Tests
+
+- Added `tests/test_named_profiles.py`: instances, listing, area binding, v2
+  migration, quick start and selection rules.
+
 ## 2.4.0 - 2026-08-03
 
 ### Connection rebuild

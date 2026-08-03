@@ -2,14 +2,19 @@
 
 Responsibilities are split on purpose:
 
-* :func:`start_flow` is what START.bat uses. It only lets the operator pick a
-  work area. No questions about tunnels, keys, domains or tokens.
+* :func:`start_flow` is what START.bat uses. Pick a work area and go. If the
+  area already has a connection profile, that is the whole interaction. If it
+  does not, the operator picks a saved profile or creates one right there.
 * :func:`setup_flow` is what SETUP.bat uses: folder, access mode, and which
-  already-configured connection profile the area should use.
+  saved profile the area should use.
 * Profiles themselves are built by ``profiles_setup.py`` (PROFILES.bat).
 
-The launcher keeps working with a flat config dict. That dict is now a
-generated mirror of the resolved connection, never a source of truth.
+Every profile list shows the actual settings, not just a name. Choosing between
+"Prod MCP" and "Staging MCP" is impossible if you cannot see which domain and
+key each one carries.
+
+The launcher keeps working with a flat config dict. That dict is a generated
+mirror of the resolved connection, never a source of truth.
 """
 
 from __future__ import annotations
@@ -61,39 +66,64 @@ def prompt_existing_folder(label: str, default: Path) -> Path:
         print(f"   Folder does not exist: {candidate}")
 
 
-def profile_status_line(circuit_id: str) -> str:
-    circuit = store.circuit(circuit_id)
-    state = "configured" if store.is_configured(circuit_id) else "NOT configured"
-    url = circuit.static_url(store.profile_settings(circuit_id))
-    suffix = f" -> {url}" if url else ""
-    return f"{circuit.title} [{state}]{suffix}"
+def print_profile_choices(profiles: list[dict[str, Any]], current: str = "") -> None:
+    """One flat numbered list, each entry with its real settings."""
+    for index, entry in enumerate(profiles, start=1):
+        marker = "  (current)" if entry["id"] == current else ""
+        state = "" if store.is_configured(entry["id"]) else "  [INCOMPLETE]"
+        print(f" {index}. {entry['name']}{marker}{state}")
+        print(f"      protocol: {store.circuit(entry['circuit']).title}")
+        for line in store.describe_profile(entry):
+            print(f"      {line}")
 
 
-def choose_connection_profile(current_choice: str = "") -> str:
-    """Pick an already-configured circuit. Never configures anything here."""
-    ids = list(blueprints.available_ids())
-    print("\nConnection profile for this work area:")
-    for index, circuit_id in enumerate(ids, start=1):
-        marker = " (current)" if circuit_id == current_choice else ""
-        print(f" {index}. {profile_status_line(circuit_id)}{marker}")
-    print("\nOnly configured profiles can be selected. Use PROFILES.bat to build one.")
-    default_index = str(ids.index(current_choice) + 1) if current_choice in ids else ""
-    label = f"Choose a profile [{default_index}]: " if default_index else "Choose a profile: "
+def create_profile_inline() -> str:
+    """Let the operator build a profile without leaving this flow."""
+    import profiles_setup
+
+    before = {entry["id"] for entry in store.list_profiles()}
+    profiles_setup.new_profile_flow()
+    created = [entry for entry in store.list_profiles() if entry["id"] not in before]
+    return created[0]["id"] if created else ""
+
+
+def choose_profile(current: str = "", *, allow_create: bool = True) -> str:
+    """Pick a saved profile, or build a new one on the spot."""
     while True:
+        profiles = store.list_profiles()
+        print("\nConnection profile for this work area:")
+        if profiles:
+            print_profile_choices(profiles, current)
+        else:
+            print(" (no profiles saved yet)")
+        print("")
+        if allow_create:
+            print(" n. create a new profile")
+        default_index = next(
+            (str(i) for i, entry in enumerate(profiles, start=1) if entry["id"] == current), ""
+        )
+        label = f"Choose a profile [{default_index}]: " if default_index else "Choose a profile: "
         raw = flow.default_prompt(label).strip().lower()
         if not raw and default_index:
             raw = default_index
-        if raw in ids:
-            chosen = raw
-        elif raw.isdigit() and 1 <= int(raw) <= len(ids):
-            chosen = ids[int(raw) - 1]
-        else:
-            print("   Enter one of the numbers above.")
+        if raw == "n" and allow_create:
+            created = create_profile_inline()
+            if created:
+                return created
+            continue
+        chosen = ""
+        if raw.isdigit() and 1 <= int(raw) <= len(profiles):
+            chosen = profiles[int(raw) - 1]["id"]
+        elif raw:
+            entry = store.find_profile(raw)
+            chosen = entry["id"] if entry else ""
+        if not chosen:
+            print("   Enter one of the numbers above" + (", or 'n' to create one." if allow_create else "."))
             continue
         if not store.is_configured(chosen):
             print(
-                f"   '{store.circuit(chosen).title}' is not configured yet. "
-                "Run PROFILES.bat first, then come back here."
+                f"   '{store.get_profile(chosen)['name']}' is incomplete. "
+                "Finish it in PROFILES.bat, then come back here."
             )
             continue
         return chosen
@@ -137,7 +167,7 @@ def setup_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
     access_mode = choose_access_mode(str(active_area.get("accessMode", "file_only")))
 
     existing = current["areas"].get(store.area_id_for(workspace)) or {}
-    profile_id = choose_connection_profile(str(existing.get("connectionProfile", "")))
+    profile_id = choose_profile(str(existing.get("connectionProfile", "")))
 
     use_global = flow.ask_yes_no(
         "\nShare one MCP token and OAuth owner code across all work areas?\n"
@@ -160,8 +190,48 @@ def setup_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
     return set_active(resolved)
 
 
+def _area_line(area: dict[str, Any]) -> list[str]:
+    entry = store.find_profile(str(area.get("connectionProfile", "")))
+    lines = [f"      {area['workspace']}"]
+    if entry is None:
+        lines.append("      profile: none yet")
+    else:
+        lines.append(f"      profile: {entry['name']} ({store.circuit(entry['circuit']).title})")
+        url = store.circuit(entry["circuit"]).static_url(entry["settings"])
+        if url:
+            lines.append(f"      url: {url}")
+    lines.append(f"      access: {area['accessMode']}")
+    return lines
+
+
+def choose_area(current: dict[str, Any]) -> dict[str, Any]:
+    areas = list(current["areas"].values())
+    if len(areas) == 1:
+        return areas[0]
+    active_id = current.get("activeAreaId", "")
+    print("\n=== Work area ===")
+    for index, area in enumerate(areas, start=1):
+        marker = "  (last used)" if area["id"] == active_id else ""
+        print(f" {index}. {area['displayName']}{marker}")
+        for line in _area_line(area):
+            print(line)
+    default_index = next(
+        (str(i) for i, area in enumerate(areas, start=1) if area["id"] == active_id), "1"
+    )
+    while True:
+        raw = flow.default_prompt(f"\nChoose a work area [{default_index}]: ").strip()
+        raw = raw or default_index
+        if raw.isdigit() and 1 <= int(raw) <= len(areas):
+            return areas[int(raw) - 1]
+        print("   Enter one of the numbers above.")
+
+
 def start_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) -> ResolvedConnection:
-    """START.bat: pick a work area, then start. Nothing else is asked."""
+    """START.bat: pick a work area, then start.
+
+    An area that already has a profile starts immediately. An area without one
+    asks a single question: which saved profile, or create a new one.
+    """
     current = bootstrap(legacy_config)
     if not current["areas"]:
         raise ConnectionStoreError(
@@ -169,26 +239,14 @@ def start_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
             "mode and a connection profile."
         )
 
-    areas = list(current["areas"].values())
-    if len(areas) > 1:
-        active_id = current.get("activeAreaId", "")
-        print("\n=== Work area ===")
-        for index, area in enumerate(areas, start=1):
-            marker = " (last used)" if area["id"] == active_id else ""
-            profile = area.get("connectionProfile") or "no profile"
-            print(f" {index}. {area['displayName']}{marker}")
-            print(f"      {area['workspace']}")
-            print(f"      profile: {profile}   access: {area['accessMode']}")
-        default_index = next(
-            (str(i) for i, area in enumerate(areas, start=1) if area["id"] == active_id), "1"
-        )
-        while True:
-            raw = flow.default_prompt(f"\nChoose a work area [{default_index}]: ").strip()
-            raw = raw or default_index
-            if raw.isdigit() and 1 <= int(raw) <= len(areas):
-                current["activeAreaId"] = areas[int(raw) - 1]["id"]
-                break
-            print("   Enter one of the numbers above.")
+    area = choose_area(current)
+    current["activeAreaId"] = area["id"]
+
+    if store.find_profile(str(area.get("connectionProfile", ""))) is None:
+        print(f"\nWork area '{area['displayName']}' has no usable connection profile yet.")
+        area["connectionProfile"] = choose_profile()
+        area["updatedAt"] = store.now_iso()
+        store.save_current(current)
 
     resolved = store.resolve(current, script_dir=script_dir)
     store.save_current(current)
@@ -273,7 +331,7 @@ def stop_circuit(resolved: ResolvedConnection | None = None) -> None:
 
 def describe(resolved: ResolvedConnection | None = None) -> str:
     resolved = resolved or active()
-    return f"{resolved.circuit.title} ({resolved.circuit.id})"
+    return f"{resolved.profile_name} ({resolved.circuit.title})"
 
 
 __all__ = [
@@ -285,6 +343,7 @@ __all__ = [
     "active",
     "active_or_none",
     "bootstrap",
+    "choose_profile",
     "describe",
     "fallback_tunnel_command",
     "health_path",

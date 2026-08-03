@@ -1,4 +1,4 @@
-# Notion Local MCP Easy 2.4.0
+# Notion Local MCP Easy 2.4.1
 
 Notion Local MCP Easy runs a local MCP server for a selected workspace and exposes file, git, and trusted-developer tools to compatible MCP clients.
 
@@ -49,7 +49,14 @@ The work is split into three steps:
 | `SETUP.bat` / `--setup` | Configure a work area | Folder, access mode, profile |
 | `START.bat` / `launcher.py` | Run the server | Work area only |
 
-Seven profiles ship with the product:
+A connection profile is a **named instance** of a protocol, not one profile per
+protocol. The same protocol can be saved several times with different domains
+and keys, so `Prod MCP` and `Staging MCP` can both be Tunnellio stable against
+different reservations. All saved profiles live in one flat numbered list, so a
+work area connects with a single `1-N` choice, and every list shows the real
+settings rather than just a name.
+
+Seven protocols ship with the product:
 
 1. **Serveo stable domain** — you generate the SSH key and reserve the hostname yourself; the profile asks for those two values only.
 2. **Serveo temporary domain** — asks nothing. Random domain, may change on reconnect.

@@ -3,7 +3,7 @@ Task ID: TASK-020
 Task title: One permanent config, isolated connection circuits, standalone profile setup
 Status: DONE
 Date: 2026-08-03
-Shipped release: 2.4.0
+Shipped release: 2.4.1
 
 ## Why this work existed
 A production upgrade broke every connection path at once. Serveo had a
@@ -57,6 +57,29 @@ Root causes found in the 2.3.0 tree:
 - Tests: 392 pass, including `test_connection_circuits.py`,
   `test_connection_store.py` and `test_tunnel_diagnostics.py`.
 
+## Follow-up shipped in 2.4.1: named profiles
+
+A profile is now a named instance of a circuit, not one per circuit. The driver:
+two folders on the same protocol against different domains with different keys.
+
+- Profile storage is schema 3, keyed by an instance id with a `circuit` field.
+  Schema 2 files import automatically; the circuit id is kept as the instance id
+  so existing areas resolve. `find_profile()` accepts an id, a name, or a bare
+  circuit id when exactly one profile exists for it. Ambiguity is never guessed.
+- `store` gained `create_profile`, `update_profile`, `delete_profile`,
+  `list_profiles`, `find_profile`, `profiles_for_circuit`, `suggest_profile_name`,
+  `unique_profile_id` and `describe_profile`.
+- `profiles_setup.py`: create, edit, verify, rename, duplicate, delete, reset,
+  blueprint. Duplicate is the fast path for "same protocol, different domain".
+- Every profile list prints the real settings, not just a name. This was an
+  explicit requirement: an operator cannot decide what to change otherwise.
+- START is a quick start. An area with a profile asks nothing; an area without
+  one asks once and remembers.
+- `ResolvedConnection.profile` / `.profile_name`; the mirror gained
+  `connection_profile_id` and `connection_profile_name`; the launcher prints the
+  active profile name and writes it into the connection info.
+- Tests: `tests/test_named_profiles.py`. Full suite 420 OK.
+
 ## Upstream work completed alongside
 Tunnellio client 0.6.0 was fixed and released in its own repository
 (`LEADBERG-studio/tunnellio-api-client`, branch `main`):
@@ -78,6 +101,9 @@ Tunnellio client 0.6.0 was fixed and released in its own repository
   written only by the profile setup script.
 
 ## Possible next steps
+- The data model is now ready for the GUI: profiles are named, listed flat,
+  self-describing and independently editable, and areas reference them by id.
+  A checkbox list of profiles plus an edit dialog maps onto this directly.
 - Wire the plugin enable/disable checkboxes and the profile editor windows into
   a UI, now that the underlying model supports them.
 - Consider surfacing `DOCTOR` output in that UI as a health panel.

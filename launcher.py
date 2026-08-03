@@ -48,7 +48,8 @@ from urllib.parse import urlsplit
 from core import DEFAULT_ALLOWED_COMMANDS
 import connection_runtime
 from connections.base import ConnectionConfigError, ConnectionSetupAborted
-from connections.store import ConnectionStoreError
+from connections.store import ConnectionStoreError
+
 from connections import diagnostics as tunnel_diagnostics
 
 
@@ -84,7 +85,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -3040,6 +3041,8 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
         tunnel_mode = f"sish ({sish_tunnel_match(config)})"
     else:
         tunnel_mode = f"stable ({hostname})" if hostname else "temporary"
+    profile_label = str(config.get("connection_profile_name", "")).strip()
+    profile_line = f"Profile: {profile_label}\n" if profile_label else ""
     oauth_lines = ""
     oauth_prints: list[str] = []
     if auth_mode in ("oauth", "dual"):
@@ -3057,6 +3060,7 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
         f"URL: {endpoint}\n"
         f"Authorization=Bearer {config['token']} (Bearer token)\n"
         f"Workspace: {config['workspace']}\n"
+        f"{profile_line}"
         f"Mode: {mode}\n"
         f"Auth: {auth_mode}\n"
         f"{oauth_lines}"
@@ -3070,6 +3074,9 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
     print(f" URL: {endpoint}")
     print(f" Authorization=Bearer {config['token']} (Bearer token)")
     print(f" Workspace: {config['workspace']}")
+    profile_name = str(config.get("connection_profile_name", "")).strip()
+    if profile_name:
+        print(f" Profile: {profile_name}")
     print(f" Mode: {mode}")
     print(f" Auth: {auth_mode}")
     for line in oauth_prints:
@@ -3311,41 +3318,76 @@ def run() -> int:
 
 
 
-def doctor(cleanup: bool = False) -> int:
-    """Show tunnel processes and optionally clean up orphans.
-
-    Killing a launcher window can leave its ssh/tunnellio child alive, still
-    holding a relay port. Those leftovers are invisible in a raw task list, so
-    this command names them and says which one the running launcher owns.
-    """
-    workspace = ""
-    resolved = connection_runtime.active_or_none()
-    if resolved is not None:
-        workspace = str(resolved.area.get("workspace", ""))
-    else:
-        workspace = str(load_json(CONFIG_FILE).get("workspace", ""))
-
-    processes = tunnel_diagnostics.scan(RUNTIME_FILE, workspace=workspace)
-    print()
-    print(tunnel_diagnostics.report(processes))
-    stray = tunnel_diagnostics.orphans(processes)
-    if not stray:
-        return 0
-    if not cleanup:
-        print()
-        print("Run DOCTOR.bat --cleanup to stop the orphaned processes above.")
-        return 0
-    print()
-    for process in stray:
-        if not yes_no(f"Stop orphaned pid {process.pid} ({process.image})?", True):
-            continue
-        ok, message = tunnel_diagnostics.terminate(process.pid)
-        if not ok:
-            ok, message = tunnel_diagnostics.terminate(process.pid, force=True)
-        print(f"  {message}")
-    return 0
-
-
+def doctor(cleanup: bool = False) -> int:
+
+    """Show tunnel processes and optionally clean up orphans.
+
+
+
+    Killing a launcher window can leave its ssh/tunnellio child alive, still
+
+    holding a relay port. Those leftovers are invisible in a raw task list, so
+
+    this command names them and says which one the running launcher owns.
+
+    """
+
+    workspace = ""
+
+    resolved = connection_runtime.active_or_none()
+
+    if resolved is not None:
+
+        workspace = str(resolved.area.get("workspace", ""))
+
+    else:
+
+        workspace = str(load_json(CONFIG_FILE).get("workspace", ""))
+
+
+
+    processes = tunnel_diagnostics.scan(RUNTIME_FILE, workspace=workspace)
+
+    print()
+
+    print(tunnel_diagnostics.report(processes))
+
+    stray = tunnel_diagnostics.orphans(processes)
+
+    if not stray:
+
+        return 0
+
+    if not cleanup:
+
+        print()
+
+        print("Run DOCTOR.bat --cleanup to stop the orphaned processes above.")
+
+        return 0
+
+    print()
+
+    for process in stray:
+
+        if not yes_no(f"Stop orphaned pid {process.pid} ({process.image})?", True):
+
+            continue
+
+        ok, message = tunnel_diagnostics.terminate(process.pid)
+
+        if not ok:
+
+            ok, message = tunnel_diagnostics.terminate(process.pid, force=True)
+
+        print(f"  {message}")
+
+    return 0
+
+
+
+
+
 def mask_token(token: str) -> str:
 
     if len(token) <= 10:
@@ -3660,10 +3702,14 @@ def main() -> int:
 
     )
 
-    parser.add_argument("--profiles", action="store_true", help="configure connection profiles (same as PROFILES.bat)")
-
-    parser.add_argument("--doctor", action="store_true", help="show tunnel processes and spot orphaned ones")
-
+    parser.add_argument("--profiles", action="store_true", help="configure connection profiles (same as PROFILES.bat)")
+
+
+
+    parser.add_argument("--doctor", action="store_true", help="show tunnel processes and spot orphaned ones")
+
+
+
     parser.add_argument("--cleanup", action="store_true", help="with --doctor: offer to stop orphaned tunnel processes")
 
     parser.add_argument("--oauth", action="store_true", help="configure auth mode (legacy/oauth/dual)")
@@ -3692,10 +3738,14 @@ def main() -> int:
 
         return show_connection(args.full)
 
-    if args.doctor:
-
-        return doctor(cleanup=args.cleanup)
-
+    if args.doctor:
+
+
+
+        return doctor(cleanup=args.cleanup)
+
+
+
     if args.profiles:
 
         import profiles_setup
