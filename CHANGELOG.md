@@ -1,3 +1,32 @@
+## 2.4.8 - 2026-08-04
+
+Two faults reported from a real multi-folder install.
+
+### Granting full access to a work area did nothing
+
+Two stores describe the same folder. SETUP writes the access mode into the new
+store (`current-connection.json`), but START reads it out of the legacy
+`workflow-profiles.json`. Nothing kept them in step, so choosing trusted access
+for a folder was saved and then ignored: the next start applied the stale
+`file_only` and the command tools never appeared.
+
+The new store is now the source of truth and the legacy file is mirrored from it
+whenever a connection is resolved.
+
+### SETUP offered only one folder
+
+Two separate causes:
+
+- The folder chooser in START is gated on `MENU` in `connections.cfg`. The sync
+  helper read the key `menu`, but the parser returns `menu_on`, so the lookup was
+  always `None` and `bool(None)` rewrote the file with `MENU = off` on every
+  single sync. The chooser disabled itself. Files written by the affected
+  versions are repaired once, keyed on a marker in the generated header.
+- SETUP itself never listed anything: it prompted for a path with the active area
+  as the default, which hides every other configured folder and turns a typo into
+  a duplicate area. It now lists the known areas with their access mode and
+  profile, plus an option for a new folder.
+
 ## 2.4.7 - 2026-08-04
 
 A hotfix for a regression 2.4.6 introduced. The cosmetic bug it was chasing was

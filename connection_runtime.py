@@ -156,6 +156,47 @@ def bootstrap(legacy_config: dict[str, Any] | None = None) -> dict[str, Any]:
     return current
 
 
+def choose_workspace(current: dict[str, Any], default_folder: Path) -> Path:
+    """Offer the folders already known, not just the last one used.
+
+    Setup used to prompt for a single path with the active area as the default.
+    With several areas configured that hides every other one, so the operator
+    had to retype a path they had already registered, and a typo silently
+    created a duplicate area.
+    """
+    areas = list(current.get("areas", {}).values())
+    if not areas:
+        return prompt_existing_folder("Workspace folder", default_folder)
+
+    print("\nKnown work areas:")
+    default_index = 1
+    for index, area in enumerate(areas, start=1):
+        path = str(area.get("workspace", ""))
+        mode = str(area.get("accessMode", "file_only"))
+        profile = str(area.get("connectionProfile", "")) or "no profile"
+        marker = ""
+        if store.normalize_path(path) == store.normalize_path(default_folder):
+            default_index = index
+            marker = "  (current)"
+        print(f" {index}. {path}{marker}")
+        print(f"      access: {mode} | profile: {profile}")
+    print(" 0. Another folder")
+
+    while True:
+        raw = flow.default_prompt(
+            f"Choose a work area [{default_index}]: "
+        ).strip() or str(default_index)
+        if raw == "0":
+            return prompt_existing_folder("Workspace folder", default_folder)
+        if raw.isdigit() and 1 <= int(raw) <= len(areas):
+            chosen = Path(str(areas[int(raw) - 1].get("workspace", "")))
+            if chosen.is_dir():
+                return chosen.resolve()
+            print(f"   Folder is gone: {chosen}")
+            return prompt_existing_folder("Workspace folder", default_folder)
+        print(f"   Enter a number from 0 to {len(areas)}.")
+
+
 def setup_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) -> ResolvedConnection:
     """SETUP.bat: choose folder, access mode and connection profile."""
     current = bootstrap(legacy_config)
@@ -163,7 +204,7 @@ def setup_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
     default_folder = Path(active_area.get("workspace") or script_dir).resolve()
 
     print("\n=== Work area setup ===")
-    workspace = prompt_existing_folder("Workspace folder", default_folder)
+    workspace = choose_workspace(current, default_folder)
     access_mode = choose_access_mode(str(active_area.get("accessMode", "file_only")))
 
     existing = current["areas"].get(store.area_id_for(workspace)) or {}

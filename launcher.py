@@ -85,7 +85,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.4.7"
+VERSION = "2.4.8"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -820,11 +820,16 @@ def normalize_workspace_path(value: str | Path) -> Path:
 
 
 
+MENU_MARKER = "# menu-setting-respected"
+
+
 def connections_cfg_template(menu_on: bool, paths: dict[int, str]) -> str:
 
     slots = sorted(set(range(1, DEFAULT_CONNECTION_SLOTS + 1)) | set(paths))
 
     lines = [
+
+        MENU_MARKER,
 
         "# connections.cfg — сохранённые рабочие области для Notion Local MCP Easy",
 
@@ -1508,10 +1513,63 @@ def _sync_area_paths_to_connections_cfg() -> None:
         if not paths:
             return
         connections = load_connections_cfg()
+        # The cfg parser returns "menu_on"; this sync used to read "menu",
+        # which is always None, so bool(None) rewrote the file with
+        # MENU = off and the folder chooser silently disappeared. Nothing
+        # else ever writes "off", so a file lacking the marker was disabled
+        # by that bug rather than by the operator: repair it exactly once.
+        menu_on = bool(connections.get("menu_on", True))
+        existing_text = ""
+        try:
+            existing_text = CONNECTIONS_FILE.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+        if MENU_MARKER not in existing_text:
+            menu_on = True
         CONNECTIONS_FILE.write_text(
-            connections_cfg_template(bool(connections.get("menu", False)), paths),
+            connections_cfg_template(menu_on, paths),
             encoding="utf-8",
         )
+    except Exception:
+        pass
+
+
+def _sync_access_mode_to_legacy_profiles() -> None:
+    """Copy each area's access mode into the legacy workflow profiles.
+
+    Two stores describe the same folder. SETUP writes the new one
+    (current-connection.json) while START reads the access mode out of the old
+    one (workflow-profiles.json). Nothing kept them in step, so granting full
+    access in SETUP appeared to do nothing: the next START still applied the
+    stale file_only and the command tools stayed hidden.
+
+    The new store is the source of truth; the legacy file is a mirror.
+    """
+    try:
+        import profiles as _profiles
+        from connections import store as _store
+
+        current = _store.load_current()
+        areas = current.get("areas", {})
+        if not areas:
+            return
+        by_path = {
+            str(_store.normalize_path(area.get("workspace", ""))): str(
+                area.get("accessMode", "file_only")
+            )
+            for area in areas.values()
+        }
+        storage = load_profiles()
+        changed = False
+        for profile in storage.get("profiles", {}).values():
+            path = str(normalize_workspace_path(profile.get("workspacePath", "")))
+            wanted = by_path.get(path)
+            if wanted and profile.get("accessMode") != wanted:
+                profile["accessMode"] = wanted
+                profile["updatedAt"] = _profiles.now_iso()
+                changed = True
+        if changed:
+            save_profiles(storage)
     except Exception:
         pass
 
@@ -1524,6 +1582,7 @@ def _apply_resolved(resolved) -> dict:
         allowed_commands=sorted(DEFAULT_ALLOWED_COMMANDS),
     )
     _sync_area_paths_to_connections_cfg()
+    _sync_access_mode_to_legacy_profiles()
     return config
 
 
