@@ -85,7 +85,7 @@ from profiles import (
 
 APP_NAME = "NotionMcpEasy"
 
-VERSION = "2.4.6"
+VERSION = "2.4.7"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -3113,7 +3113,21 @@ def publish_connection(config: dict, url: str, server_pid: int, tunnel_pid: int)
                 gw_key = str(ep_state.get("token", "")).strip()
     except Exception:
         pass
+    # A key alone proves nothing: it may be left over from an older run.
+    # Only announce the gateway when something answers where it should be.
+    gw_live = False
     if gw_key:
+        import socket as _socket
+
+        probe = _socket.socket()
+        probe.settimeout(0.4)
+        try:
+            gw_live = probe.connect_ex((gw_host or "127.0.0.1", int(gw_port))) == 0
+        except (OSError, ValueError):
+            gw_live = False
+        finally:
+            probe.close()
+    if gw_live:
         print("---")
         print(f" IDE Gateway: {gw_mode} mode")
         print(f"   Local:  http://{gw_host}:{gw_port}/v1")
@@ -3133,14 +3147,13 @@ def ensure_ide_gateway_key(config: dict) -> dict:
         existing = dict(config)
     changed = False
 
+    # Do not mint a gateway key here. Generating one for every install
+    # meant a key existed on machines where the gateway was never enabled,
+    # and the start banner then advertised it. The plugin issues its own
+    # token the first time it is genuinely set up.
     gw_key = str(existing.get("ide_gateway_api_key", "")).strip()
-    if not gw_key:
-        import secrets as _secrets
-        gw_key = "ideg_" + _secrets.token_urlsafe(32)
-        existing["ide_gateway_api_key"] = gw_key
-        changed = True
-        print(f"IDE Gateway API key generated: {gw_key[:20]}... (stored in global config)")
-    config["ide_gateway_api_key"] = gw_key
+    if gw_key:
+        config["ide_gateway_api_key"] = gw_key
 
     # Also store mode/host/port in global config if missing
     if not existing.get("ide_gateway_mode"):

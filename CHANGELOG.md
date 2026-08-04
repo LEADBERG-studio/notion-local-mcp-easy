@@ -1,3 +1,37 @@
+## 2.4.7 - 2026-08-04
+
+A hotfix for a regression 2.4.6 introduced. The cosmetic bug it was chasing was
+trivial; the bug it caused was not.
+
+### The Bearer token was regenerated on every start (critical)
+
+`launcher.py` contains two occurrences of `if gw_key:`. The 2.4.6 banner patch
+matched the first one, inside the config-finalisation helper, and inserted a
+socket probe there. That code referenced `gw_host` and `gw_port`, which do not
+exist in that scope, so finalising the config raised `NameError`. The caller
+fell back to building a fresh config, which minted a new Bearer token on every
+start. Already-configured folders lost their connection and had to be set up
+again on the server side.
+
+Fixed by restoring the helper and moving the liveness check into the function
+that actually prints the banner.
+
+### The gateway key generator, found for real this time
+
+2.4.6 stopped one code path from minting `ide_gateway_api_key`, but the actual
+generator lives in `ensure_ide_gateway_key`, called from two places. It now
+reuses an existing key and never creates one; the gateway plugin issues its own
+token when it is genuinely set up. The start banner is printed only when
+something answers on the gateway host and port.
+
+### Tests
+
+- `tests/test_config_stability.py`: finalising a config returns a config, never
+  regenerates the token across repeated calls, never invents a gateway key, and
+  preserves an existing one. Plus a structural test that forbids socket code in
+  the config helper, so this patch cannot land there again.
+- 521 tests pass.
+
 ## 2.4.6 - 2026-08-04
 
 Two defects found while looking at a first clean install on a customer machine.
