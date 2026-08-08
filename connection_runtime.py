@@ -287,6 +287,48 @@ def choose_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any]:
         print("   Enter one of the numbers above, or 0 to add a folder.")
 
 
+def _active_area(current: dict[str, Any]) -> dict[str, Any]:
+    return current.get("areas", {}).get(str(current.get("activeAreaId", ""))) or {}
+
+
+def _inherited_access_mode(current: dict[str, Any]) -> str:
+    """Default the prompt to whatever the operator last chose."""
+    return str(_active_area(current).get("accessMode", "file_only"))
+
+
+def _inherited_global_auth(current: dict[str, Any]) -> bool:
+    """Follow the auth regime already in use.
+
+    Shared credentials are an all-or-nothing decision in practice: the point of
+    the switch is to change channels without re-authorizing every client. A new
+    folder that opted out on its own would defeat that, and the operator would
+    only find out when their client stopped being accepted.
+    """
+    areas = list(current.get("areas", {}).values())
+    if not areas:
+        return False
+    active = _active_area(current)
+    if active:
+        return bool(active.get("useGlobalAuth", False))
+    return all(bool(area.get("useGlobalAuth", False)) for area in areas)
+
+
+def _seed_global_auth(current: dict[str, Any]) -> None:
+    """Promote the active folder's credentials to the shared slot.
+
+    Turning the switch on with an empty shared slot would mint a fresh token,
+    which is the very surprise this is meant to avoid, so the credentials in
+    use right now become the shared ones.
+    """
+    shared = current.get("globalAuth") or {}
+    if str(shared.get("token", "")).strip():
+        return
+    active = _active_area(current)
+    auth = active.get("auth") or {}
+    if str(auth.get("token", "")).strip():
+        current["globalAuth"] = dict(auth)
+
+
 def add_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any] | None:
     """Add a folder during START and inherit the standing channel."""
     workspace = prompt_existing_folder("Folder to serve", Path(script_dir).resolve())
@@ -302,17 +344,38 @@ def add_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any] | None
             inherited = choose_profile()
     else:
         inherited = choose_profile()
+    # Ask. Forcing file_only here and telling the operator to run SETUP
+    # afterwards looked tidy, but it meant the answer to "do you want full
+    # access" was decided for them, and the only way to change it was another
+    # trip through SETUP or a hand-edited config.
+    access_mode = choose_access_mode(_inherited_access_mode(current))
+
+    # Inherit the auth regime too. A new folder used to always get
+    # useGlobalAuth=False, so resolving it minted a brand new Bearer token even
+    # for an operator who had deliberately switched to shared credentials.
+    use_global = _inherited_global_auth(current)
+    if use_global:
+        print("   Using the shared MCP token, same as the other folders.")
+    elif current.get("areas"):
+        # The usual shape of this product is one outbound channel with several
+        # folders behind it, and the operator does not expect a new Bearer to
+        # appear just because they added a folder. Offer to keep the one they
+        # already have; per-folder credentials stay available by answering no.
+        use_global = flow.ask_yes_no(
+            "   Reuse the MCP token the other folders already use?", True
+        )
+        if use_global:
+            _seed_global_auth(current)
+
     area = store.upsert_area(
         current,
         workspace=workspace,
-        access_mode="file_only",
+        access_mode=access_mode,
         connection_profile=inherited,
+        use_global_auth=use_global,
     )
     store.save_current(current)
-    print(
-        f"   Added '{area['displayName']}' in file-only mode. "
-        "Run SETUP.bat if this folder needs trusted developer mode."
-    )
+    print(f"   Added '{area['displayName']}' in {access_mode} mode.")
     return area
 
 

@@ -1,3 +1,25 @@
+## 2.4.9 - 2026-08-08
+
+### Adding a folder from START decided two things behind your back
+
+`add_area()` hardcoded `access_mode="file_only"` and `useGlobalAuth=False`, then
+printed a note suggesting SETUP for anything else. Two consequences:
+
+- The folder was read-only whatever the operator intended, and trusted mode
+  could not be reached from this path at all.
+- Resolving the new area minted a brand new Bearer token, because per-area
+  credentials are the default and nothing inherited the regime already in use.
+  Every client pointed at this server stopped being accepted, and the only fix
+  was editing the config files by hand.
+
+Now START asks for the access mode, defaulting to whatever the active folder
+uses, and follows the existing auth regime. When folders are on per-area
+credentials it offers to reuse the token already in service, seeding the shared
+slot from the active folder so the answer is a real reuse rather than a fresh
+secret. Answering no still gives the folder its own credentials.
+
+`tests/test_start_add_area.py` covers all of it.
+
 ## 2.4.8 - 2026-08-04
 
 Two faults reported from a real multi-folder install.
