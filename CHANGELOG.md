@@ -1,3 +1,40 @@
+## 2.4.10 - 2026-08-08
+
+An audit of every configurator path after the 2.4.9 report, looking for anything
+else that decides for the operator or rotates a credential behind their back.
+One real fault, and it was the root of the repeated "I have to reconfigure the
+server again" pain.
+
+### Credentials belonged to the folder instead of the channel
+
+The connection profile is the public address. Two folders on one profile are
+reached at the same URL, but each was issued its own Bearer token. So switching
+folders in START changed the token behind an unchanged address, and every MCP
+client pointed at it stopped being accepted. 2.4.9 fixed the case of adding a
+folder; this is the general case, and it applied to folders added at any time.
+
+A folder without credentials now inherits them from another folder on the same
+connection profile, and only mints a new token when there is nothing to inherit.
+Separate profiles still get separate tokens.
+
+An existing token is never overwritten. Installations already holding divergent
+tokens are reported at start, naming the folders, and SETUP offers to move a
+folder onto the shared token. It is a question, never automatic: the token is
+what every client is configured with.
+
+### Audited and found correct
+
+- Re-running SETUP and changing only the profile, or only the access mode, keeps
+  the token.
+- Turning shared credentials on and back off restores the folder's own token
+  rather than minting a third one.
+- The OAuth owner code is stable across repeated resolves and survives an auth
+  mode switch.
+- Legacy import preserves the old token and access mode and never rotates a
+  secret.
+
+`tests/test_channel_credentials.py` covers all of it.
+
 ## 2.4.9 - 2026-08-08
 
 ### Adding a folder from START decided two things behind your back

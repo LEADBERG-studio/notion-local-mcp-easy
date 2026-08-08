@@ -231,10 +231,39 @@ def setup_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
     ):
         store.set_default_profile(current, profile_id)
     store.save_current(current)
+    _offer_to_align_auth(current, workspace)
     resolved = store.resolve(current, script_dir=script_dir)
     store.save_current(current)
     print(f"\nSaved: {store.CURRENT_FILE}")
+    _warn_about_conflicting_auth(current)
     return set_active(resolved)
+
+
+def _offer_to_align_auth(current: dict[str, Any], workspace: Path) -> None:
+    """Put this folder on the token its channel already uses, if asked.
+
+    This is the repair path the start-up warning points at. It is a question,
+    never automatic: the token is what every MCP client is configured with, so
+    replacing one without being asked breaks working setups.
+    """
+    area = current.get("areas", {}).get(store.area_id_for(workspace))
+    if not area or area.get("useGlobalAuth"):
+        return
+    sibling = store._auth_from_sibling(current, area)
+    if not sibling:
+        return
+    mine = str((area.get("auth") or {}).get("token", "")).strip()
+    if not mine or mine == sibling["token"]:
+        return
+    print(
+        "\nAnother folder on this connection profile uses a different MCP token."
+        "\nBoth are reached at the same address, so two tokens means "
+        "re-authorizing\nyour client every time you switch folders."
+    )
+    if flow.ask_yes_no("Use the token the other folder already uses?", True):
+        area["auth"] = dict(sibling)
+        area["updatedAt"] = store.now_iso()
+        print("   This folder now shares that token.")
 
 
 def _area_line(area: dict[str, Any]) -> list[str]:
@@ -287,6 +316,26 @@ def choose_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any]:
         print("   Enter one of the numbers above, or 0 to add a folder.")
 
 
+def _warn_about_conflicting_auth(current: dict[str, Any]) -> None:
+    """Say so when folders behind one address disagree on the token.
+
+    Installations configured before credentials followed the channel can hold a
+    different Bearer per folder behind the same public URL, so switching folders
+    quietly invalidates the MCP client. Nothing is rewritten here: the operator
+    may have meant it, and changing a credential without being asked is how this
+    became painful in the first place.
+    """
+    for group in store.areas_with_conflicting_auth(current):
+        print(
+            "\n   Note: these folders share one public address but have different"
+            " MCP tokens,\n   so switching between them means re-authorizing your"
+            " client every time:"
+        )
+        for name in group:
+            print(f"     - {name}")
+        print("   Run SETUP.bat on a folder to move it onto the shared token.")
+
+
 def _active_area(current: dict[str, Any]) -> dict[str, Any]:
     return current.get("areas", {}).get(str(current.get("activeAreaId", ""))) or {}
 
@@ -311,22 +360,6 @@ def _inherited_global_auth(current: dict[str, Any]) -> bool:
     if active:
         return bool(active.get("useGlobalAuth", False))
     return all(bool(area.get("useGlobalAuth", False)) for area in areas)
-
-
-def _seed_global_auth(current: dict[str, Any]) -> None:
-    """Promote the active folder's credentials to the shared slot.
-
-    Turning the switch on with an empty shared slot would mint a fresh token,
-    which is the very surprise this is meant to avoid, so the credentials in
-    use right now become the shared ones.
-    """
-    shared = current.get("globalAuth") or {}
-    if str(shared.get("token", "")).strip():
-        return
-    active = _active_area(current)
-    auth = active.get("auth") or {}
-    if str(auth.get("token", "")).strip():
-        current["globalAuth"] = dict(auth)
 
 
 def add_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any] | None:
@@ -356,16 +389,9 @@ def add_area(current: dict[str, Any], script_dir: Path) -> dict[str, Any] | None
     use_global = _inherited_global_auth(current)
     if use_global:
         print("   Using the shared MCP token, same as the other folders.")
-    elif current.get("areas"):
-        # The usual shape of this product is one outbound channel with several
-        # folders behind it, and the operator does not expect a new Bearer to
-        # appear just because they added a folder. Offer to keep the one they
-        # already have; per-folder credentials stay available by answering no.
-        use_global = flow.ask_yes_no(
-            "   Reuse the MCP token the other folders already use?", True
-        )
-        if use_global:
-            _seed_global_auth(current)
+    # No question about the token here. A folder on this profile is reached at
+    # the same address as its siblings, so it inherits their credentials in
+    # store.effective_auth(); asking would imply a choice that does not exist.
 
     area = store.upsert_area(
         current,
@@ -410,6 +436,7 @@ def start_flow(script_dir: Path, legacy_config: dict[str, Any] | None = None) ->
 
     resolved = store.resolve(current, script_dir=script_dir)
     store.save_current(current)
+    _warn_about_conflicting_auth(current)
     return set_active(resolved)
 
 

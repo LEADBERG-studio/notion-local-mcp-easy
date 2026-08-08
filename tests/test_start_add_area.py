@@ -70,10 +70,18 @@ class AddAreaDuringStart(unittest.TestCase):
         area = self.add("2")
         self.assertEqual(store.effective_auth(self.current, area)["token"], existing)
 
-    def test_declining_the_shared_token_keeps_credentials_separate(self):
+    def test_a_folder_on_another_channel_gets_its_own_token(self):
+        """Sharing is per connection profile, not across the whole install.
+
+        Folders on one profile answer at one address and must share a token.
+        A folder on a different profile is a different address, so it gets its
+        own credentials.
+        """
         first = self.current["areas"][store.area_id_for(self.first)]
         existing = store.effective_auth(self.current, first)["token"]
-        area = self.add("2", reuse=False)
+        area = self.add("2")
+        area["connectionProfile"] = "profile-2"
+        area["auth"]["token"] = ""
         self.assertNotEqual(store.effective_auth(self.current, area)["token"], existing)
 
     def test_the_standing_profile_is_inherited(self):

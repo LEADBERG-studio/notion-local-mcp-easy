@@ -496,11 +496,69 @@ def effective_auth(current: dict[str, Any], area: dict[str, Any]) -> dict[str, A
         return auth
     auth = _normalize_auth(area.get("auth"))
     if not auth["token"]:
-        auth["token"] = new_token()
+        # A folder without credentials yet inherits them from another folder on
+        # the same connection profile, and only mints a new token when there is
+        # nothing to inherit.
+        #
+        # The profile is the public address. Two folders sharing one profile are
+        # reached at the same URL, so issuing each of them a different Bearer
+        # meant that merely switching folders invalidated whatever the operator
+        # had configured in their MCP client. The credential belongs to the
+        # channel, not to the directory being served.
+        sibling = _auth_from_sibling(current, area)
+        auth["token"] = sibling["token"] if sibling else new_token()
+        if sibling and sibling["oauthOwnerCode"] and not auth["oauthOwnerCode"]:
+            auth["oauthOwnerCode"] = sibling["oauthOwnerCode"]
     if auth["mode"] in {"oauth", "dual"} and not auth["oauthOwnerCode"]:
         auth["oauthOwnerCode"] = new_owner_code()
     area["auth"] = auth
     return auth
+
+
+def _auth_from_sibling(
+    current: dict[str, Any], area: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Credentials already in service on this area's connection profile."""
+    profile = str(area.get("connectionProfile", "")).strip()
+    if not profile:
+        return None
+    for other in current.get("areas", {}).values():
+        if other is area or other.get("id") == area.get("id"):
+            continue
+        if str(other.get("connectionProfile", "")).strip() != profile:
+            continue
+        if other.get("useGlobalAuth"):
+            continue
+        other_auth = _normalize_auth(other.get("auth"))
+        if other_auth["token"]:
+            return other_auth
+    return None
+
+
+def areas_with_conflicting_auth(current: dict[str, Any]) -> list[list[str]]:
+    """Groups of folders that share a profile but disagree on the token.
+
+    Installations configured before this was fixed can still hold a different
+    Bearer per folder behind one public address. Rewriting them silently would
+    swap a credential the operator may have deliberately set, so they are
+    reported instead and left alone.
+    """
+    by_profile: dict[str, dict[str, list[str]]] = {}
+    for area in current.get("areas", {}).values():
+        if area.get("useGlobalAuth"):
+            continue
+        profile = str(area.get("connectionProfile", "")).strip()
+        token = _normalize_auth(area.get("auth"))["token"]
+        if not profile or not token:
+            continue
+        by_profile.setdefault(profile, {}).setdefault(token, []).append(
+            str(area.get("displayName") or area.get("workspace", ""))
+        )
+    conflicts = []
+    for tokens in by_profile.values():
+        if len(tokens) > 1:
+            conflicts.append(sorted(name for names in tokens.values() for name in names))
+    return conflicts
 
 
 # ------------------------------------------------------------------ resolved
